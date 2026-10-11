@@ -43,6 +43,7 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 | 下一发（2026-06 快照，含 opencode） | 2.3.0-preview.20 | 2.5.0-preview.19 | 0.9.0-preview.20 | 0.6.3-preview.4 | 🔜 待切（见 §6，dashboard 本发不动） |
 | **已发布 preview 头（snapshot 2026-08-17）** | **2.3.0-preview.39** | **2.5.0-preview.31** | **0.9.0-preview.29** | 0.6.3-preview（浮动） | ⚠️ `npm view @preview` 实测；`preview.39` 二进制内嵌 `.d.ts` pair 仍指 `agent-node@2.5.0-preview.28`（main-源码 vs binary 差） |
 | v2.3.0 GA 目标 | 2.3.0 | 2.5.0 | 0.9.0 | 0.7.0（含 #260） | 🎯 整行测绿才升 |
+| #1027 发布候选（2026-10-12，未发布） | 2.3.0-preview.167 | 2.5.0-preview.133 | 0.9.0-preview.126 | 不变 | 待精确 main 发布门及三 runtime 验收；不是已知良好生产组合 |
 | latest（稳定线） | 2.2.21 | 2.4.13 | 0.8.8 | 0.6.x | ✅ 旧稳定，无 opencode/无 #383 |
 
 ## 5. Bump-together 规则

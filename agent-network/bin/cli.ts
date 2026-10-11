@@ -13,6 +13,9 @@
 import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
+import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
+import { runDaemonProviderApply } from '../src/daemon-provider-apply-command.js';
+import { runDaemonProviderInitialize } from '../src/daemon-provider-initialize.js';
 import { stoppedReceiptAtStart, isHubStopped } from "../src/stopped-receipt.js";
 import { formatScrubbedEnvLine, scrubInheritedSessionIdentityEnv } from "../src/daemon-inherited-env.js";
 import { dirname, isAbsolute, join, resolve } from "path";
@@ -86,6 +89,8 @@ import {
   opencodeStartGenerationRefusal,
 } from "../src/opencode-generation-create";
 import { opencodeGenerationOfConfig, opencodeGenerationSupport } from "../src/opencode-versions";
+import { planOpencodeV2Create } from "../src/opencode-v2-create-align";
+import { OpenCodeV2AlignError } from "../src/opencode-v2-configured-model";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
 import { PassThrough } from "stream";
@@ -115,9 +120,18 @@ import {
   findOpencodePreset,
   prepareOpencodeNodeForProfileWrite,
   readOpencodePrivateProfileFile,
+  readPresetKeyFromEnv,
+  replaceOpencodeConfigJson,
   writeOpencodeAuthJson,
+  writeOpencodeConfigJson,
   writeOpencodePrivateProfileFile,
 } from "../src/opencode-preset";
+import {
+  applyStagedProviderToProfile,
+  materializeStagedProvider,
+  stageProviderRequest,
+  type StagedProvider,
+} from "../src/provider-apply";
 import {
   buildOpencodeAuthLoginArgs,
   readOpencodeAuthLoginCredential,
@@ -145,6 +159,20 @@ import { ambientTypeScriptTranspiler, nodeServerPayloadFor } from "../src/node-s
 import { installTeamSkills } from "../src/node-skills";
 import { applyNodeServerPayload } from "../src/node-server-version";
 import {
+  STANDALONE_BUILD_STAMP,
+  STANDALONE_HUB_ARG,
+  anetVersionFromStamp,
+  applyStandaloneDetectedVersions,
+  cliReinvokeArgs,
+  cliReinvokeShell,
+  formatAnetVersionBanner,
+  isStandaloneBuild,
+  standaloneBundleVersion,
+  standaloneHubLaunch,
+  standaloneNodeArgs,
+  standaloneNodeServerJs,
+} from "../src/standalone-bin";
+import {
   agentNodeHelpSupportsGrokCopresence,
   buildGrokAgentNodeEnv,
   buildGrokPreviewResolverEnv,
@@ -160,9 +188,11 @@ import {
   codexCopresenceCreateFields,
   codexCopresenceCreateHint,
   codexCopresenceRequested,
+  CODEX_COPRESENCE_RUNTIME,
   shouldPersistCodexCopresence,
   shouldPersistCodexFullAccess,
 } from "../src/codex-copresence-profile";
+import { writeCopresenceYoloToCodexHome } from "../src/codex-copresence-yolo";
 import {
   codexHomeStagePlan,
   codexKnownStartupPromptAction,
@@ -322,6 +352,11 @@ import {
   defaultCodexModelForRuntime,
 } from "../src/codex-model-default";
 import { describeCodexModelSource, resolveCodexCopresenceModel } from "../src/codex-copresence-model";
+import {
+  codexReasoningEffortConfigOverride,
+  isReasoningEffortValue,
+  writeReasoningEffortToCodexHome,
+} from "../src/codex-reasoning-effort";
 import { resolvePrimaryNetwork } from "../src/primary-network";
 
 const args = process.argv.slice(2);
@@ -338,6 +373,33 @@ function dashboardLaunchRecordPath(port: string | number) { return join(home, ".
 function nodesDir() { return join(process.cwd(), ".anet", "nodes"); }
 function skillCachePath() { return join(home, ".anet", "skillhub", "catalog-cache.json"); }
 function shellQuote(value: string): string { return `'${value.replace(/'/g, `'\\''`)}'`; }
+
+function standaloneNow(): boolean {
+  return isStandaloneBuild(STANDALONE_BUILD_STAMP);
+}
+
+/** Re-invoke this CLI. npm/node keeps script path + execArgv; the compiled binary does not. */
+function reinvokeArgv(cliArgs: string[], includeExecArgv: boolean, scriptPath?: string): string[] {
+  return cliReinvokeArgs({
+    standalone: standaloneNow(),
+    execArgv: process.execArgv,
+    scriptPath: scriptPath ?? (process.argv[1] ?? ""),
+    cliArgs,
+    includeExecArgv,
+  });
+}
+
+function reinvokeShell(cliArgs: string[], includeExecArgv: boolean, scriptPath?: string): string {
+  return cliReinvokeShell({
+    standalone: standaloneNow(),
+    execPath: process.execPath,
+    execArgv: process.execArgv,
+    scriptPath: scriptPath ?? (process.argv[1] ?? ""),
+    cliArgs,
+    includeExecArgv,
+    quote: shellQuote,
+  });
+}
 /**
  * Pane target (`<session>:<window>.<pane>`) for a session, or null.
  *
@@ -720,6 +782,8 @@ interface CopresenceOptions {
   codexVersion?: string;
   codexHome: string;
   model?: string;
+  /** Non-persisted explicit provider override for exact-session recovery. */
+  modelProvider?: string;
   port?: number;
   dangerFullAccess: boolean;
   yesDangerFullAccess: boolean;
@@ -789,7 +853,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
     const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
     const fd = openPrivateAppendLog(hubLog);
     try {
-      const child = spawn(process.execPath, [process.argv[1] ?? "", "hub", "start", "--port", hubPort], {
+      const child = spawn(process.execPath, reinvokeArgv(["hub", "start", "--port", hubPort], false), {
         cwd: process.cwd(), detached: true, windowsHide: true,
         stdio: ["ignore", fd, fd], env: { ...process.env },
       });
@@ -825,8 +889,7 @@ async function ensureLocalHubRunning(hub: string): Promise<void> {
       //    wait below times out against a perfectly healthy server. Observed:
       //    node on 9299, "Server: http://127.0.0.1:9200", 60s timeout.
       const hubPort = (() => { try { return new URL(hub).port || "9200"; } catch { return "9200"; } })();
-      const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`
-        + ` hub start --port ${shellQuote(hubPort)}`;
+      const selfCmd = reinvokeShell(["hub", "start", "--port", hubPort], false);
       // 🔴 tmux does NOT hand a new session this process's environment — the
       //    child inherits the tmux SERVER's, which was frozen whenever that
       //    server started. Without forwarding it, an operator who set
@@ -1164,7 +1227,7 @@ async function startWindowsCodexCopresence(
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
     recoveryAdmission = await holdCodexRecovery(resolved.id, resumeBudget.rolloutBytes);
     const thread = await resumeOrForkOnMissingOrdinal(
-      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst }),
+      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst, modelProvider: opts.modelProvider ?? resolved.profile.codexModelProvider }),
       forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
     );
     reportResumedCodexModel(model, thread.resumedModel);
@@ -1205,9 +1268,9 @@ async function startWindowsCodexCopresence(
     };
     delete bridgeEnv.COMMHUB_TOKEN;
     delete bridgeEnv.ANET_CODEX_COMMHUB_TOKEN;
-    managed.push(await windowsManagedProcess("bridge", process.execPath, [
-      process.argv[1] ?? "", "node", "start", displayName,
-    ], bridgeEnv, bridgeLog));
+    managed.push(await windowsManagedProcess("bridge", process.execPath, reinvokeArgv([
+      "node", "start", displayName,
+    ], false), bridgeEnv, bridgeLog));
     writeWindowsCopresenceRecord(nodesDir(), resolved.id, managed, marker);
     const bridgeReceipt = pendingRecoveryId
       ? bridgeClientHealthReceipt(wsUrl, pendingRecoveryId)
@@ -1228,7 +1291,9 @@ async function startWindowsCodexCopresence(
     console.log(`[anet] ② bridge pid=${managed[1].pid} running`);
     console.log(`[anet] ③ opening Codex TUI in this Windows console (thread=${threadId || "pending-user-thread"})`);
     console.log(`[anet]    stop from another terminal: anet node stop ${displayName}`);
-    const tuiArgs = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgs = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tui = spawn(opts.codexBin, tuiArgs, {
       cwd: process.cwd(),
       env: { ...process.env, ...codexCopresenceStageEnv(opts.configEnv, { CODEX_HOME: opts.codexHome, ANET_NODE_MARKER: marker }) },
@@ -1394,7 +1459,7 @@ async function startGrokCopresenceOrchestration(
       process.exit(1);
     }
   }
-  const selfCmd = `${shellQuote(process.execPath)} ${shellQuote(process.argv[1] ?? "")}`;
+  const selfCmd = reinvokeShell([], false);
 
   // ── piece ① the node (owns the grok leader and the attach socket) ────────
   // GROK_COPRESENCE_CHILD_ENV keeps this inner start from re-entering the
@@ -1640,7 +1705,8 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
         try { chmodIfPosix(step.dst, step.mode); } catch { /* best effort */ }
         console.log(`[anet] staged ${step.name} into the node CODEX_HOME (${step.reason}) — ${step.because}`);
       }
-    } else if (!existsSync(join(opts.codexHome, "auth.json"))) {
+    } else if (!existsSync(join(opts.codexHome, "auth.json"))
+      && codexHomeLoginState(opts.codexHome, { ...process.env, ...opts.configEnv }).state === 'needs-login') {
       console.error(`[anet] ⚠ --no-inherit-codex-home, and ${join(opts.codexHome, "auth.json")} does not exist.`);
       console.error(`[anet]   codex TUI 会停在登录选择页，且不会说明原因（#853）。先在该 HOME 下登录一次。`);
     }
@@ -1661,7 +1727,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // bridge died 120 s later waiting for a thread nobody could create. Decide BEFORE any session starts.
   // Judged by the #529 helper (codexLoginFactsOfHome) on opts.codexHome: the home THIS launch hands to all
   // three sessions (--codex-home > config.codexHome > <node>/codex-home), after host-login staging above.
-  const loginGate = codexHomeLoginState(opts.codexHome);
+  const loginGate = codexHomeLoginState(opts.codexHome, { ...process.env, ...opts.configEnv });
   if (loginGate.state === "needs-login") {
     for (const line of describeCodexNeedsLogin({ alias: displayName, codexHome: opts.codexHome, reason: loginGate.reason })) console.error(line);
     process.exit(NEEDS_LOGIN_EXIT_CODE);
@@ -1864,6 +1930,10 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   // #720 — url + bearer + `default_tools_approval_mode="approve"` for commhub only, so the
   //   first commhub tool call does not stop on an approval prompt nobody will answer.
   const commhubMcpOverrides = codexCommhubMcpOverrides(opts.hub, "quoted");
+  const profileReasoning = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  const reasoningEffortOverride = isReasoningEffortValue(profileReasoning)
+    ? ` -c ${shellQuote(codexReasoningEffortConfigOverride(profileReasoning))}`
+    : "";
   const appsrvCmd = [
     `export CODEX_HOME=${shellQuote(opts.codexHome)}`,
     `. ${shellQuote(envFilePath)}`,
@@ -1873,6 +1943,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
       + ` -c approval_policy=${approvalPolicy}`
       + ` -c sandbox_mode=${sandboxMode}`
       + ` -c model=${shellQuote(model)}`
+      + reasoningEffortOverride
       + commhubMcpOverrides.map((o) => ` -c ${shellQuote(o)}`).join("")
       + ` --listen ${wsUrl}`,
   ].join(" ; ");
@@ -1964,7 +2035,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     console.log(`[anet] Codex thread recovery deadline: ${resumeBudget.timeoutMs}ms (${formatCopresenceRolloutSize(resumeBudget.rolloutBytes)})`);
     recoveryAdmission.hold(await holdCodexRecovery(nodeId, resumeBudget.rolloutBytes));
     const thread = await resumeOrForkOnMissingOrdinal(
-      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst }),
+      (forkFirst) => createCodexCopresenceThread(wsUrl, resumeBudget.timeoutMs, requestedThreadId, model, { rolloutBytes: resumeBudget.rolloutBytes, forkFirst, modelProvider: opts.modelProvider ?? profile.codexModelProvider }),
       forkRecoveryOptions(resolved.id, displayName, opts, requestedThreadId),
     );
     reportResumedCodexModel(model, thread.resumedModel);
@@ -2045,7 +2116,7 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
     // codepath as the non-copresence case — no fork of the bridge dispatch.
     // #1856 PR-D — 桥再入用**当前这份 anet**(execPath + execArgv + argv[1]),不用 PATH 上的 `anet`:
     // 真机上 PATH 里是另一个版本,它不认这份 profile,把桥当成 claude-code-cli 起了;沿用 PATH 等于让桥的运行时取决于环境。
-    const selfInvoke = [process.execPath, ...process.execArgv, process.argv[1]].map(shellQuote).join(" ");
+    const selfInvoke = reinvokeShell([], true);
     // #535 (audit P1-2) — when the bridge died its tmux session went with it, and the printed
     // `tmux attach` pointed at nothing: the real error was gone. Its output now also goes to
     // <node>/codex-bridge.log (0600, truncated each start, capped), and a failure prints the tail.
@@ -2124,7 +2195,9 @@ async function startCopresenceOrchestration(nodeId: string, opts: CopresenceOpti
   };
   const launchTui = () => {
     // ── piece ③ codex TUI (attachable, resumes same thread) ───────────────
-    const tuiArgv = codexTuiLaunchArgs(wsUrl, model, freshDeferred ? undefined : threadId, opts.dangerFullAccess);
+    const tuiArgv = codexTuiLaunchArgs(
+      wsUrl, model, freshDeferred ? undefined : threadId, posture.sandboxMode === "danger-full-access",
+    );
     const tuiInvocation = `exec ${shellQuote(opts.codexBin)} ${tuiArgv.map(shellQuote).join(" ")}`;
     const tuiEnvFilePath = writeCodexCopresenceEnvFile(opts.codexHome, codexCopresenceStageEnv(opts.configEnv, {
       CODEX_HOME: opts.codexHome,
@@ -2311,7 +2384,8 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   rmSync(attachScript, { force: true });
   rmSync(bridgeLog, { force: true });
 
-  const cliEntry = resolve(process.argv[1]);
+  const cliEntry = standaloneNow() ? (process.argv[1] ?? "") : resolve(process.argv[1]);
+  const cliPrefix = reinvokeShell([], false, cliEntry);
   const bridgeCommand = [
     `export PATH=${shellQuote(process.env.PATH ?? "")}`,
     ...(process.env.ANET_AGENT_NODE_BIN
@@ -2325,7 +2399,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     // This internal start owns the runtime, not a second TUI/bridge pair.
     `export ANET_COPRESENCE_BRIDGE=1`,
     `exec > >(tee -a ${shellQuote(bridgeLog)}) 2>&1`,
-    `exec ${shellQuote(process.execPath)} ${shellQuote(cliEntry)} node start ${shellQuote(resolved.id)}`
+    `exec ${cliPrefix} node start ${shellQuote(resolved.id)}`
       + (hubOverride ? ` --hub ${shellQuote(hubOverride)}` : ""),
   ].join(" ; ");
   execTmux([
@@ -2470,6 +2544,10 @@ function codexSdkYoloFlags(noYolo?: boolean): Record<string, string | boolean> {
     sandboxMode: "danger-full-access",
     skipGitRepoCheck: true,
   };
+}
+
+function copresenceCreateOptTruthy(v: string | boolean | undefined): boolean {
+  return v === true || v === "true";
 }
 
 // Scan ~/.claude/projects/<cwd-key>/*.jsonl — the Claude Code sessions that
@@ -2652,24 +2730,33 @@ function findBundledNodeServerJs(): string | null {
   return null;
 }
 
+/** Disk candidate, or the prebundled payload stamped into the standalone binary. */
+function readNodeServerBundle(): { text: string; filename: string } | null {
+  const src = findBundledNodeServerJs();
+  if (src) return { text: readFileSync(src, "utf-8"), filename: src };
+  const embedded = standaloneNodeServerJs(STANDALONE_BUILD_STAMP);
+  if (!embedded) return null;
+  return { text: embedded, filename: "node-server.js" };
+}
+
 function refreshNodeServerJsAt(targetPath: string, opts: { overwrite: boolean }): "wrote" | "exists" | "no-source" | "kept-newer" {
   const exists = existsSync(targetPath);
   if (exists && !opts.overwrite) return "exists";
-  const src = findBundledNodeServerJs();
-  if (!src) return "no-source";
+  const bundled = readNodeServerBundle();
+  if (!bundled) return "no-source";
   // The target is always `.js` — agent-node's spawn gate pins the CommHub MCP
   // payload to exactly `<project>/.anet/node-server.js` — so a `.ts` source
   // must be transpiled on the way, not copied verbatim. See issue #1216: the
   // verbatim copy produced a file that could not be parsed, and the failure
   // surfaced three layers away as "CommHub MCP readiness preflight failed (1)".
   const payload = nodeServerPayloadFor(
-    readFileSync(src, "utf-8"),
-    src,
+    bundled.text,
+    bundled.filename,
     ambientTypeScriptTranspiler(),
   );
   // #549 — never downgrade a newer existing file (an older anet resuming a
   // node used to strip rules-file support and node_id reporting this way).
-  const applied = applyNodeServerPayload(targetPath, payload, src);
+  const applied = applyNodeServerPayload(targetPath, payload, bundled.filename);
   return applied === "kept-newer" ? "kept-newer" : "wrote";
 }
 
@@ -2714,6 +2801,7 @@ interface Profile {
   codexRuntime?: string;
   codexAppServerUrl?: string;  // RFC-030 — shared codex app-server URL (co-presence)
   codexThreadId?: string;      // RFC-030 — codex thread to adopt
+  codexModelProvider?: string; // #906 explicit provider when resuming an existing thread
   codexRecoveryVerification?: CodexRecoveryVerification;
   codexRecoveryBackup?: { createdAt: string; stateFiles: string[]; path: string };
   // Remembered so `anet node start <name>` alone brings up the co-presence
@@ -3078,6 +3166,10 @@ function packageJsonPath() {
 }
 
 function getAnetVersion(): string {
+  // Compiled binaries see import.meta.url under /$bunfs and have no package.json
+  // on that virtual path. The stamp is null for npm/node, so this stays a disk read.
+  const embedded = anetVersionFromStamp(STANDALONE_BUILD_STAMP);
+  if (embedded) return embedded;
   try { return JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version || ""; }
   catch { return ""; }
 }
@@ -3339,12 +3431,14 @@ function detectGlobalNpmPackage(pkgName: string, displayName: string, source = "
 }
 
 function detectInstalledPackages() {
-  const pkg = JSON.parse(readFileSync(packageJsonPath(), "utf-8"));
+  // Standalone: do not touch /$bunfs package.json. npm/node: same read as before.
+  const embeddedAnet = anetVersionFromStamp(STANDALONE_BUILD_STAMP);
+  const pkgVersion = embeddedAnet ?? (JSON.parse(readFileSync(packageJsonPath(), "utf-8")).version as string);
   const versions = {
     anet: {
       name: "anet",
       displayName: "anet",
-      version: pkg.version as string,
+      version: pkgVersion,
       state: "ok" as VersionState,
     },
     agentNode: detectCommandVersion("agent-node", "agent-node", "global"),
@@ -3379,7 +3473,7 @@ function detectInstalledPackages() {
     versions.commhubServer = detectGlobalNpmPackage("@sleep2agi/commhub-server", "commhub-server", "global");
   }
 
-  return versions;
+  return applyStandaloneDetectedVersions(versions, STANDALONE_BUILD_STAMP);
 }
 
 function formatDetectedVersion(pkg: DetectedVersion): string {
@@ -3435,7 +3529,7 @@ function detectAgentNodeSubDeps(): { claudeAgentSdk: string | null; codexSdk: st
 
 function printVersionReport() {
   const versions = detectInstalledPackages();
-  console.log(`anet v${versions.anet.version}\n`);
+  process.stdout.write(formatAnetVersionBanner(versions.anet.version, standaloneBundleVersion(STANDALONE_BUILD_STAMP)));
 
   console.log("Components (auto-fetched on first use, you don't need to install them manually):");
   console.log(`  ${formatLazyComponent(versions.agentNode)}`);
@@ -3727,7 +3821,7 @@ function opencodeUsePinSource(): string {
 type AgentNodeLaunchPlan = {
   command: string;
   argsPrefix: string[];
-  source: "explicit" | "sibling" | "global" | "preview" | "paired";
+  source: "explicit" | "sibling" | "global" | "preview" | "paired" | "bundled";
   probeEnv: NodeJS.ProcessEnv;
 };
 
@@ -3761,7 +3855,9 @@ function agentNodeHelp(plan: AgentNodeLaunchPlan): string {
   return execFileSync(plan.command, [...plan.argsPrefix, "--help"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000 : 5_000,
+    timeout: plan.source === "preview" || plan.source === "paired" ? 120_000
+      : plan.source === "bundled" ? 60_000
+      : 5_000,
     env: plan.probeEnv,
   });
 }
@@ -3797,9 +3893,26 @@ function opencodeAgentNodeError(detail: string): Error {
  * A merely capable older preview is insufficient: historical builds could
  * advertise opencode-cli without this release's isolation guarantees.
  */
+function bundledAgentNodeLaunchPlan(probeEnv: NodeJS.ProcessEnv): AgentNodeLaunchPlan {
+  return {
+    command: process.execPath,
+    argsPrefix: standaloneNodeArgs([]),
+    source: "bundled",
+    probeEnv,
+  };
+}
+
 function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (opencodeAgentNodeLaunchPlan) return opencodeAgentNodeLaunchPlan;
   const probeEnv = hardenOpencodeAgentNodeEnv(process.env, process.env.PATH);
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(probeEnv);
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError("embedded agent-node lacks opencode-cli");
+    }
+    opencodeAgentNodeLaunchPlan = plan;
+    return plan;
+  }
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   const explicit = process.env.ANET_AGENT_NODE_BIN;
 
@@ -3865,6 +3978,12 @@ function resolveOpencodeAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
 }
 
 function revalidateOpencodeAgentNodeLaunchPlan(plan: AgentNodeLaunchPlan): AgentNodeLaunchPlan {
+  if (plan.source === "bundled") {
+    if (!planSupportsOpencode(plan)) {
+      throw opencodeAgentNodeError("embedded agent-node no longer advertises opencode-cli");
+    }
+    return plan;
+  }
   const entrypoint = validateAgentNodePackageEntrypoint(
     plan.argsPrefix[0],
     OPENCODE_AGENT_NODE_SPEC,
@@ -3887,6 +4006,14 @@ function pairedAgentNodeError(detail: string): Error {
 function resolveCodexAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (codexAgentNodeLaunchPlan) return codexAgentNodeLaunchPlan;
   const probeEnv = { ...process.env };
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(probeEnv);
+    if (!agentNodeHelpSupportsCodexAppServer(agentNodeHelp(plan))) {
+      throw pairedAgentNodeError("embedded agent-node lacks codex-app-server capability");
+    }
+    codexAgentNodeLaunchPlan = plan;
+    return plan;
+  }
   const forbiddenRoots = discoverOpencodeForbiddenRoots();
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   let rawEntrypoint: string;
@@ -4025,6 +4152,14 @@ function resolveGrokAgentNodeLaunchPlan(): AgentNodeLaunchPlan {
   if (grokAgentNodeLaunchPlan) return grokAgentNodeLaunchPlan;
   prepareGrokPreviewResolverConfigs(home);
   const resolverEnv = buildGrokPreviewResolverEnv(process.env, home);
+  if (standaloneNow()) {
+    const plan = bundledAgentNodeLaunchPlan(resolverEnv);
+    if (!planSupportsRuntime(plan, "grok-build-cli")) {
+      throw new Error("embedded agent-node lacks the required Grok co-presence capability");
+    }
+    grokAgentNodeLaunchPlan = plan;
+    return plan;
+  }
 
   const explicit = process.env.ANET_AGENT_NODE_BIN;
   if (explicit) {
@@ -4615,6 +4750,8 @@ Daemon (host_supervisor — required by the dashboard's node-creation wizard):
   anet daemon init <name>                                 Create a host_supervisor node config
   anet daemon start <name>                                Start an existing daemon
   anet daemon list                                        List locally-configured daemons
+  anet daemon provider list <name>                        Read daemon-scoped Provider configuration (no secrets)
+  anet daemon provider put <name> --revision N            Save private Provider JSON from stdin (not runtime apply)
 
 Config & tokens:
   anet config [path|json]      Show config summary, path, or raw JSON
@@ -5022,6 +5159,9 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
       // #149/#156 — codex-sdk fast/yolo flags via shared helper (was inline
       // here only; #156 batch path missed it because of duplication).
       ...(runtime === "codex-sdk" ? codexSdkYoloFlags(opts["no-yolo"] === "true") : {}),
+      ...(runtime === "codex-app-server" && copresenceCreateOptTruthy(opts.copresence)
+        ? codexSdkYoloFlags(opts["no-yolo"] === "true")
+        : {}),
     },
     ...(runtime === "codex-app-server" && opts["codex-app-server-url"]
       ? { codexAppServerUrl: opts["codex-app-server-url"] }
@@ -5124,6 +5264,15 @@ function loadOpencodeNodeDotenv(nodeId: string): Record<string, string> {
   return raw === undefined ? {} : parseNodeDotenv(raw);
 }
 
+// OpenCode stores the node secret file through the private-profile reader.
+// The runtime id stays in this helper: nodeEditCommand must not grow its own
+// runtime-id literals (#1698 scans that function body).
+function loadNodeDotenvForProfile(nodeId: string, profile: Profile): Record<string, string> {
+  return normalizeRuntime(profile) === "opencode-cli"
+    ? loadOpencodeNodeDotenv(nodeId)
+    : loadNodeDotenv(nodeId);
+}
+
 // #193 envRef Option A — ensure the user's project-level `.anet/.gitignore`
 // covers per-node .env secret stores. Idempotent.
 function ensureNodeDotenvGitignore(): void {
@@ -5188,6 +5337,9 @@ function saveCreatedNode(id: string, profile: Profile) {
   rewritePlainSecretsToEnvRef(id, profile);
   writeLegacyProjectAlias(profile.node_name || id);
   saveProfile(id, profile);
+  if ((profile as { codexCopresence?: boolean }).codexCopresence === true) {
+    writeCopresenceYoloToCodexHome(join(nodesDir(), id, "codex-home"));
+  }
 }
 
 // #125 — extracted helper so create + migrate-token-to-envref + (future)
@@ -5299,13 +5451,55 @@ async function ensureNodeToken(profile: Profile, id: string): Promise<Profile> {
 // 0o600 by writeOpencodeAuthJson. If the env key is missing we emit
 // a node-scoped upstream login command rather than suggesting a second create
 // of an alias that now already exists.
+function alignOpencodeV2CreateOrExit(profile: Profile, opts: Record<string, any>): void {
+  if (normalizeRuntime(profile) !== "opencode-cli" || opencodeGenerationOfConfig(profile) !== "v2") return;
+  try {
+    const requestedModel = typeof opts.model === "string" && opts.model !== "true" ? opts.model : undefined;
+    const planned = planOpencodeV2Create({
+      projectDir: process.cwd(),
+      homeDir: opencodeBindingHome(),
+      xdgConfigHome: process.env.XDG_CONFIG_HOME,
+      requestedModel,
+      requestedProvider: typeof opts.provider === "string" ? opts.provider : undefined,
+      requestedBaseUrl: typeof opts["base-url"] === "string" ? opts["base-url"] : undefined,
+      requestedApiKeyEnv: typeof opts["api-key-env"] === "string" ? opts["api-key-env"] : undefined,
+      argv: process.argv,
+      env: process.env,
+    });
+    profile.model = planned.selection.model;
+    opts._opencodeV2AlignedJson = planned.opencodeJson;
+    const env = { ...(profile.env ?? {}) };
+    for (const name of planned.credentialEnv) {
+      const value = process.env[name];
+      if (typeof value !== "string" || value.length === 0) {
+        throw new OpenCodeV2AlignError(
+          "opencode_v2_provider_credential_missing",
+          `OpenCode provider ${JSON.stringify(planned.selection.providerId)} requires ${name}, which is not set.`,
+        );
+      }
+      env[name] = value;
+    }
+    profile.env = env;
+    console.log(`[anet] OpenCode V2 model ${planned.selection.model} (provider ${planned.selection.providerId}) matches this machine's OpenCode config.`);
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
 function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts: Record<string, any>): void {
   if (normalizeRuntime(profile) !== "opencode-cli") return;
+  if (opencodeGenerationOfConfig(profile) === "v2") {
+    const body = wizardOpts._opencodeV2AlignedJson;
+    if (typeof body !== "string" || !body.includes(`"model"`)) {
+      console.error("[anet] ❌ OpenCode V2 create has no aligned provider/model. Refusing to write a fallback preset.");
+      process.exit(1);
+    }
+    const configPath = replaceOpencodeConfigJson(join(nodesDir(), id), body);
+    console.log(`[anet] OpenCode V2 config copied from this machine's OpenCode config: ${configPath}`);
+    return;
+  }
   const presetId = wizardOpts._opencodePreset || "anthropic";
-  const { findOpencodePreset, readPresetKeyFromEnv, writeOpencodeAuthJson, writeOpencodeConfigJson } =
-    // Lazy-loaded so a create wizard for another runtime doesn't
-    // pay the import cost.
-    require("../src/opencode-preset") as typeof import("../src/opencode-preset");
   const preset = findOpencodePreset(presetId);
   if (!preset) {
     console.warn(`[anet] ⚠ unknown opencode preset '${presetId}' — skipping auth.json write.`);
@@ -5339,6 +5533,60 @@ function writeOpencodePresetIfRequested(id: string, profile: Profile, wizardOpts
   console.log(`  opencode.json: ${configPath} (safe tools disabled by default)`);
   console.log(`[anet]   Default opencode-cli mode is for communication/text tasks in a launch-scoped external workspace.`);
   console.log(`[anet]   Code tools require flags.opencodeUnsafeTools=true for trusted tasks; use Docker/VM for isolation.`);
+}
+
+function providerStdinLine(): string | undefined {
+  if (process.stdin.isTTY) return undefined;
+  const text = readFileSync(0, "utf8");
+  return text.split(/\r?\n/, 1)[0] ?? "";
+}
+
+/** Validate --provider before the node is written. The secret lands in
+ * profile.env so the existing envRef rewrite stores it; the runtime file is
+ * written later by materializeRuntimeProviderOrExit. */
+function stageRuntimeProviderOrExit(
+  profile: Profile,
+  opts: Record<string, any>,
+  dotenv?: Record<string, string>,
+): StagedProvider | null {
+  const provider = typeof opts.provider === "string" ? opts.provider : undefined;
+  const baseUrl = typeof opts["base-url"] === "string" ? opts["base-url"] : undefined;
+  const apiKeyEnv = typeof opts["api-key-env"] === "string" ? opts["api-key-env"] : undefined;
+  if (!provider && !baseUrl && !apiKeyEnv) return null;
+  try {
+    const staged = stageProviderRequest({
+      runtime: normalizeRuntime(profile),
+      opencodeGeneration: typeof profile.opencodeGeneration === "string" ? profile.opencodeGeneration : undefined,
+      opencodeUnsafeTools: profile.flags?.opencodeUnsafeTools === true,
+      provider,
+      baseUrl,
+      apiKeyEnv,
+      model: typeof opts.model === "string" && opts.model !== "true" ? opts.model : undefined,
+      argv: process.argv,
+      shellEnv: process.env,
+      dotenv,
+      readStdin: providerStdinLine,
+    });
+    if (staged) applyStagedProviderToProfile(profile, staged);
+    return staged;
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
+
+function materializeRuntimeProviderOrExit(id: string, staged: StagedProvider | null): void {
+  if (!staged) return;
+  try {
+    materializeStagedProvider(join(nodesDir(), id), staged.resolved);
+    const where = staged.resolved.family === "codex"
+      ? "codex-home/config.toml [model_providers.*]"
+      : "opencode.json providers";
+    console.log(`[anet] provider ${staged.resolved.presetId} written to ${where} (credential env ${staged.resolved.envKey}; value not printed)`);
+  } catch (error) {
+    console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 }
 
 function printOpencodeCreationSecurityDisclosure(id: string, profile: Profile): void {
@@ -5385,6 +5633,9 @@ async function configureOpencodeRuntime(
   if (wizardOpts["opencode-generation"] === "v2") {
     console.log(`[anet] 请确保已安装 OpenCode V2 (exact): ${opencodeGenerationInstallCommand("v2")}`);
     console.log(`[anet]   V1 and V2 both install 'opencode': use separate npm prefixes and select the V2 prefix on PATH.`);
+    console.log(`[anet]   V2 co-presence uses the model and provider already in this machine's OpenCode config.`);
+    console.log(`[anet]   A different --model or --provider is refused. There is no fallback provider.`);
+    return;
   } else {
     const currentPin = readEffectivePin();
     console.log(`[anet] 请确保已安装 opencode CLI (exact): ${opencodeExactInstallCommand(currentPin.version)}`);
@@ -5992,6 +6243,8 @@ API key:
   }
 
   const profile = await ensureNodeToken(createProfileFromOpts(id, opts), id);
+  alignOpencodeV2CreateOrExit(profile, opts);
+  const stagedProvider = opencodeGenerationOfConfig(profile) === "v2" ? null : stageRuntimeProviderOrExit(profile, opts);
 
   // #138 fix — @inquirer/prompts select() cleanup leaves process.stdin in a
   // state where the subsequent readline `ask()` doesn't keep the event loop
@@ -6043,6 +6296,7 @@ Telegram setup:
     writeTelegramChannelConfig(id, telegramConfig.botToken, telegramConfig.allowId);
   }
   writeOpencodePresetIfRequested(id, profile, opts);
+  materializeRuntimeProviderOrExit(id, stagedProvider);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   console.log(`\n[anet] Created node "${id}" (${normalizeRuntime(profile)})`);
@@ -6429,6 +6683,8 @@ async function createCommand(idOverride?: string) {
   }
 
   const profile = createProfileFromOpts(id, opts);
+  alignOpencodeV2CreateOrExit(profile, opts);
+  const stagedProvider = opencodeGenerationOfConfig(profile) === "v2" ? null : stageRuntimeProviderOrExit(profile, opts);
 
   // Request a network token (ntok_) for this node — agent-node REQUIRES ntok_ for SSE.
   // No silent fallback to utok_; that just defers the failure to runtime.
@@ -6464,6 +6720,7 @@ async function createCommand(idOverride?: string) {
 
   saveCreatedNode(id, profile);
   writeOpencodePresetIfRequested(id, profile, opts);
+  materializeRuntimeProviderOrExit(id, stagedProvider);
   checkRuntimeDependency(normalizeRuntime(profile), "create");
 
   const netLabel = gc.network_name || gc.network_id || "global";
@@ -6682,6 +6939,16 @@ function ensureMcpJson(profile: Profile) {
       }
       found = true;
       break;
+    }
+  }
+  if (!found) {
+    const embedded = standaloneNodeServerJs(STANDALONE_BUILD_STAMP);
+    if (embedded) {
+      mkdirSync(anetDir, { recursive: true });
+      if (applyNodeServerPayload(serverTs, embedded, "node-server.js") === "wrote") {
+        console.log(`[anet] Updated .anet/node-server.js`);
+      }
+      found = true;
     }
   }
   if (!found && !existsSync(serverTs)) {
@@ -7296,7 +7563,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
     // Try agent-node from PATH, fallback to npx
     let cmd = "agent-node";
     let commandArgs = agentArgs;
-    if (runtime === "opencode-cli") {
+    if (standaloneNow()) {
+      cmd = process.execPath;
+      commandArgs = standaloneNodeArgs(agentArgs);
+      console.log("[anet] using the agent-node embedded in this standalone binary");
+    } else if (runtime === "opencode-cli") {
       const plan = resolveOpencodeAgentNodeLaunchPlan();
       cmd = plan.command;
       commandArgs = [...plan.argsPrefix, ...agentArgs];
@@ -7428,7 +7699,7 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         const child = await spawnOwnedNodeChild(nodeId, launchGeneration, () => spawn(runCommand, runCommandArgs, {
           env: childEnv,
           stdio: "inherit",
-          shell: runtime === "opencode-cli" ? false : process.platform === "win32",
+          shell: standaloneNow() ? false : runtime === "opencode-cli" ? false : process.platform === "win32",
         }));
         if (runtime === "opencode-cli") activeAgentChild = child;
         if (child.pid) writeFileSync(pidFile, String(child.pid));
@@ -8119,7 +8390,7 @@ async function startExternalAppserverNode(
     try {
       execTmux([
         "new-session", "-d", "-s", plan.sessions.appsrv, "-c", plan.nodeDir, ...codexEnv,
-        "bash", "-c", appserverShellCommand(plan, process.execPath),
+        "bash", "-c", appserverShellCommand(plan, process.execPath, standaloneNow() ? "standalone-bin" : "js-eval"),
       ], { stdio: "pipe" });
     } catch (e: any) {
       console.error(`[anet] ❌ tmux new-session ${plan.sessions.appsrv} failed: ${e?.message || e}`);
@@ -8365,6 +8636,7 @@ async function startCommand() {
       // #448 — absolute, and from the node's own config/dir; never from the environment.
       codexHome: resolve(opts["codex-home"] || (typeof prof.codexHome === "string" && prof.codexHome ? prof.codexHome : codexHomeDefault)),
       model: opts.model,
+      modelProvider: opts['codex-model-provider'],
       port: opts.port ? Number(opts.port) : undefined,
       dangerFullAccess: opts["dangerously-allow-full-access"] === "true",
       inheritCodexHome: opts["no-inherit-codex-home"] !== "true",
@@ -8788,7 +9060,7 @@ function codexRestartActions(ctx: CodexLifecycleCtx, peer: { id: string; profile
     start: async () => {
       const prof = (loadStoredProfile(resolved.id) ?? profile) as Record<string, any>;
       // execArgv 跟着走:开发态用 tsx 跑 .ts 时子进程也要带 loader;发布态(dist/bin/cli.js)execArgv 为空,行为不变。
-      const argv = [...process.execArgv, process.argv[1], "node", "start", displayName, "--copresence", "--tui-first"];
+      const argv = reinvokeArgv(["node", "start", displayName, "--copresence", "--tui-first"], true);
       if (prof.codexCopresenceFullAccess) argv.push("--dangerously-allow-full-access", "--yes-danger-full-access");
       const env = { ...process.env }; delete env.ANET_COPRESENCE_BRIDGE; delete env.ANET_NODE_MARKER;
       // #448 — the launcher computes CODEX_HOME from the node; do not hand it whatever this shell carries.
@@ -10115,6 +10387,8 @@ async function serverCommand() {
       // bun 单独从来不够。原来的 OR 会让 bun-only 的机器通过前置检查,
       // 然后在 spawn 处失败,并报「it disappeared from PATH」—— 而它从来没在过。
       // 实测:release zip 装的 bun 不带 bunx;只加一条 bunx 软链,hub 立刻起来(#766)。
+      // The standalone executable embeds the Hub and does not take this branch.
+      if (!standaloneNow()) {
       if (!commandExists("bunx")) {
         // bun 在、bunx 不在 —— 这是最常见也最容易被误诊的一种,单独给话术。
         if (commandExists("bun")) {
@@ -10136,6 +10410,7 @@ async function serverCommand() {
         console.error(`\n     More info: https://bun.sh/install\n`);
         process.exit(1);
       }
+      }
       // #511 — resolve which commhub-server to launch, and say where it came from.
       const versionFlag = opts.version ?? opts["hub-version"];
       if (versionFlag === "true" || (versionFlag && versionFlag !== "latest" && versionFlag !== "preview" && !isExactSemver(versionFlag))) {
@@ -10147,7 +10422,42 @@ async function serverCommand() {
         console.error(`\n  ❌ --channel must be "latest" or "preview" (got "${channelFlag}").\n`);
         process.exit(1);
       }
-      const hubVersion = resolveHubServerVersion({
+      const env: Record<string, string> = {
+        ...process.env as any,
+        PORT: port,
+        HOST: host,
+        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
+      };
+      let hubVersion: ReturnType<typeof resolveHubServerVersion>;
+      if (standaloneNow()) {
+        const explicitVersion = versionFlag && versionFlag !== "true" ? versionFlag : null;
+        const decided = standaloneHubLaunch(STANDALONE_BUILD_STAMP, {
+          explicitVersion,
+          port,
+          host,
+          devOpen,
+        });
+        if (!decided.ok) {
+          console.error(`\n  ❌ ${decided.message}\n`);
+          process.exit(1);
+        }
+        if (channelFlag) {
+          decided.warnings.push(`standalone binary ignores --channel ${channelFlag} and runs the embedded hub`);
+        }
+        hubVersion = {
+          version: decided.version,
+          source: "explicit",
+          channel: null,
+          cached: false,
+          origin: decided.origin,
+          warnings: decided.warnings,
+        };
+        console.log(`  ${formatHubVersionBanner(hubVersion)}`);
+        for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
+        console.log(`  Starting embedded CommHub Server on port ${port} (bind ${host})...`);
+        child = spawn(process.execPath, decided.args, { env, stdio: "inherit" });
+      } else {
+      const hubVersionResolved = resolveHubServerVersion({
         explicit: versionFlag || null,
         channelFlag: channelFlag || null,
         anetVersion: getAnetVersion() || "",
@@ -10155,19 +10465,15 @@ async function serverCommand() {
         exec: (cmd, cmdArgs) => runLauncherSync(cmd, cmdArgs, { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "pipe"] }).toString(),
         cacheDir: bunInstallCacheDir(),
       });
+      hubVersion = hubVersionResolved;
       console.log(`  ${formatHubVersionBanner(hubVersion)}`);
       for (const w of hubVersion.warnings) console.error(`\n  ⚠️  ${w}\n`);
       console.log(`  Starting CommHub Server on port ${port} (bind ${host})...`);
-      const env: Record<string, string> = {
-        ...process.env as any,
-        PORT: port,
-        HOST: host,
-        ...(devOpen ? { COMMHUB_DEV_OPEN: "1" } : token ? { COMMHUB_AUTH_TOKEN: token } : {}),
-      };
       // Always an exact version (resolved above) — see PINNED_SERVER_VERSION.
       const serverArgs = ["--bun", `@sleep2agi/commhub-server@${hubVersion.version}`];
       if (devOpen) serverArgs.push("--dev-open");
       child = spawnLauncher("bunx", serverArgs, { env, stdio: "inherit" });
+      }
       // #235 — Belt-and-braces: even with the preflight above, race
       // conditions (PATH being modified mid-process, partial install) can
       // still produce an async ENOENT 'error' event. Without this handler
@@ -10175,11 +10481,15 @@ async function serverCommand() {
       // preflight's UX promise. Log + exit gracefully.
       child.on("error", (err: any) => {
         if (err?.code === "ENOENT") {
+          if (standaloneNow()) {
+            console.error(`\n  ❌ Failed to spawn the embedded hub (${process.execPath} ${STANDALONE_HUB_ARG}).`);
+          } else {
           console.error(`\n  ❌ Failed to spawn bunx.`);
           // 不再说 "disappeared from PATH":那条归因会把人引去查 PATH 与
           // 「谁卸载了 bun」,而绝大多数情况是这台机器从来没有过 bunx(#766)。
           console.error(`     This usually means Bun was uninstalled or PATH changed mid-process.`);
           console.error(`     Try: which bunx && bunx --version`);
+          }
         } else {
           console.error(`\n  ❌ commhub-server spawn error: ${err?.message || err}`);
         }
@@ -10197,6 +10507,12 @@ async function serverCommand() {
         } catch {}
       }
       if (!ready) {
+        if (standaloneNow()) {
+          console.error(`  ❌ Embedded CommHub Server failed to start. Check the output above for the real error.`);
+          child?.kill();
+          markFailed();
+          return;
+        }
         // commhub-server is TypeScript w/ a bun shebang; it requires Bun.
         // Most Node-only systems hit this exact failure.
         let bunInstalled = false;
@@ -10219,7 +10535,8 @@ async function serverCommand() {
       }
       console.log(`  ✅ Server running on ${hubUrl} (commhub-server v${serverVersion || "?"})`);
       if (serverVersion && serverVersion !== hubVersion.version) {
-        console.error(`\n  ⚠️  Asked bunx for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
+        const asked = standaloneNow() ? "the embedded hub" : "bunx";
+        console.error(`\n  ⚠️  Asked ${asked} for commhub-server ${hubVersion.version} but the server reports v${serverVersion}.\n`);
       }
       if (devOpen) {
         console.log(`  ⚠️  DEV OPEN MODE`);
@@ -10877,6 +11194,9 @@ Subcommands:
   adopt <alias>        Plan adoption from this workdir (--yes to request; --all supported)
   unadopt <alias>      Plan binding revocation (--yes to apply, never stops node)
   adopted             List active adopted nodes (run from the daemon workdir)
+  provider list <name> Read daemon-scoped Provider configuration (redacted)
+  provider put <name> --revision N
+                      Save private JSON from stdin; does not log in or apply to nodes
 
 Options:
   --force              init only。两种用法:
@@ -10900,6 +11220,15 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
   switch (sub) {
     case "adopt": case "unadopt": case "adopted": {
       const code = await runDaemonAdopt(sub, args.slice(2), { cwd: process.cwd(), home: homedir(), login: loadGlobal(), fetch, print: console.log });
+      if (code === 2) markUsageError(); else if (code) markFailed();
+      break;
+    }
+    case "provider": {
+      const providerCommand = args[2] === 'apply' ? runDaemonProviderApply : args[2] === 'initialize' ? runDaemonProviderInitialize : runDaemonProvider;
+      const code = await providerCommand(args.slice(2), { nodesDir: nodesDir(), readInput: () => {
+        if (process.stdin.isTTY) throw new Error("private stdin required");
+        return readProviderInput();
+      }, print: console.log });
       if (code === 2) markUsageError(); else if (code) markFailed();
       break;
     }
@@ -11811,6 +12140,16 @@ async function verifyNodeRestarted(
 // 🔴 空值不当默认：`normalizeRuntimeStrict` 对空串返回 DEFAULT_RUNTIME，
 //    那是给「配置里没写」用的语义。用户显式敲 `--runtime ""` 是打错了，
 //    不该被悄悄解释成 claude-agent-sdk —— 所以这里先自己挡掉空值。
+function applyNodeEditReasoningEffortToml(nodeKey: string, profile: Profile, reasoningIdx: number): void {
+  const re = (profile.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+  if (reasoningIdx < 0 || !isReasoningEffortValue(re)) return;
+  const { codexHome } = resolveNodeCodexHome({
+    nodeDir: join(nodesDir(), nodeKey),
+    config: JSON.parse(JSON.stringify(profile)) as Record<string, unknown>,
+  });
+  if (codexHome) writeReasoningEffortToCodexHome(codexHome, re);
+}
+
 async function nodeEditCommand() {
   const ref = args[1];
   const flagIdx = args.indexOf("--runtime");
@@ -11824,19 +12163,43 @@ async function nodeEditCommand() {
   //    与 #1698 里 grok 撞 uid_map 墙时「产品给出的修法产品自己做不到」同形。
   const modelIdx = args.indexOf("--model");
   const rawModel = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  const reasoningIdx = args.indexOf("--reasoning-effort");
+  const rawReasoning = reasoningIdx >= 0 ? args[reasoningIdx + 1] : undefined;
   // #1856 —— `--workdir <dir>` 写 codexProjectDir(共存节点的工作目录 = 含 .anet 的目录);preflight 的
   // workdir_consistent 缺它就 fail,而在这之前没有任何命令能给旧节点补上(提示里写的 `config apply` 根本不存在)。
   const workdirIdx = args.indexOf("--workdir");
   const rawWorkdir = workdirIdx >= 0 ? args[workdirIdx + 1] : undefined;
-  if (!ref || (flagIdx < 0 && modelIdx < 0 && workdirIdx < 0)) {
+  const providerFlag = (flag: string): string | undefined => {
+    const i = args.indexOf(flag);
+    if (i < 0) return undefined;
+    const value = args[i + 1];
+    if (value === undefined || value.startsWith("--")) {
+      console.error(`${flag} needs a value`);
+      process.exit(1);
+    }
+    return value;
+  };
+  const providerValue = providerFlag("--provider");
+  const baseUrlValue = providerFlag("--base-url");
+  const apiKeyEnvValue = providerFlag("--api-key-env");
+  if (!ref || (flagIdx < 0 && modelIdx < 0 && reasoningIdx < 0 && workdirIdx < 0 && !providerValue && !baseUrlValue && !apiKeyEnvValue)) {
     console.log(`
-anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <dir>]
+anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--reasoning-effort <level>] [--workdir <dir>]
+                                   [--provider <id>] [--base-url <url>] [--api-key-env <NAME>]
 
   Change an existing node's runtime, model and/or co-presence workdir. Supported runtime ids:
     ${SUPPORTED_RUNTIME_NAMES.join(", ")}
 
   --model takes any id the runtime accepts; it is validated the same way
   'anet node create --model' validates it (non-empty, no whitespace).
+
+  --reasoning-effort sets Codex thinking level (codex-app-server only): none,
+  minimal, low, medium, high, or xhigh — written to config.json and
+  codex-home/config.toml as model_reasoning_effort.
+
+  --provider is Codex (config.toml [model_providers.*]) or OpenCode V2
+  (native opencode.json providers). The key value is never a flag: export
+  the variable named by --api-key-env (or the preset's default).
 
   Note: the change is written to the node's config; a running node keeps its
   current runtime/model until it is restarted (anet node restart <name>).
@@ -11853,7 +12216,12 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
   if (modelIdx >= 0 && (rawModel === undefined || rawModel.trim() === "" || rawModel.startsWith("--"))) {
     console.error("--model needs a value (an id the runtime accepts).");
     process.exit(1);
-  }  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
+  }
+  if (reasoningIdx >= 0 && (rawReasoning === undefined || rawReasoning.trim() === "" || rawReasoning.startsWith("--"))) {
+    console.error("--reasoning-effort needs a value (none, minimal, low, medium, high, or xhigh).");
+    process.exit(1);
+  }
+  if (workdirIdx >= 0 && (rawWorkdir === undefined || rawWorkdir.trim() === "" || rawWorkdir.startsWith("--"))) {
     console.error("--workdir needs a value (an existing directory; the one that holds this node's .anet).");
     process.exit(1);
   }
@@ -11901,6 +12269,24 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`model ${currentModel ?? "(unset)"} -> ${nextModel}`);
     }
   }
+  if (reasoningIdx >= 0) {
+    if (normalizeRuntime(profile) !== CODEX_COPRESENCE_RUNTIME) {
+      console.error(`--reasoning-effort only applies to ${CODEX_COPRESENCE_RUNTIME} nodes (this node is ${normalizeRuntime(profile)}).`);
+      process.exit(1);
+    }
+    const nextRe = rawReasoning!.trim() as string;
+    if (!isReasoningEffortValue(nextRe)) {
+      console.error(`--reasoning-effort must be one of: none, minimal, low, medium, high, xhigh`);
+      process.exit(1);
+    }
+    const fl = (profile.flags && typeof profile.flags === "object" ? profile.flags : {}) as Record<string, unknown>;
+    profile.flags = fl;
+    const currentRe = fl.modelReasoningEffort as string | undefined;
+    if (currentRe !== nextRe) {
+      fl.modelReasoningEffort = nextRe;
+      changes.push(`modelReasoningEffort ${currentRe ?? "(unset)"} -> ${nextRe}`);
+    }
+  }
   if (workdirIdx >= 0) {
     let nextDir: string;
     try {
@@ -11916,11 +12302,22 @@ anet node edit <node-id|node-name> [--runtime <id>] [--model <id>] [--workdir <d
       changes.push(`workdir ${currentDir ?? "(unset)"} -> ${nextDir}`);
     }
   }
+  const dotenv = loadNodeDotenvForProfile(resolved.id, profile);
+  const stagedProvider = stageRuntimeProviderOrExit(profile, {
+    provider: providerValue,
+    "base-url": baseUrlValue,
+    "api-key-env": apiKeyEnvValue,
+    model: modelIdx >= 0 ? (profile as any).model : undefined,
+  }, dotenv);
+  if (stagedProvider) changes.push(`provider ${stagedProvider.resolved.presetId} via ${stagedProvider.resolved.envKey}`);
   if (changes.length === 0) {
     console.log(`${resolved.id} already matches what you asked for — nothing to change.`);
     return;
   }
+  if (stagedProvider) rewritePlainSecretsToEnvRef(resolved.id, profile);
   saveProfile(resolved.id, profile);
+  materializeRuntimeProviderOrExit(resolved.id, stagedProvider);
+  applyNodeEditReasoningEffortToml(resolved.id, profile, reasoningIdx);
   for (const c of changes) console.log(`${resolved.id}: ${c}`);
   // 🔴 说清「什么时候生效」。同 `anet goal edit` 的先例:改配置不等于改运行中的进程。
   const running = findNodeStopCandidates(resolved.id);

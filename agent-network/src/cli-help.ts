@@ -68,6 +68,15 @@ Options:
   --tools <list>         Extra tools to enable (e.g. WebSearch)
   --copresence           Shared human + agent TUI (codex-app-server / opencode-cli / grok)
   --env KEY=VALUE        Environment for the node (stored as an env ref, repeatable)
+  --provider <id>        Codex or OpenCode V2 provider: deepseek | minimax |
+                         custom-openai-compat. Codex writes config.toml
+                         [model_providers.*]. OpenCode V2 writes native
+                         opencode.json providers (requires
+                         --opencode-generation v2 --opencode-unsafe-tools).
+                         The key value is never a flag.
+  --base-url <url>       Provider base URL (required for custom-openai-compat)
+  --api-key-env <NAME>   Env var that holds the key (required for custom).
+                         Export NAME in the shell; do not pass --api-key.
   --channel <spec>       Attach a channel (repeatable)
   --resume <id>          Bind an existing Claude session
   --resume-latest        Bind the latest Claude session
@@ -101,8 +110,11 @@ Resume the node's interrupted session (or a specific one with --session).`,
 Rename a node. --force is required for a running node: it is stopped and
 restarted under the new name so it re-registers on the Hub.`,
   "node edit": `Usage: anet node edit ${NODE_REF} [--runtime <id>] [--model <id>] [--workdir <dir>]
+                   [--provider <id>] [--base-url <url>] [--api-key-env <NAME>]
 
-Change a node's runtime, model or co-presence working directory (at least one flag).
+Change a node's runtime, model, co-presence working directory, or Codex /
+OpenCode V2 provider (at least one flag). The API key is read from the named
+environment variable, the node .env, or one stdin line — never from argv.
 Restart the node for the change to take effect.
 
 On another machine (#562): add --remote — the Hub asks that machine's daemon to do it.
@@ -417,6 +429,11 @@ init + start in one step (default name: "daemon").`,
        anet daemon ls
 
 List locally configured daemon nodes (configuration only, not liveness).`,
+  "daemon provider": `Usage: anet daemon provider <list|scan|put|apply> <daemon> [--revision N] [--request dps_UUID]
+
+list reads the daemon-scoped Provider configuration (no secrets).
+scan, put, and apply read private JSON from stdin. No key is accepted in argv.
+put saves that JSON; it does not apply it to a runtime.`,
 
   // ── network ──
   "network ls": `Usage: anet network ls

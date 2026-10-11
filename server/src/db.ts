@@ -528,6 +528,33 @@ try {
 }
 
 // `node_config_updates` — pending + history. One row per dashboard write.
+// #906: redacted daemon-owned inventory requests, never credential material.
+db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_snapshots (
+  request_id TEXT PRIMARY KEY, network_id TEXT NOT NULL, daemon_node_id TEXT NOT NULL,
+  requested_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, observed_at INTEGER,
+  snapshot_json TEXT, error TEXT
+)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_daemon_provider_pending
+  ON daemon_provider_snapshots(network_id, daemon_node_id, status)`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_daemon_provider_inflight
+  ON daemon_provider_snapshots(network_id, daemon_node_id) WHERE status='pending'`);
+// One encrypted mutation payload per request; public receipt remains secret-free.
+db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_writes (
+  request_id TEXT PRIMARY KEY, expected_revision INTEGER NOT NULL,
+  ciphertext BLOB NOT NULL, iv BLOB NOT NULL, tag BLOB NOT NULL
+)`);
+// Application intent is credential-free; secrets stay in the daemon's store.
+db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_applications (
+  request_id TEXT PRIMARY KEY, expected_revision INTEGER NOT NULL,
+  selection_json TEXT NOT NULL
+)`);
+
+// Login commands contain only intent. OAuth tokens never enter Hub storage.
+db.exec(`CREATE TABLE IF NOT EXISTS daemon_provider_logins (
+  request_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL
+)`);
+
 // At most one row per node may be in a non-terminal state at a time
 // (single-flight enforced at the tool layer; this table just stores).
 //
@@ -788,6 +815,15 @@ try {
   if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
 }
 
+// Hub #938 — clone_node reuses this table (same token mint, sweeper, and
+// register finalize) but must not be replayed as a blank create_node.
+// NULL/empty = ordinary create. Non-empty JSON = clone directives.
+try {
+  db.exec(`ALTER TABLE node_create_requests ADD COLUMN clone_json TEXT`);
+} catch (e: any) {
+  if (!/duplicate column|already exists/i.test(e?.message || "")) throw e;
+}
+
 // #1493 — 把 user_inbox.network_id 升到 **schema 级 NOT NULL**(belt-and-suspenders,
 // 叠在 send_desktop_message 的代码级三闸之上:canWrite / `!effectiveNetId` return /
 // getUserNetworkRole,tools.ts)。「不产生 network_id=NULL 孤儿」现是代码级保证 + #1492
@@ -899,6 +935,19 @@ db.exec(`
     UNIQUE(network_id, name)
   );
   CREATE INDEX IF NOT EXISTS idx_providers_network ON providers(network_id);
+`);
+// #907 network-owned Provider configuration. Keys remain in network_secrets.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS hub_provider_configs (
+    network_id TEXT NOT NULL, provider_id TEXT NOT NULL, revision INTEGER NOT NULL,
+    config_json TEXT NOT NULL, secret_key_ref TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(network_id, provider_id)
+  );
+  CREATE TABLE IF NOT EXISTS hub_provider_bindings (
+    request_id TEXT PRIMARY KEY, network_id TEXT NOT NULL, provider_id TEXT NOT NULL,
+    provider_revision INTEGER NOT NULL, daemon_node_id TEXT NOT NULL,
+    daemon_provider_id TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
 `);
 db.exec(`
   CREATE TABLE IF NOT EXISTS provider_models (

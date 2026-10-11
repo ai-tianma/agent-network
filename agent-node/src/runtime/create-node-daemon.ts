@@ -8,7 +8,7 @@
 // in their own processes (detached) and get their own supervisor wrap
 // once they hit `anet node start`.
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { statSync, realpathSync, readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
@@ -23,12 +23,27 @@ import {
   TIMEOUT_MS_MIN,
   TIMEOUT_MS_MAX,
 } from "./config-apply.js";
+import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
+import { validProviderInitialization } from '../shared/provider-initialization.js';
+import {
+  applyCodexCopresenceFlagDefaults,
+  writeCopresenceYoloToCodexHome,
+} from "./codex-copresence-yolo.js";
 import { prepareChildWorkdir, recordChildWorkdir, WorkdirError } from "./child-workdir.js";
 import { NODE_SECRETS_FILE_NAME } from "../node-secrets.js";
 import { writeCreatedOpencodeProfile } from "./opencode-create-profile.js";
+import {
+  assertOpenCodeV2RequestedModel,
+  OpenCodeV2AlignError,
+  readOpenCodeConfiguredSelection,
+  renderOpenCodeV2AlignedConfig,
+  type OpenCodeConfiguredSelection,
+} from "../opencode-v2-configured-model.js";
+import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
+  opencodeExplicitGenerationMismatch,
   requiredCliStatus,
   resolveOnPathReal,
   STEP_TIMEOUT_MS,
@@ -466,6 +481,9 @@ export const DAEMON_EXTRA_PATH_FIELD = "daemonExtraPath";
 
 /** 子进程 PATH 与 computeChildPath 一样用 `:`,含 win32。额外目录接在整段固定 PATH 之后。 */
 let daemonExtraPathDirs: readonly string[] = [];
+/** 只给测试把「栽进去的 CLI」放到固定 PATH 之前。生产始终是空的:
+ *  daemonExtraPath 仍然追加,配置项不能盖住 /usr/local/bin。 */
+let childPathPrefixForTest: readonly string[] = [];
 
 function canonicalExtraDir(raw: string, platform: NodeJS.Platform): string | null {
   const s = raw.trim();
@@ -500,8 +518,20 @@ export function applyDaemonExtraPath(raw: unknown, platform: NodeJS.Platform = p
   return daemonExtraPathDirs;
 }
 
+/** 测试夹具目录,搜在固定 PATH 之前。空前缀时 minimalEnv 的 PATH 与未设时逐字相同。 */
+export function _prependChildPathForTest(raw: unknown, platform: NodeJS.Platform = process.platform): readonly string[] {
+  childPathPrefixForTest = parseDaemonExtraPath(raw, platform);
+  return childPathPrefixForTest;
+}
+
 export function _resetDaemonExtraPathForTest(): void {
   daemonExtraPathDirs = [];
+  childPathPrefixForTest = [];
+}
+
+function withChildPathTestPrefix(base: string): string {
+  if (childPathPrefixForTest.length === 0) return base;
+  return `${childPathPrefixForTest.join(":")}:${base}`;
 }
 
 /** 追加到固定 PATH 之后,并去掉已经在固定 PATH 里的目录。 */
@@ -531,11 +561,37 @@ export function missingCliCreateError(command: string): string {
   );
 }
 
+/** Copied from the daemon's own env (never from `extra`) when set.
+ *  USER / LOGNAME: Claude Code on macOS reads its Keychain login by account
+ *  = $USER; without it every claude-agent-sdk child answered "Not logged in".
+ *  Proxy keys: behind a local proxy the child otherwise connects directly and
+ *  the vendor API refuses it (Anthropic: "403 Request not allowed"), while
+ *  runtime-readiness — which runs with the daemon env — reports reachable.
+ *  No credentials and no runtime-config keys; additions need review and a
+ *  set-equality test update. */
+export const DAEMON_CHILD_INHERITED_ENV_KEYS = [
+  "USER",
+  "LOGNAME",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
+] as const;
+
 export function minimalEnv(
   extra: Record<string, string> = {},
   platform: NodeJS.Platform = process.platform,
   parentEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
+  const inherited: Record<string, string> = {};
+  for (const k of DAEMON_CHILD_INHERITED_ENV_KEYS) {
+    const v = parentEnv[k];
+    if (typeof v === "string" && v !== "") inherited[k] = v;
+  }
   const filtered: Record<string, string> = {};
   const fixedKeys = fixedEnvKeysFor(platform);
   for (const [k, v] of Object.entries(extra)) {
@@ -549,10 +605,12 @@ export function minimalEnv(
   }
   const home = resolveChildHome(parentEnv, platform);
   const base: NodeJS.ProcessEnv = {
+    ...inherited,
     ...filtered,
     // #648 — fixed prefix (computeChildPath, historically aS()) first, then
     // daemonExtraPath. Not process.env.PATH, and not guessed user dirs.
-    PATH: appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform),
+    // The test prefix is empty in production, so this string stays the same.
+    PATH: withChildPathTestPrefix(appendExtraPath(computeChildPath(platform), daemonExtraPathDirs, platform)),
     HOME: home,
     LANG: parentEnv.LANG || "C.UTF-8",
   };
@@ -623,6 +681,9 @@ const PERMISSION_MODES = new Set(["default", "acceptEdits", "plan", "bypassPermi
 // or fork argv. Per 通信牛 PR #299 BLOCKER #2.
 export function validateFlagValueDaemon(k: string, v: unknown): void {
   switch (k) {
+    case 'daemonProvider':
+      if (!validProviderInitialization(v)) throw new Error('flag_value_invalid:daemonProvider');
+      return;
     case "opencodeGeneration":
       if (v !== "v1" && v !== "v2") throw new Error(`flag_value_invalid:${k}:must be v1 or v2`);
       return;
@@ -657,6 +718,11 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
       if (typeof v !== "boolean") throw new Error(`flag_value_invalid:${k}:must be boolean`);
       return;
     default:
+      if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) {
+        const fail = validateCodexConfigFlag(k, v, null);
+        if (fail) throw new Error(`flag_value_invalid:${k}:${fail.reason}`);
+        return;
+      }
       throw new Error(`flag_key_unknown:${k}`);
   }
 }
@@ -691,6 +757,24 @@ export function validateOpenCodeCreateFlags(runtime: string, flags: Record<strin
   }
 }
 
+/** Mirrors Hub validateOpenCodeV2ProviderModel. Unsafe opt-in throws first. */
+export function validateOpenCodeV2ProviderModelDaemon(spec: Pick<DaemonNodeSpec, "runtime" | "model" | "flags">): void {
+  const flags = spec.flags || {};
+  if (spec.runtime !== "opencode-cli") return;
+  if (flags.opencodeGeneration !== "v2" || flags.opencodeUnsafeTools !== true) return;
+  const model = spec.model;
+  const native = typeof model === "string"
+    && model.length > 0
+    && model.length <= 100
+    && MODEL_RE.test(model)
+    && !MODEL_DOT_ONLY_SEGMENT.test(model)
+    && model.includes("/")
+    && model.indexOf("/") === model.lastIndexOf("/");
+  if (!native) {
+    throw new Error("opencode_v2_requires_provider_model:OpenCode V2 uses the installed OpenCode provider/model (exactly one slash). This API does not take an anet provider preset.");
+  }
+}
+
 /**
  * #584 —— 把 node_spec.flags 拆成「写进子节点 config 的那份」和「建节点时的开关」。
  *
@@ -703,19 +787,36 @@ export function validateOpenCodeCreateFlags(runtime: string, flags: Record<strin
 export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" | "flags">): {
   flags: Record<string, unknown>;
   codexCopresence?: true;
+  codexCopresenceFullAccess?: true;
   opencodeGeneration?: "v1" | "v2";
   opencodeMode?: "copresence";
 } {
   const flags: Record<string, unknown> = { ...(spec.flags || {}) };
+  delete flags.daemonProvider;
   validateOpenCodeCreateFlags(spec.runtime, flags);
+  for (const [k, v] of Object.entries(flags)) {
+    if (!CODEX_CONFIG_ONLY_FLAG_KEYS.has(k)) continue;
+    const fail = validateCodexConfigFlag(k, v, spec.runtime);
+    if (fail) throw new Error(`flag_value_invalid:${k}:${fail.reason}`);
+  }
   const generation = flags.opencodeGeneration;
   delete flags.opencodeGeneration;
   const wanted = flags.copresence === true;
   delete flags.copresence;
-  if (generation === "v1" || generation === "v2") {
-    return { flags, opencodeGeneration: generation, ...(generation === "v2" ? { opencodeMode: "copresence" as const } : {}) };
+  const fullAccessOpt = flags.copresenceFullAccess;
+  delete flags.copresenceFullAccess;
+  if (wanted && spec.runtime === "codex-app-server") {
+    applyCodexCopresenceFlagDefaults(flags);
   }
-  return wanted && spec.runtime === "codex-app-server" ? { flags, codexCopresence: true } : { flags };
+  const fullAccess = wanted && spec.runtime === "codex-app-server" && fullAccessOpt !== false;
+  const codexExtras = {
+    ...(wanted && spec.runtime === "codex-app-server" ? { codexCopresence: true as const } : {}),
+    ...(fullAccess ? { codexCopresenceFullAccess: true as const } : {}),
+  };
+  if (generation === "v1" || generation === "v2") {
+    return { flags, opencodeGeneration: generation, ...(generation === "v2" ? { opencodeMode: "copresence" as const } : {}), ...codexExtras };
+  }
+  return { flags, ...codexExtras };
 }
 
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
@@ -733,11 +834,23 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   if (spec.model !== undefined && spec.model !== null &&
       (spec.model.length === 0 || spec.model.length > 100 || !MODEL_RE.test(spec.model) || MODEL_DOT_ONLY_SEGMENT.test(spec.model))) throw new Error("model_invalid");
   if (Array.isArray(spec.channels) && spec.channels.length > 0) throw new Error("channels_not_supported_in_p1");
+  if (spec.flags?.daemonProvider !== undefined && (spec.runtime !== 'codex-app-server' || spec.flags.copresence !== true)) {
+    throw new Error('flag_not_applicable_to_runtime:daemonProvider');
+  }
+  if (spec.flags?.daemonProvider !== undefined && (!validProviderInitialization(spec.flags.daemonProvider)
+    || spec.model !== spec.flags.daemonProvider.model)) throw new Error('provider_create_model_mismatch');
   const args: string[] = ["node", "create", spec.name, "--runtime", spec.runtime];
   if (spec.model) args.push("--model", spec.model);
   validateOpenCodeCreateFlags(spec.runtime, spec.flags || {});
+  validateOpenCodeV2ProviderModelDaemon(spec);
   for (const [k, v] of Object.entries(spec.flags || {})) {
-    if (!["permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout", "copresence", "opencodeGeneration", "opencodeUnsafeTools"].includes(k)) {
+    const allowed = [
+      "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
+      "copresence", "opencodeGeneration", "opencodeUnsafeTools",
+      "daemonProvider",
+      ...CODEX_CONFIG_ONLY_FLAG_KEYS,
+    ];
+    if (!allowed.includes(k)) {
       throw new Error(`flag_key_unknown:${k}`);
     }
     // §4.2.2 daemon double-layer: defense in depth (per 通信牛 PR
@@ -752,6 +865,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
       if (v === true) args.push("--copresence");   // CLI 的布尔开关,不吃值
       continue;
     }
+    if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k) || k === 'daemonProvider') continue;
     args.push(`--${kebab(k)}`, String(v));
   }
   return args;
@@ -791,6 +905,7 @@ export interface CreateNodeDeps {
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   workDir: string;                     // §4.2.3 WORK_DIR enforced cwd
   hubUrl: string;                       // daemon propagates its hub to child via global config
+  providerScope?: { alias: string; networkId: string; daemonId: string };
   log: (msg: string) => void;
   warn: (msg: string) => void;
   serializeEnvLocal: (env: Record<string, string>) => string;
@@ -825,11 +940,14 @@ interface ListPendingCreateRequestsResult {
   ok?: boolean;
   error?: string;
   requests?: PendingCreateRequest[];
+  clone_requests?: PendingCreateRequest[];
 }
 
 export interface ReconcilePendingCreateRequestsDeps {
   callCommHub: (tool: string, args: Record<string, unknown>) => Promise<any>;
   handleCreateNodeDoorbell: (event: { request_id: string }) => Promise<void>;
+  /** Hub #938 — pending clone rows come back beside create rows. Absent on older hubs. */
+  handleCloneNodeDoorbell?: (event: { request_id: string }) => Promise<void>;
   recentlyHandledRequestIds?: Set<string>;
   log: (msg: string) => void;
   warn: (msg: string) => void;
@@ -858,6 +976,23 @@ export async function reconcilePendingCreateRequestsOnConnect(
       deps.warn(`[create-node] pending reconcile handler failed for ${requestId}: ${e?.message || e}`);
     }
   }
+  const clones = Array.isArray(res.clone_requests) ? res.clone_requests : [];
+  if (clones.length > 0 && !deps.handleCloneNodeDoorbell) {
+    deps.warn(`[clone-node] ${clones.length} pending clone request(s) not replayed (no clone handler)`);
+  }
+  for (const row of clones) {
+    const requestId = typeof row?.request_id === "string" ? row.request_id : "";
+    if (!requestId || !deps.handleCloneNodeDoorbell) continue;
+    if (deps.recentlyHandledRequestIds?.has(requestId)) continue;
+    deps.recentlyHandledRequestIds?.add(requestId);
+    try {
+      await deps.handleCloneNodeDoorbell({ request_id: requestId });
+      handled += 1;
+    } catch (e: any) {
+      deps.recentlyHandledRequestIds?.delete(requestId);
+      deps.warn(`[clone-node] pending reconcile handler failed for ${requestId}: ${e?.message || e}`);
+    }
+  }
   if (handled > 0) deps.log(`[create-node] pending reconcile handled ${handled} request(s)`);
 }
 
@@ -884,6 +1019,8 @@ interface GetCreateRequestResult {
   node_spec?: DaemonNodeSpec;
   child_token?: string;
   env_blob?: Record<string, string>;
+  clone?: { source_alias?: string };
+  network_id?: string;
 }
 
 /** #596 — a codex co-presence launcher (`anet node start` on a codexCopresence
@@ -907,6 +1044,12 @@ export async function handleCreateNodeDoorbell(
 ): Promise<void> {
   const { request_id } = event;
   const req: GetCreateRequestResult = await deps.callCommHub("get_create_request", { request_id });
+  if (req?.error === "clone_request") {
+    // A clone row must stay pending for handleCloneNodeDoorbell. Acking it
+    // failed here would revoke the new token.
+    deps.warn(`[create-node] ${request_id} is a clone request; not acking from the create handler`);
+    return;
+  }
   if (!req?.ok || !req.node_spec || !req.child_token) {
     deps.warn(`[create-node] get_create_request failed: ${req?.error || "unknown"}`);
     await deps.callCommHub("ack_create_request", {
@@ -936,6 +1079,10 @@ export async function handleCreateNodeDoorbell(
     }).catch(() => {});
     return;
   }
+  if (req.node_spec.flags?.daemonProvider && !deps.providerScope) {
+    await deps.callCommHub('ack_create_request', { request_id, status: 'rejected', error: 'provider_create_scope_unavailable' }).catch(() => {});
+    return;
+  }
 
   // #648 — missing_cli 在写 config 和 spawn 之前拒绝。判据与就绪自检同一函数,
   // PATH 与下面的 spawn 都来自 minimalEnv()。超时(unknown)不在这里拒绝。
@@ -952,6 +1099,19 @@ export async function handleCreateNodeDoorbell(
     deps.warn(`[create-node] ${error}`);
     await deps.callCommHub("ack_create_request", {
       request_id, status: "rejected", error: error.slice(0, 800),
+    }).catch(() => {});
+    return;
+  }
+  // Explicit v1/v2 must match an accepted install of that generation.
+  // Omitted generation stays legacy V1. Timeout (cli=unknown) does not reject.
+  const generationMismatch = opencodeExplicitGenerationMismatch(
+    req.node_spec.flags?.opencodeGeneration,
+    cliStatus,
+  );
+  if (generationMismatch) {
+    deps.warn(`[create-node] ${generationMismatch}`);
+    await deps.callCommHub("ack_create_request", {
+      request_id, status: "rejected", error: generationMismatch.slice(0, 800),
     }).catch(() => {});
     return;
   }
@@ -1008,6 +1168,47 @@ export async function handleCreateNodeDoorbell(
   try { ensureGlobalAnetConfig(resolveChildHome(process.env, process.platform), deps.hubUrl); }
   catch (e: any) { deps.warn(`[create-node] global config write failed (continuing): ${e?.message || e}`); }
 
+  // V2 co-presence must use the OpenCode model and provider already configured
+  // on this machine. #2567's format gate (exactly one slash) already ran in
+  // buildAnetArgsDaemon and rejects a missing or malformed model before this
+  // check. A present model that does not match the machine config is rejected
+  // here, before the node config is written. It is not replaced with a preset.
+  let alignedOpenCode: OpenCodeConfiguredSelection | undefined;
+  const openCodeV2Create = req.node_spec.runtime === "opencode-cli"
+    && req.node_spec.flags?.opencodeGeneration === "v2"
+    && req.node_spec.flags?.opencodeUnsafeTools === true;
+  if (openCodeV2Create) {
+    try {
+      const homeDir = resolveChildHome(process.env, process.platform);
+      alignedOpenCode = readOpenCodeConfiguredSelection({
+        projectDir: childWorkDir,
+        homeDir,
+        xdgConfigHome: process.env.XDG_CONFIG_HOME,
+      });
+      const requested = typeof req.node_spec.model === "string" && req.node_spec.model.trim()
+        ? req.node_spec.model.trim()
+        : undefined;
+      assertOpenCodeV2RequestedModel(alignedOpenCode, requested);
+      const blob = req.env_blob ?? {};
+      for (const name of alignedOpenCode.credentialEnv) {
+        if (typeof blob[name] !== "string" || blob[name].length === 0) {
+          throw new OpenCodeV2AlignError(
+            "opencode_v2_provider_credential_missing",
+            `OpenCode provider ${JSON.stringify(alignedOpenCode.providerId)} requires ${name}, which was not in the create env. The value is not printed.`,
+          );
+        }
+      }
+      deps.log(`[create-node] OpenCode V2 model ${alignedOpenCode.model} matches this machine's OpenCode config`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.warn(`[create-node] ${message}`);
+      await deps.callCommHub("ack_create_request", {
+        request_id, status: "rejected", error: `validate: ${message}`.slice(0, 800),
+      }).catch(() => {});
+      return;
+    }
+  }
+
   // Step 1 — write child config.json directly.
   //
   // P1 simplification: we bypass `anet node create` (which requires a
@@ -1046,7 +1247,13 @@ export async function handleCreateNodeDoorbell(
   }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
-  const { flags: flagsObj, codexCopresence, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  // #1027 — opencode-cli 缺省写 opencodeGeneration=v1,否则 anet node start 因
+  // 「OpenCode runtime binding is missing」拒绝启动并在 5s 内退出 → daemon 记 ESRCH →
+  // hub 撤 token → 之后所有调用 401。hub 的 get_create_request 现在也返回 network_id。
+  const { flags: flagsObj, codexCopresence, codexCopresenceFullAccess, opencodeGeneration: rawGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  const opencodeGeneration = req.node_spec.runtime === "opencode-cli"
+    ? (rawGeneration ?? "v1")
+    : rawGeneration;
   const opencodeCopresence = req.node_spec.runtime === "opencode-cli"
     && opencodeGeneration === "v2" && opencodeMode === "copresence";
   // Best-effort: also derive `permissionMode` etc into a `flags` block
@@ -1058,18 +1265,41 @@ export async function handleCreateNodeDoorbell(
       node_name: req.node_spec.name,
       alias: req.node_spec.name,
       runtime: req.node_spec.runtime,
-      ...(req.node_spec.model ? { model: req.node_spec.model } : {}),
+      ...(req.network_id ? { network_id: req.network_id } : {}),
+      ...(alignedOpenCode
+        ? { model: alignedOpenCode.model }
+        : req.node_spec.model ? { model: req.node_spec.model } : {}),
+      ...(alignedOpenCode && alignedOpenCode.credentialEnv.length
+        ? { env: Object.fromEntries(alignedOpenCode.credentialEnv.map((name) => [name, { _envRef: name }])) }
+        : {}),
       hub: deps.hubUrl,
       token: req.child_token,
       ...(Object.keys(flagsObj).length ? { flags: flagsObj } : {}),
       ...(codexCopresence ? { codexCopresence } : {}),
+      ...(codexCopresenceFullAccess ? { codexCopresenceFullAccess } : {}),
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
     };
-    if (req.node_spec.runtime === "opencode-cli") {
+    let initializedReplay = false;
+    if (req.node_spec.flags?.daemonProvider) {
+      try { initializedReplay = JSON.parse(readFileSync(childCfgPath, 'utf8')).daemonProviderCreation?.request_id === request_id; } catch { /* new child */ }
+    }
+    if (initializedReplay) {
+      // Preserve an already initialized child on a lost create ACK; the initializer
+      // checks the exact request/model before permitting any subsequent launch.
+    } else if (req.node_spec.runtime === "opencode-cli") {
       writeCreatedOpencodeProfile(childDir, childCfg);
+      if (alignedOpenCode) replaceOpencodeConfigJson(childDir, renderOpenCodeV2AlignedConfig(alignedOpenCode));
     } else {
       atomicWriteJson(childCfgPath, childCfg);
+    }
+    if (!initializedReplay && codexCopresence && req.node_spec.runtime === "codex-app-server") {
+      try {
+        writeCopresenceYoloToCodexHome(join(childDir, "codex-home"));
+        deps.log(`[create-node] seeded co-presence yolo config.toml under ${childDir}`);
+      } catch (e: any) {
+        deps.warn(`[create-node] codex-home yolo seed failed: ${e?.message || e}`);
+      }
     }
     deps.log(`[create-node] wrote child config: ${childCfgPath}`);
   } catch (e: any) {
@@ -1098,6 +1328,30 @@ export async function handleCreateNodeDoorbell(
       deps.warn(`[create-node] secrets.env write failed: ${e?.message || e}`);
       // not fatal — proceed to start; hub will see status=succeeded but
       // child might fail on first vendor call. Acceptable for P1.
+    }
+  }
+
+  if (req.node_spec.flags?.daemonProvider) {
+    try {
+      const input = JSON.stringify({ request_id, alias: req.node_spec.name, network_id: deps.providerScope!.networkId,
+        daemon_node_id: deps.providerScope!.daemonId, selection: req.node_spec.flags.daemonProvider });
+      const raw = await new Promise<string>((resolve, reject) => {
+        const child = execFile(process.execPath, [anetBin, 'daemon', 'provider', 'initialize', deps.providerScope!.alias],
+          { cwd: deps.workDir, env: minimalEnv(), timeout: STEP_TIMEOUT_MS, maxBuffer: 64 * 1024, encoding: 'utf8', windowsHide: true },
+          (error, stdout) => error ? reject(new Error('provider_initialization_unavailable')) : resolve(stdout));
+        child.stdin?.on('error', () => reject(new Error('provider_initialization_unavailable')));
+        child.stdin?.end(input);
+      });
+      const result = JSON.parse(raw), receipt = result.initialization, wanted = req.node_spec.flags.daemonProvider;
+      if (!validProviderInitialization(wanted) || result.ok !== true || receipt?.status !== 'initialized' || receipt.request_id !== request_id
+        || receipt.node_id !== `node_${request_id.slice(3)}` || receipt.provider_revision !== wanted.revision
+        || receipt.provider_id !== wanted.provider_id || receipt.auth_id !== wanted.auth_id || receipt.model !== wanted.model
+        || receipt.verification !== 'configuration_only') throw new Error('provider_initialization_unconfirmed');
+    } catch {
+      // Initialization failure is terminal BEFORE spawn: never launch with a
+      // default login or a silently omitted provider selection.
+      await deps.callCommHub('ack_create_request', { request_id, status: 'failed', error: 'provider_initialization_unconfirmed' }).catch(() => {});
+      return;
     }
   }
 

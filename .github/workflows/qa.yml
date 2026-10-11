@@ -12,6 +12,7 @@ name: anet QA (v0)
 on:
   pull_request:
     paths:
+      - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
       - 'scripts/check-doc-claims.py'
@@ -222,6 +223,12 @@ on:
       - 'tests/test827-opencode-v2-hub/**'
       - 'tests/test828-opencode-v2-mcp/**'
       - 'tests/test829-opencode-create/**'
+      - 'tests/test906-daemon-catalog/**'
+      - 'tests/test906-daemon-provider-management/**'
+      - 'tests/test906-provider-collect/**'
+      - 'tests/test906-provider-create/**'
+      - 'tests/test907-hub-provider/**'
+      - 'tests/test906-hub-upgrade-preflight/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test894-launch-window/**'
@@ -255,6 +262,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
       - 'scripts/check-doc-claims.py'
@@ -451,6 +459,12 @@ on:
       - 'tests/test827-opencode-v2-hub/**'
       - 'tests/test828-opencode-v2-mcp/**'
       - 'tests/test829-opencode-create/**'
+      - 'tests/test906-daemon-catalog/**'
+      - 'tests/test906-daemon-provider-management/**'
+      - 'tests/test906-provider-collect/**'
+      - 'tests/test906-provider-create/**'
+      - 'tests/test907-hub-provider/**'
+      - 'tests/test906-hub-upgrade-preflight/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test894-launch-window/**'
@@ -2048,6 +2062,7 @@ jobs:
           - test829-opencode-create
           - test894-launch-window
           - test894-v1-runtime
+          - test906-daemon-catalog
           - test832-opencode-v2-registry
           - test828-opencode-v2-policy
           - test833-user-avatar

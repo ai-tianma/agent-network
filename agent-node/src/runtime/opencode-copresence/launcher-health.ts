@@ -77,10 +77,26 @@ export function validateLaunchHealth(
     const bridgeArgs = probe.argv(record.bridge.pid);
     if (!bridgeArgs.some((v, i) => v === "--config" && bridgeArgs[i + 1] === configPath)) throw new Error("bridge config mismatch");
     const tuiArgs = probe.argv(attach.pid);
-    if (!tuiArgs.some((v, i) => v === "--session" && tuiArgs[i + 1] === record.generation)) throw new Error("TUI session mismatch");
+    if (classifyTuiArgv(tuiArgs, record.generation) !== "match") throw new Error("TUI session mismatch");
     return { ok: true, bridgePid: record.bridge.pid };
   } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : "health unavailable" }; }
 }
+/** `--session <id>` is two argv elements after exec. The attach shell publishes
+ * its pid before that exec, so a missing flag is the pre-exec window, not a
+ * different generation. An equals-form flag is not this contract. */
+export function classifyTuiArgv(args: string[], generation: string): "match" | "pre_exec" | "wrong_session" {
+  if (!Array.isArray(args)) return "pre_exec";
+  let sawSession = false;
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i] ?? "";
+    if (token === "--session") {
+      sawSession = true;
+      if (args[i + 1] === generation) return "match";
+    } else if (token.startsWith("--session=")) sawSession = true;
+  }
+  return sawSession ? "wrong_session" : "pre_exec";
+}
+
 export function inspectLaunchHealth(dir: string, configPath: string, launchedAt: number) {
   if (process.platform !== "linux") return { ok: false as const, reason: "daemon V2 launch health requires Linux process identity" };
   try {
@@ -91,7 +107,7 @@ export function inspectLaunchHealth(dir: string, configPath: string, launchedAt:
 
 /** The attach shell publishes its PID before exec. A zero-exit launcher can
  * therefore precede matching TUI argv. Recheck the SAME full guard only within
- * the caller's existing deadline; missing/foreign identities never pass. */
+ * the caller's existing deadline; missing or foreign identities never pass. */
 export async function waitForLaunchHealth(
   dir: string, configPath: string, launchedAt: number, deadline: number,
   deps: {
@@ -105,9 +121,9 @@ export async function waitForLaunchHealth(
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   let health = inspect(dir, configPath, launchedAt);
   while (!health.ok && now() < deadline) {
-    await sleep(Math.min(50, deadline - now()));
-    if (now() >= deadline) break;
+    await sleep(Math.min(50, Math.max(0, deadline - now())));
     health = inspect(dir, configPath, launchedAt);
+    if (now() >= deadline) break;
   }
   return health;
 }

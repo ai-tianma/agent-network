@@ -1,16 +1,19 @@
 # OpenCode TUI 共存运行手册
 
-## OpenCode V2 远程创建接口（#829 开发中）
+用户向导（anet.sh，中英）在 `docs-site/docs/guide/opencode.md`。本手册保留操作边界和尚未验收的部分，不把向导里的创建命令再抄成第二套。
+
+## 本地创建、远程切片、目录读取，三件不同的事
+
+**本地 CLI 创建是当前操作入口。** `anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools` 会写下 `opencodeGeneration: "v2"`、`opencodeMode: "copresence"`、`flags.opencodeUnsafeTools: true`。不带 `--opencode-unsafe-tools` 时创建和启动都拒绝。不带 `--opencode-generation` 仍是 V1。这条路径随 preview 线发布（自 `agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107`）。2026-10-11 量到 npm `preview` = `2.3.0-preview.162`、`latest` = `2.3.0-preview.76`；`.76` 没有这条标志。dist-tag 会动，以 `anet -v` 为准。成熟度仍是 preview：没有 V2 安全预设。
+
+**Hub/daemon 的 flag 切片已经在仓库里，但不是桌面客户端入口，也不是完整生命周期验收**（#829 / #539 仍开着）。字段必须在 `node_spec.flags`。下面几段写的是这层代码拒绝什么、落盘什么。Hub 首次注册的 `succeeded` 或启动器退出 0 单独都不算健康。
+
+**目录读取（#2574）是第三件。** `agent-node/src/runtime/opencode-v2-catalog.ts` 的 `readOpenCodeCatalog` 只读调用方已经持有的 loopback V2 server（`/api/provider`、`/api/model`、`/api/model/default`）。快照 `invocationVerified` 恒为 false，`completeness` 为 `unknown`。它还没接到 daemon 派发、Hub 授权、心跳或客户端选模型，也不是用户命令，并且不在上面的已发布 preview 包里。创建节点仍然复制本机 `opencode.json`，不调用这个读取器。详见 [opencode-v2-registry-readiness.md](opencode-v2-registry-readiness.md) 的目录一节。
 
 daemon 发现 `opencode --version` 为 V2 时，通用 runtime-readiness 只报告
 `unknown`（CLI 已发现，provider/auth 尚未确认），不把 V1 的 opencode.ai HEAD
 结果当成所有 V2 provider 的结论。本地/局域网 provider 不依赖该站点；反之，
-站点可达也不证明选定模型可用。客户端显示未检测仍允许配置，创建/启动时的
-精确包身份、显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、
-其他 runtime 的认证/网络判据不因此放宽。这里的版本字符串不是可信包身份。
-
-以下是 Hub/daemon 参数与落盘切片，**不是已经上线的客户端入口或真实 V2
-生命周期验收**。现有 CLI、原生 V2 权限、客户端界面和正式发布仍各有门禁。
+站点可达也不证明选定模型可用。客户端显示未检测仍允许配置。显式 `opencodeGeneration` 为 `v1` 或 `v2` 时，daemon 在写子节点配置之前拒绝与该代际已接受版本不符的安装（`opencode_generation_mismatch`；V2 接受 `@opencode/cli@2.0.22`）。省略代际仍是 V1，不因 PATH 上是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。V2 还要求 `model` 为 OpenCode 自己的 `provider/model`（恰好一个斜杠，`opencode_v2_requires_provider_model`）；本接口不套用 anet provider 预设。就绪结果对 `opencode-cli` 可带 `generation` 与 `accepted`，V2 的 `state` 仍是 `unknown`。配置快照 `flags` 回显代际、模式和 unsafe 同意，只读，不能用 `update_node_config` 修改。显式 unsafe-tools 授权和启动证据校验不变。V1 网络失败、缺 CLI、其他 runtime 的认证/网络判据不因此放宽。`--version` 文本不是包文件身份。
 
 新接口沿用 runtime `opencode-cli`，在 `node_spec.flags` 里显式传
 `opencodeGeneration: "v2"` 和 `opencodeUnsafeTools: true`。
@@ -33,7 +36,15 @@ Linux 候选实现会在原生 V2 就绪后写节点目录内的
 `opencode-launch-health.json`（0600，无凭据）。daemon 接受正常退出的
 共存启动器前，核对本轮写入时间、bridge/serve/TUI 的 PID 与启动 ticks、
 serve 父进程、bridge 的精确配置路径及 TUI session；旧记录、PID 复用、
-死进程或非零退出不放行。运行代际关闭/serve 退出时清理自己的记录。
+死进程或非零退出不放行。attach 脚本在 `exec` 之前就用自己的 PID 写下
+`opencode-attach.json`，所以启动器退出 0 的瞬间 `/proc` 里可能还是 shell，
+没有 `--session <generation>` 这两个参数。这个窗口的判据仍是
+`TUI session mismatch`，它不是另一条 session。创建和远程 start/restart
+只在原有截止时间（默认 35 秒，从本次启动起算，不是退出后再加一段）内
+重复同一套检查，等到 exec 之后的 argv；错 session、复用 PID、非零退出
+不会因为等到超时而通过。远程 start 若最终仍是这条 mismatch，回执错误码是
+`opencode_tui_session_mismatch`，生命周期读接口原样返回该码；带路径的
+daemon 原文仍然折叠成 `lifecycle_error`。运行代际关闭/serve 退出时清理自己的记录。
 此文件是可重建的运行证据，不是需要从备份恢复的数据，不能复制旧记录
 冒充就绪。Linux daemon 创建和远程 start 完成判定使用此证据路径，其他平台未验收。
 不要把 Hub 首次注册的 `succeeded` 或 launcher 的退出 0 单独当作健康；
@@ -99,23 +110,23 @@ V2 应安装在独立、所有者可信且不可组写的前缀，再让启动�
 不要通过覆盖生产全局 V1 来试用 V2。切回 V1 使用独立 V1 节点和对应 PATH；
 V2 session 没有承诺可降级为 V1 session。
 
-V2 创建命令（仅用于可信工作区和可信任务，先理解工具权限风险）：
+V2 创建命令（仅用于可信工作区和可信任务，先理解工具权限风险）。
+
+模型和 Provider 必须已经写在这台机器的 OpenCode 配置里（全局 `~/.config/opencode/opencode.json`，或项目 `opencode.json` / `.opencode/opencode.json`，后写的覆盖先写的；`.opencode` 覆盖同目录的直接文件）。`model` 是 OpenCode 自己的 `provider/model` 字符串。有对应的 `providers.<id>` 时，创建会把这一条原样复制进节点，不另造一套 provider 结构。`--model` 或 `--provider` 与这份配置不一致时，创建拒绝并写出请求值和本机值。没有配置 `model` 时同样拒绝，不会退回 anthropic 或预设默认模型。
 
 ```bash
 anet node create opencode-v2 \
   --runtime opencode-cli \
   --opencode-generation v2 \
   --opencode-unsafe-tools \
-  --model '<provider>/<model>'
+  --model '<与本机 OpenCode 相同的 provider/model>'
 anet node start opencode-v2 --copresence
 tmux attach -t '=opencode-v2'
 anet node stop opencode-v2
 ```
 
 V2 忽略 V1 的 `OPENCODE_PERMISSION` 等环境开关。没有显式 opt-in 时应看到
-拒绝提示，而不是删除校验或把安全模式改成宽松模式。原生 V2 安全策略、
-daemon/API/客户端 V2 创建入口与模型主动调用 CommHub 工具的完整验收，
-仍由 Hub #539 / GitHub #2544 跟踪；这里的 CLI 示例不代表这些入口已支持。
+拒绝提示，而不是删除校验或把安全模式改成宽松模式。上面的 CLI 是本地创建路径，不代表桌面客户端、目录选模型或「模型主动调用 CommHub 工具」已经验收。原生 V2 安全策略、客户端 V2 创建入口和模型主动调用工具的完整验收仍由 Hub #539 / GitHub #2544 跟踪。
 
 V2 使用 `opencode --server <url> --session <id>`，不是 V1 的 `attach`。
 网络任务经 `/api/session/:id/prompt`、`delivery=queue` 提交，在消息历史中

@@ -194,6 +194,7 @@ import {
   type ConfigUpdate,
   type ConfigPatch,
 } from "./runtime/config-apply";
+import { attachAdoptionCandidates, heartbeatAdoptionCandidates } from "./runtime/adopt-candidates.js";
 import {
   evaluateCreateCapability,
   type CreateCapabilityLogState,
@@ -339,16 +340,23 @@ if (argv.length === 1 && argv[0] === "--print-entrypoint") {
 }
 
 let PKG_VERSION = "2.1.0";
-try {
-  // Try relative to the script location (works for both dev and npm install)
-  const scriptDir = new URL(".", import.meta.url).pathname;
-  for (const rel of ["../package.json", "../../package.json"]) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
-      if (pkg.version) { PKG_VERSION = pkg.version; break; }
-    } catch {}
-  }
-} catch {}
+// Set only by the standalone `anet` binary before it imports this entry.
+// npm/node leaves it unset and keeps the package.json walk below.
+const embeddedAgentNodeVersion = process.env.ANET_EMBEDDED_AGENT_NODE_VERSION?.trim() ?? "";
+if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(embeddedAgentNodeVersion)) {
+  PKG_VERSION = embeddedAgentNodeVersion;
+} else {
+  try {
+    // Try relative to the script location (works for both dev and npm install)
+    const scriptDir = new URL(".", import.meta.url).pathname;
+    for (const rel of ["../package.json", "../../package.json"]) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(scriptDir, rel), "utf-8"));
+        if (pkg.version) { PKG_VERSION = pkg.version; break; }
+      } catch {}
+    }
+  } catch {}
+}
 
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--version" || argv[i] === "-v") {
@@ -1318,6 +1326,7 @@ import { installProcessSurvivalLog } from "./process-survival-log";
 //    这条不是假设 —— test631 / test646 就是这么红的（它们当时都不在 CI 里，所以没人看见）。
 import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
+import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runtime/codex-reasoning-effort.js";
 import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
@@ -1834,10 +1843,10 @@ const reportStatus = async (rawStatus: string, rawTask?: string) => {
     ...(reportedNodeHealth() ? { health: reportedNodeHealth() } : {}),
     config_snapshot: configApplyDraining ? undefined : {
       // #622 —— daemon 的逐 runtime 自检结果(后台每 10 分钟一轮,这里只读缓存,不阻塞心跳)。
-      ...attachCodexForkCapability(attachRuntimeReadiness(
+      ...attachAdoptionCandidates(attachCodexForkCapability(attachRuntimeReadiness(
         buildConfigSnapshot(fileConfig, process.env.ANET_CONFIG_UPDATE_CAPABLE === "1", currentConfigRevision, daemonCreateCapability()),
         runtimeReadinessMonitor?.current(),
-      ), codexForkCapabilityMonitor?.current()),
+      ), codexForkCapabilityMonitor?.current()), heartbeatAdoptionCandidates(fileConfig, COMMHUB_URL, NETWORK_ID)),
       ...(sideThreadCapabilitySnapshot ? { side_thread_capability: sideThreadCapabilitySnapshot } : {}),
       // #1958 — informational; the hub's RFC-024 content-match reads
       // snapshot.model (still the configured value) field-by-field, so extra
@@ -2533,6 +2542,9 @@ async function ensureCodexAppServerSession(): Promise<
       onDeferredCandidate: (threadId) => writebackCodexPendingThread(threadId, codexAppServerUrl ?? ""),
       approvalPolicy: (fileConfig.flags as { approvalPolicy?: string } | undefined)?.approvalPolicy,
       sandboxMode: (fileConfig.flags as { sandboxMode?: string } | undefined)?.sandboxMode,
+      reasoningEffort: isReasoningEffortValue((fileConfig.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort)
+        ? String((fileConfig.flags as { modelReasoningEffort: string }).modelReasoningEffort)
+        : undefined,
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN || undefined,
       codexHome: NODE_CODEX_HOME,
@@ -4106,6 +4118,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
       commhubToken: AUTH_TOKEN,
       commhubAlias: ALIAS,
+      providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
       onSession: async (id) => {
         opencodeSessionId = id;
         writebackSession(id);
@@ -6918,7 +6931,7 @@ async function processConfigUpdate(): Promise<void> {
     }
 
     // Defense-in-depth local validation (hub validator drift guard).
-    const localFail = validateLocalPatch(update.patch);
+    const localFail = validateLocalPatch(update.patch, { runtime: fileConfig?.runtime });
     if (localFail) {
       warn(`[config-apply] local validate rejected ${updateId}: ${localFail.field}=${localFail.reason}`);
       await callCommHub("ack_config_update", {
@@ -6950,6 +6963,15 @@ async function processConfigUpdate(): Promise<void> {
     const merged = mergePatch(fileConfig, update.patch);
     if (RUNTIME === "opencode") writeOpencodeConfig(configFilePath, merged);
     else atomicWriteJson(configFilePath, merged);
+    const effort = (update.patch.flags as { modelReasoningEffort?: unknown } | undefined)?.modelReasoningEffort;
+    if (effort !== undefined && merged.runtime === "codex-app-server" && configFilePath) {
+      const nodeDir = dirname(configFilePath);
+      const { codexHome } = resolveNodeCodexHome({ nodeDir, config: merged, exists: existsSync });
+      if (isReasoningEffortValue(effort)) {
+        applyReasoningEffortToCodexHome(codexHome, effort);
+        log(`[config-apply] wrote ${join(codexHome, "config.toml")} (model_reasoning_effort)`);
+      }
+    }
     log(`[config-apply] wrote ${configFilePath} (.prev backedUp=${backup.backedUp})`);
 
     if (mode === "hot") {
@@ -7116,18 +7138,33 @@ async function connectSSE() {
               processRulesFileRequests(rulesFileDeps())
                 .catch((e: any) => warn(`[rules-file] connect catch-up failed: ${e?.message || e}`));
               if (fileConfig.role === "host_supervisor") {
+                import("./runtime/daemon-provider-snapshot.js").then(({ reconcileProviderSnapshots }) => reconcileProviderSnapshots({
+                  callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
+                  warn: (m: string) => warn(m),
+                })).catch(() => warn("[daemon-provider] readback module unavailable"));
                 import("./runtime/create-node-daemon.js").then(({ handleCreateNodeDoorbell, reconcilePendingCreateRequestsOnConnect, serializeEnvLocalDaemon }) => {
                   reconcilePendingCreateRequestsOnConnect({
                     callCommHub,
                     recentlyHandledRequestIds: recentlyHandledCreateRequestIds,
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
+                    handleCloneNodeDoorbell: (event: { request_id: string }) => import("./runtime/clone-node.js").then(({ handleCloneNodeDoorbell }) => handleCloneNodeDoorbell(event, {
+                      callCommHub,
+                      workDir: process.cwd(),
+                      hubUrl: COMMHUB_URL,
+                      log: (m: string) => log(m),
+                      warn: (m: string) => warn(m),
+                      serializeEnvLocal: serializeEnvLocalDaemon,
+                      allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                        ? fileConfig.allowed_runtimes : null,
+                    })),
                     handleCreateNodeDoorbell: (event: { request_id: string }) => handleCreateNodeDoorbell(
                       event,
                       {
                         callCommHub,
                         workDir: process.cwd(),
                         hubUrl: COMMHUB_URL,
+                        providerScope: { alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID },
                         log: (m: string) => log(m),
                         warn: (m: string) => warn(m),
                         serializeEnvLocal: serializeEnvLocalDaemon,
@@ -7250,6 +7287,7 @@ async function connectSSE() {
                     callCommHub,
                     workDir: process.cwd(),
                     hubUrl: COMMHUB_URL,
+                    providerScope: { alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID },
                     log: (m: string) => log(m),
                     warn: (m: string) => warn(m),
                     serializeEnvLocal: serializeEnvLocalDaemon,
@@ -7266,6 +7304,35 @@ async function connectSSE() {
               }).catch((e: any) => {
                 recentlyHandledCreateRequestIds.delete(requestId);
                 warn(`create-node-daemon import failed: ${e?.message || e}`);
+              });
+            }
+            // Hub #938 — same daemon, new node. Shares the create dedupe set
+            // so a reconnect reconcile does not spawn the clone twice.
+            if (ev.type === "clone_node" && fileConfig.role === "host_supervisor") {
+              const requestId = typeof ev.request_id === "string" ? ev.request_id : "";
+              if (!requestId || recentlyHandledCreateRequestIds.has(requestId)) continue;
+              recentlyHandledCreateRequestIds.add(requestId);
+              log(`← SSE clone_node ${requestId}`);
+              Promise.all([
+                import("./runtime/clone-node.js"),
+                import("./runtime/create-node-daemon.js"),
+              ]).then(([{ handleCloneNodeDoorbell }, { serializeEnvLocalDaemon }]) => {
+                return handleCloneNodeDoorbell(
+                  { request_id: requestId },
+                  {
+                    callCommHub,
+                    workDir: process.cwd(),
+                    hubUrl: COMMHUB_URL,
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                    serializeEnvLocal: serializeEnvLocalDaemon,
+                    allowedRuntimes: Array.isArray(fileConfig.allowed_runtimes)
+                      ? fileConfig.allowed_runtimes : null,
+                  },
+                );
+              }).catch((e: any) => {
+                recentlyHandledCreateRequestIds.delete(requestId);
+                warn(`clone-node failed: ${e?.message || e}`);
               });
             }
             // RFC-027 §2.4 — stop/delete doorbell. host_supervisor daemons
@@ -7318,6 +7385,12 @@ async function connectSSE() {
               }
             }
             // RFC-028 P1 — provider probe daemon doorbell (host_supervisor only).
+            if (ev.type === "daemon_provider_snapshot" && fileConfig.role === "host_supervisor") {
+              import("./runtime/daemon-provider-snapshot.js").then(({ reconcileProviderSnapshots }) => reconcileProviderSnapshots({
+                callCommHub, workDir: process.cwd(), alias: ALIAS, networkId: NETWORK_ID, daemonId: NODE_ID, serverUrl: COMMHUB_URL,
+                warn: (m: string) => warn(m),
+              })).catch(() => warn("[daemon-provider] readback module unavailable"));
+            }
             if (ev.type === "probe_provider" && fileConfig.role === "host_supervisor") {
               log(`← SSE probe_provider ${ev.probe_id || ""}`);
               import("./runtime/probe-daemon.js").then(({ handleProbeDoorbell }) => {
@@ -7330,6 +7403,20 @@ async function connectSSE() {
                   },
                 ).catch((e: any) => warn(`probe-daemon failed: ${e?.message || e}`));
               }).catch((e: any) => warn(`probe-daemon import failed: ${e?.message || e}`));
+            }
+            if (ev.type === "opencode_catalog" && fileConfig.role === "host_supervisor") {
+              log(`← SSE opencode_catalog ${ev.request_id || ""}`);
+              import("./runtime/opencode-catalog-dispatch.js").then(({ handleOpenCodeCatalogDoorbell }) => {
+                handleOpenCodeCatalogDoorbell(
+                  { request_id: ev.request_id },
+                  {
+                    callCommHub,
+                    daemonWorkDir: process.cwd(),
+                    log: (m: string) => log(m),
+                    warn: (m: string) => warn(m),
+                  },
+                ).catch((e: any) => warn(`opencode-catalog failed: ${e?.message || e}`));
+              }).catch((e: any) => warn(`opencode-catalog import failed: ${e?.message || e}`));
             }
           } catch {}
         }
@@ -7897,6 +7984,7 @@ const shutdown = async () => {
   sideThreadOwnedSession?.client.close();
   sideThreadOwnedSession?.proc?.kill("SIGTERM");
   log("shutting down...");
+  await import('./runtime/daemon-provider-login.js').then(m => m.closeProviderLogins()).catch(() => {});
   await closeOpencodeRuntime("signal shutdown");
   await grokCopresenceRuntimeSession?.close().catch((e: any) => {
     warn(`[grok-copresence] close failed: ${e?.message || e}`);
