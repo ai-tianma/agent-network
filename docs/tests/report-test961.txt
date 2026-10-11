@@ -1,7 +1,7 @@
 Hub #961 / agent-network#2587 — download page core slice
 OBSERVED_AT: 2026-10-11T20:16Z (2026-10-12 04:16+08)
 Base main: ba492094ee837281e0a9092ef1b2f5df668ee3e3
-Status: TEST-ONLY candidate; no website deployment or new app release yet.
+Initial status at 04:16+08: TEST-ONLY candidate; deployment receipt follows below.
 
 Scope
 - Current-platform recommendation without automatic download; explicit architecture.
@@ -46,3 +46,35 @@ Recovery / deployment
 - Rollback uses the previous Vercel production deployment per the existing SOP.
 - The page has no persistent data; packages/channels remain release-managed.
 - No claim of native window acceptance, account/OAuth proof or disaster rehearsal.
+
+Formal main deployment and live acceptance — 2026-10-12 04:26+08
+- PR2629 head: 3beea8657d11222f8e4c7adcedccf32491dd7b6c.
+- CI actually tested merge: 63237854c002b497e7f3091b5c719980395403e1.
+- download-platforms-docker job114564900519 / run38171506933 SUCCESS:
+  catalog checks, full VitePress build and 6/6 browser cases.
+- docs-site-build job114564900427 SUCCESS; all 10 actual required checks PASS.
+- Normal SHA-locked merge (no admin bypass) at 2026-10-11T20:22:39Z:
+  main d9b218fb498510fec24dc34576e7baa56d42170a.
+- Existing deploy-anet-sh run38171952174 / job114566214382 SUCCESS.
+  Actual checkout full SHA = d9b218fb498510fec24dc34576e7baa56d42170a.
+  20:24:56Z: actual "Using prebuilt build artifacts from .vercel/output".
+  20:25:03Z: actual content drift sampling PASS; token guard did not skip deploy.
+  Source was rechecked as an ancestor of current origin/main before acceptance.
+  No PR build artifact reused as a formal website build.
+- Anonymous Docker live audit at 20:25:41Z, network enabled only for public reads:
+  https://www.anet.sh/api/desktop-downloads HTTP200, desktop=0.2.245,
+  Android=0.2.245 from android-channel; ARM64/x64/universal architectures.
+  Chromium actual public /download (zh, Android UA, 390px) and /en/download
+  (en, Windows UA, 1280px): 2/2 PASS, no response fixtures or authentication.
+  Checks: actual recommendation, Android checksum link, no invented GitHub APK,
+  separate CLI installation, no horizontal overflow. No installation or login.
+- Both actual page screenshots personally inspected. Local ephemeral evidence:
+  zh.png SHA256 3b7df4440fe3558e35b16ccbd3432cd3b1745e62885a3870bfe15a83b97820d2
+  en.png SHA256 df8b83e9bae2940ffb0311f01d67416a222ee282ac503dff363c9a44ffdad4e9
+  Screenshots are supporting layout evidence, not deployment/recovery authority.
+- Live audit container exited0 and removed (--rm --init); no host secrets mounted.
+- Original Hub #961 marked done3/3 at 20:26:26Z, ahead of the 04:45+08 target.
+- Broad optional PR QA remained non-terminal, zero observed failures at acceptance;
+  it is not called fully green. Main CI evidence is independent of the PR results.
+- No new client version/npm publish, account action, business-node restart or data
+  migration. Existing native/account/entitlement acceptance remains separate.
