@@ -302,6 +302,35 @@ Hub，保留数据库与已分发状态。生产数据库、原 vault 密钥和�
 只能从管理员的加密备份或重新认证恢复，不包含在 Git；保险库记录名
 未覆盖这一缺口继续保留，不宣称已完成空机恢复演练。
 
+### #1027 `.126` 部署准备（已发布、尚未激活）
+
+本次配置选择 `runtime-v109-preview126`，原 `.125` 的
+`runtime-v108-preview125` 与原入口保留为回滚目标。正式软件来自 main
+`42fcf114a77b7862c55ec32328923eced9b43f22`；发布运行 `38165547126`
+的四道门、npm 发布与 registry 核实均 SUCCESS。匿名 Docker 下载的
+正式 tarball 与该运行的 gated-tarball 内层包字节相同：1230017 字节，
+SHA256 `9ab55f1ff33c1802749ee647998d7d016fc04e81fe0112df282c595436cb3817`。
+精确 URL / SHA512 integrity 在 `provider906/package*.json`，传递依赖锁未变。
+
+`.126` 在创建请求回读中补齐 `network_id`，配套 Daemon 要使用 CLI
+`2.3.0-preview.167` / runtime `2.5.0-preview.133`；客户端 `.244` 本身
+不会升级这些服务。软件发布不代表生产激活或三 runtime 建节点验收。
+原 `.125` 的离线一致性备份已完成 `.126` schema/启动/认证核心预检，
+见 `docs/tests/report-test1027-hub126-preflight.txt`；旧备份不是当前生产快照。
+
+激活前仍按上文流程重新保存原启动器并生成当前 DB 一致性备份；把本节
+精确锁复制到新的 sibling 目录，执行 `npm ci --ignore-scripts --no-audit
+--no-fund`。部署配置正常合入 main 后，安装 Git 共享启动器和此 profile，
+逐一核对部署副本字节。服务继续使用既有 PM2 `commhub-hub` 定义、Bun、
+9200 端口、原反代/隧道、原 DB 路径与 owner-only `hub.env`；不复制或
+替换密钥。只重启 Hub，不使用 `--update-env`，不重启业务节点。
+随后核对真实监听进程入口、`/health` `.126`、自然心跳/任务回执与错误日志。
+
+失败时恢复原 `.125` 入口并只重启 Hub，保留两个安装目录、DB 与配置备份。
+软件回滚不回退节点会话或已分发 Provider 状态。生产 DB、vault 原密钥和
+账号仍来自管理员加密备份或重新认证，不包含在 Git；密钥备份保险库记录名
+未覆盖的旧缺口保留，未宣称完整空机恢复或现实 OAuth / 模型权益验证。
+
 ## 混版风险(必读)
 
 `docs/release/versioning-and-compatibility.md` 的 **C2 契约**:
