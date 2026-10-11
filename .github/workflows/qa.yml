@@ -12,6 +12,7 @@ name: anet QA (v0)
 on:
   pull_request:
     paths:
+      - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
       - 'scripts/check-doc-claims.py'
@@ -258,6 +259,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
       - 'scripts/check-doc-claims.py'
