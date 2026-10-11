@@ -73,6 +73,14 @@ until safe idle cutover and actual process/new-heartbeat receipt arrive.
 daemon-dev concurrent original Owner process detected with cwd comm-ou and
 directory mismatch warning; coordination requested, no blind kill or duplicate
 start. Do not call its reported133 a verified formal private-pair upgrade.
+Separate formal pair prepared inactive at
+${USER_ROOT}/.anet-bin/provider906-cli167-runtime133 (0700),248 dependencies,
+Docker npm installation from the two byte-verified published tarballs. Offline
+Docker owning UID1000 verified both actual package-declared bin help paths.
+Initial wrong image entrypoint and an obsolete CLI bin path failed before the
+successful corrected invocation; no product source/permissions/guards changed.
+Generated private package/lock retained. No selected live Daemon switched by
+this operator while original Owner's concurrent process awaits coordination.
 Original card still4/5; three runtime children each >=5min acceptance pending.
 No real OAuth, model inference, vault decryption, Linux/mobile installer or
 full #906/#907 completion claimed by this receipt.
