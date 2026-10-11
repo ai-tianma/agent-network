@@ -212,9 +212,9 @@ PM2 定义、端口、反代、数据库路径与 `hub.env` 密钥来源不变�
 生产数据、vault 密钥和账号不由 clone 仓库恢复，必须从管理员的加密备份
 或重新认证获取。备份策略和路径沿用本 runbook 前述生产备份步骤。
 
-### #906 / #907 当前 `.124` 配置（2026-10-11 已切换）
+### #906 / #907 上一轮 `.124` 配置（2026-10-11 已切换）
 
-当前 Git 入口 `hub-provider906.sh` 选择 `runtime-v107-preview124`；原
+上一轮已部署的入口 `hub-provider906.sh` 选择 `runtime-v107-preview124`；原
 `runtime-v106-preview122` 保留为回滚目标。包从精确 main
 `ad381202cbba00c80efc30522801dedd810fbbea` 的正式运行 `38142238557`
 构建，四道门及发布/registry 核实全部通过。匿名下载与正式构建 tarball
@@ -247,6 +247,40 @@ PID1613；`/health` 返回`.124`、320会话、secured。41秒内SSE恢复113连
 启动器备份位于 owner-only `~/.commhub/backups/provider906-p124-s7X783/`。
 具体预检与切换边界见 `docs/tests/report-test906-hub124-preflight.txt`；不宣称
 真实 vault/模型权益验证、客户端241已发布或空机恢复演练完成。
+
+### #1020 `.125` 配置（正式包已发布，尚未切换）
+
+本次候选将 `hub-provider906.sh` 默认目录改为
+`runtime-v108-preview125`；保留上述已运行 `.124` 的
+`runtime-v107-preview124` 作为回滚目标。软件源码已合入精确 main
+`519af0236985957bb0ff70685052673bdd0b2373`，正式发布运行是
+`38151056880`，构建、四道门及发布/registry 核实均成功。
+2026-10-11 23:48（东八区）Docker 匿名下载的正式 npm tarball 与
+CI 制品字节摘要匹配：1229363字节、SHA256
+`f289b40562f5f2a87f38cb6cf9dc8a439efb23c7b56930375bcb688dc9fac555`。
+精确 URL、SHA512 integrity 和未变的传递依赖锁已记录在
+`provider906/package*.json`；本节不能作为“已经部署”的证据。
+
+`.125` 增加 Provider 对已存 vault 名称的显式引用；不新增本次数据库
+迁移，也不自动轮换已分发的密钥副本。第一条已验证适配链是
+Codex Responses/API key，不代表所有 runtime 或真实供应商权益。
+客户端引用入口要求 Hub `.125`、CLI `.166`、runtime `.132`；
+客户端 `.242` 的密钥库入口不等同后合入的引用 UI。
+
+正式切换仍按前述流程：先核对公开 tarball 与发布制品的精确摘要，
+更新 `provider906/package*.json` 的实际 URL、integrity 和依赖锁；
+生成当前数据库一致性备份，在 Docker 中用离线副本检查包、schema、
+启动与认证。只有这些输入落位、部署入口合入 main 后，才可从 Git
+安装共享启动器和配置，安装到新的 sibling 目录并窄重启
+`commhub-hub`（不加 `--update-env`、不重启业务节点）。随后核对
+监听进程实际目录、`/health` `.125`、自然节点心跳/ack 和错误日志。
+
+服务仍用既有 PM2 定义、Bun、9200 端口及前述反代/隧道；DB 路径和
+权限不变。密钥继续由主机管理员从原 owner-only `hub.env` 提供，
+不能生成替代 vault 密钥。回滚恢复已保留 `.124` 的入口并仅重启
+Hub，保留数据库与已分发状态。生产数据库、原 vault 密钥和登录账号
+只能从管理员的加密备份或重新认证恢复，不包含在 Git；保险库记录名
+未覆盖这一缺口继续保留，不宣称已完成空机恢复演练。
 
 ## 混版风险(必读)
 
