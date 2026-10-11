@@ -369,6 +369,32 @@ gh workflow run release.yml \
 
 ### Step 7：等待窗口 ≥ 30 分钟 + owner explicit ACK
 
+#### npm registry 尚不可下载时：复用正式 gated CLI tarball
+
+`npm publish` 被接受不等于匿名下载可用。不得重发同一版本，也不得把 PR artifact
+当正式包上传。CLI 可用 `.github/workflows/cli-gated-download.yml` 从 **GitHub Actions**
+发布原 `release.yml` 已验证的精确 main tarball；不在本机发包，不更改 npm dist-tag。
+
+输入必须是完整40位 main 源 SHA、该源的 main workflow_dispatch release run ID、
+CLI 精确版本及 **inner tarball** SHA256（不是 artifact ZIP digest）。工作流核查
+原 build 和四道门全部 SUCCESS、包名/版本/字节；下载前和公开前再次核查当前 main
+祖先关系。只创建新的不可变 `cli-v<version>` tag，不覆盖已有 tag/asset。
+
+```bash
+gh workflow run cli-gated-download.yml --ref main \
+  -f commit=FULL_40_CHARACTER_MAIN_SOURCE_SHA \
+  -f run_id=ORIGINAL_RELEASE_RUN_ID \
+  -f version=EXACT_CLI_PREVIEW_VERSION \
+  -f sha256=INNER_TARBALL_SHA256 \
+  -F publish=true
+```
+
+公开后匿名下载整个 tarball，与原 SHA256 比对，才交接升级。该下载只是 CLI npm
+tarball，不是已签名的原生客户端。Daemon 使用版本源中的精确 runtime 配对，启动、
+验证与回滚仍按 `docs-site/docs/deploy/daemon.md`；保留旧私有安装和受保护配置，
+不自动改业务节点、登录账号、生产数据或服务拓扑。账号/会话仍来自原有安全来源和
+备份；此路径不增加端口、代理、密钥源或数据备份方案。
+
 两阶段发版规则（release-preview-first，见 [CONTRIBUTING.md §Release process](../CONTRIBUTING.md)）：
 
 - 第一阶段：`release.yml`（`publish=true`）发到 preview 通道后，**至少 30 分钟**真实环境烟测
