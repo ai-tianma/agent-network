@@ -4952,6 +4952,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         content: [{ type: "text" as const, text: JSON.stringify({
           ok: true,
           request_id,
+          // #1027: daemon needs network_id to write into child config.
+          network_id: row.network_id,
           node_spec: {
             name: specRow.child_name,
             runtime: specRow.runtime,
