@@ -1,5 +1,6 @@
 #1027 formal publication and Hub126 activation receipt
 OBSERVED_AT=2026-10-11T19:13:44Z / 2026-10-12 03:13:44 Asia/Shanghai
+UPDATED_AT=2026-10-11T19:16:38Z / 2026-10-12 03:16:38 Asia/Shanghai
 Scope: original #1027/#906 software line; no new product ticket.
 
 FORMAL SOURCES / PACKAGES
@@ -84,6 +85,39 @@ this operator while original Owner's concurrent process awaits coordination.
 Original card still4/5; three runtime children each >=5min acceptance pending.
 No real OAuth, model inference, vault decryption, Linux/mobile installer or
 full #906/#907 completion claimed by this receipt.
+
+DAEMON CUTOVER INCREMENT (supersedes earlier pending observation)
+TMHR original-line reply407f22ba-9868-43f7-b755-c58dc70976f9 at19:14:56Z:
+vdev actual CLI167 PID2242603/runtime133 PID2242710, same identity/cwd/config,
+Hub new heartbeat/SSE and redacted Provider read PASS; old166/132/0600 backup
+retained. Local Docker NOT RUN due permissions, no socket/group changes.
+Independent Hub read corroborated133/idle/inflight0/queue0. Formal Docker
+publication gates are separate evidence, not a claimed local Docker execution.
+
+daemon-dev original Owner's temporary process subsequently exited/offline;
+03:15 fresh check found no matching live process and no daemon-dev tmux.
+Owner notified to avoid another bare-runtime concurrent start. No other-owned
+process was killed. Protected config backup before restoring via official CLI:
+${USER_ROOT}/.anet/nodes/daemon-dev/config.json.pre-cli167-runtime133-20261012
+0600; config unchanged SHA256
+4cf8ee102c780bb75d992b1c6b6c32d56f49015fe62cf933c54afd733d4564bc.
+03:16:12 original-name tmux started public CLI daemon start daemon-dev, Node24,
+explicit ANET_AGENT_NODE_BIN pointing to new private133. Product CLI selects
+its same-install private runtime and suppresses inherited session identity.
+CLI167 PID3384613/runtime133 PID3384789, both actual cwd=${USER_ROOT}.
+03:16:19 registration/SSE/create capability ready (anet bin pin verified).
+Rebuild5/5 existing processes recovered, missing0; no business process restart.
+Independent Hub19:16:21 same node_id/node_daemon_39bd1eeae3ee,133, original
+project_dir=${USER_ROOT},idle/inflight0/queue0; directory warning cleared.
+Provider read: ok=true/revision0/source=daemon/providersCount0. Empty catalog
+is read capability only, not actual Provider/model or account entitlement.
+Sample business/AppServer/TUI PIDs2792940/2793542/515201/3199979 unchanged.
+No global npm, credential/account/model/session or node config changes.
+Rollback: at idle stop only verified new daemon pair; use preserved166/132
+public CLI and old runtime with original cwd/PATH, repeat actual-state checks.
+Private generated package/lock and backups retained. Existing fleet PATH boot
+pin and off-host backup archive inventory gaps are not fixed by this narrow
+operation; no unversioned custom production launcher created.
 
 RECOVERY / CLEANUP
 Service startup/profile/lock authority deploy/hub in Git; PM2 definition,
