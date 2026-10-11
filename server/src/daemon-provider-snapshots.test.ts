@@ -4,6 +4,10 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { CodexManagedLogin } from '../../agent-node/src/runtime/codex-managed-login';
+import { DaemonCodexLogins } from '../../agent-node/src/runtime/daemon-codex-logins';
+import { executeProviderLogin, closeProviderLogins } from '../../agent-node/src/runtime/daemon-provider-login';
 import { db } from "./db";
 import { registerTools } from "./tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -14,6 +18,7 @@ import { register, createNetworkTokenForNode } from "./auth";
 const net = "net_dps906", user = "u_dps906", node = "node_dps906", token = "token_dps906", alias = "daemon906";
 const root = mkdtempSync(join(tmpdir(), "dps906-"));
 function cleanup() {
+  db.run('DELETE FROM daemon_provider_logins WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1)', [net]);
   db.run('DELETE FROM daemon_provider_applications WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1)', [net]);
   db.run('DELETE FROM daemon_provider_writes WHERE request_id IN (SELECT request_id FROM daemon_provider_snapshots WHERE network_id=?1)', [net]);
   db.run('DELETE FROM node_daemon_bindings WHERE network_id=?1', [net]);
@@ -44,6 +49,90 @@ function client(kind = "human", network = net) {
 const snapshot = () => ({ network_id: net, daemon_node_id: node, revision: 0, source: "daemon", providers: [] });
 const request = () => client()("daemon_provider_snapshot", { action: "refresh", network_id: net, id: node });
 
+test('saved ChatGPT account binding traverses Hub and compiled daemon CLI without credentials', async () => {
+  process.env.ANET_HUB_SECRET_VAULT_KEY = '42'.repeat(32);
+  const work = mkdtempSync(join(root, 'bind-')), dir = join(work, '.anet/nodes', alias);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const prepared = new DaemonProviderStore(dir).prepareLoginDirectory();
+  const home = join(prepared.root, 'login-fixture'); mkdirSync(home, { mode: 0o700 });
+  const account = '11111111-1111-4111-8111-111111111111';
+  writeFileSync(join(home, 'anet-account.json'), JSON.stringify({ version: 1, network_id: net, daemon_node_id: node, account_id: account }), { mode: 0o600 });
+  writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'TEST-ONLY-access', refresh_token: 'TEST-ONLY-refresh' } }), { mode: 0o600 });
+  const provider = { id: 'openai', label: 'OpenAI', enabled: true, runtimes: [{ runtime: 'codex-tui', auth: [
+    { id: 'work', kind: 'chatgpt', account_id: account, models: ['model-fixture'] },
+  ] }] };
+  const human = client(), daemon = client('daemon');
+  const r = await human('daemon_provider_snapshot', { action: 'put', id: node, network_id: net, revision: 0, provider });
+  expect(r.ok).toBe(true);
+  await reconcileProviderSnapshots({ workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {}, callCommHub: daemon });
+  const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
+  expect(read.status).toBe('succeeded');
+  expect(read.snapshot.providers[0].runtimes[0].auth[0]).toMatchObject({ account_id: account, credential_present: true, verification: 'not_checked', application: 'not_applied' });
+  expect(JSON.stringify(read)).not.toContain('TEST-ONLY-access');
+  expect(JSON.stringify(read)).not.toContain('TEST-ONLY-refresh');
+  expect(JSON.stringify(read)).not.toContain(home);
+});
+
+test('managed login: admin intent → capable target daemon → session manager → bounded public receipt', async () => {
+  const work = mkdtempSync(join(root, 'login-'));
+  const dir = join(work, '.anet/nodes', alias); mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.json'), JSON.stringify({ role: 'host_supervisor', network_id: net, node_id: node }), { mode: 0o600 });
+  const prepared = new DaemonProviderStore(dir).prepareLoginDirectory();
+  const session = 'b86c3ca5-5022-434d-bc9f-aa1c82ecf419';
+  class Rpc extends EventEmitter {
+    account: unknown = null;
+    async request<R>(method: string): Promise<R> {
+      return (method === 'account/read' ? { account: this.account } : { type: 'chatgptDeviceCode', loginId: session,
+        verificationUrl: 'https://auth.openai.com/codex/device', userCode: 'TEST-ONLY' }) as R;
+    }
+    async close() {}
+  }
+  const rpc = new Rpc(); let home = '';
+  const logins = new DaemonCodexLogins(prepared.root, { network_id: net, daemon_node_id: node }, async () => {
+    home = mkdtempSync(join(prepared.root, 'login-'));
+    const login = new CodexManagedLogin(rpc);
+    return { home, login, discard: async () => { await login.close(); rmSync(home, { recursive: true, force: true }); } };
+  });
+  const human = client(), daemon = client('daemon');
+  const deps = { workDir: work, alias, networkId: net, daemonId: node, serverUrl: 'https://hub.example.test', warn: () => {},
+    callCommHub: daemon, login: (intent: any) => executeProviderLogin(logins, intent) };
+  const command = (intent: any) => human('daemon_provider_snapshot', { action: 'login', id: node, network_id: net, provider: intent });
+  const read = (id: string) => human('daemon_provider_snapshot', { action: 'read', id, network_id: net });
+  try {
+    expect((await daemon('daemon_provider_snapshot', { action: 'login', id: node, provider: { action: 'start', session_id: session } })).ok).toBe(false);
+    expect((await command({ action: 'start', session_id: session, token: 'TEST-ONLY' })).ok).toBe(false);
+    const start = await command({ action: 'start', session_id: session });
+    expect(start.ok).toBe(true);
+    expect((await daemon('pull_daemon_provider_snapshots', { accept_writes: true, accept_applications: true })).requests).toEqual([]);
+    expect((await client('daemon', 'other')('pull_daemon_provider_snapshots', { accept_logins: true })).ok).toBe(false);
+    expect((await daemon('ack_daemon_provider_snapshot', { request_id: start.request_id, login: { request_id: session, status: 'authenticated', token: 'TEST-ONLY' } })).ok).toBe(false);
+    await reconcileProviderSnapshots(deps);
+    const challenge = await read(start.request_id);
+    expect(challenge.status).toBe('succeeded');
+    expect(challenge.login.status).toBe('awaiting_user');
+    expect(challenge.snapshot).toBeNull();
+    writeFileSync(join(home, 'auth.json'), '{"TEST_ONLY":"SECRET"}', { mode: 0o600 });
+    rpc.account = { type: 'chatgpt', email: 'PRIVATE', token: 'SECRET' };
+    rpc.emit('account/login/completed', { loginId: session, success: true });
+    await Promise.resolve();
+    const save = await command({ action: 'save', session_id: session, label: 'Work' });
+    await reconcileProviderSnapshots(deps);
+    expect((await read(save.request_id)).login.account_id).toBeString();
+    const list = await command({ action: 'accounts' });
+    // Listing uses the actual daemon handler and compiled pinned CLI bootstrap,
+    // not the injected OAuth fixture. It does not start a login or run inference.
+    await reconcileProviderSnapshots({ ...deps, login: undefined });
+    const result = await read(list.request_id);
+    expect(result.login.accounts).toHaveLength(1);
+    expect(result.login.accounts[0].auth_state).toBe('not_checked');
+    expect(JSON.stringify(result)).not.toMatch(/SECRET|PRIVATE|auth.json/);
+    db.run('UPDATE daemon_provider_snapshots SET expires_at=?1 WHERE request_id=?2', [Date.now() - 1, start.request_id]);
+    expect((await read(start.request_id)).login).toBeNull();
+    expect(db.get<any>('SELECT snapshot_json FROM daemon_provider_snapshots WHERE request_id=?1', start.request_id).snapshot_json).toBeNull();
+  } finally { await logins.close(); await closeProviderLogins(); }
+});
+
 test('application transport: scoped intent, capability gate, exact public receipt and changed binding refusal', async () => {
   const human = client(), daemon = client('daemon');
   const child = 'node_apply906';
@@ -71,6 +160,20 @@ test('application transport: scoped intent, capability gate, exact public receip
   const read = await human('daemon_provider_snapshot', { action: 'read', id: r.request_id, network_id: net });
   expect(read.status).toBe('succeeded'); expect(read.application).toEqual(receipt); expect(read.snapshot).toBeNull();
   expect(db.get('SELECT * FROM daemon_provider_applications WHERE request_id=?1', r.request_id)).toBeNull();
+  const accountId = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const officialSelection = { ...selection, provider_id: 'openai', auth_id: 'work-login', account_id: accountId };
+  const official = await human('daemon_provider_snapshot', { ...args, provider: officialSelection });
+  expect(official.ok).toBe(true);
+  const officialDispatch = await daemon('pull_daemon_provider_snapshots', { accept_applications: true });
+  expect(officialDispatch.requests[0].selection).toEqual(officialSelection);
+  const officialReceipt = { ...receipt, request_id: official.request_id, provider_id: 'openai', auth_id: 'work-login',
+    account_id: accountId, runtime_provider: 'openai', applied_at: Date.now() };
+  for (const wrong of [{ ...officialReceipt, account_id: 'bbbbbbbb-1111-4111-8111-111111111111' },
+    { ...officialReceipt, account_id: undefined }, { ...officialReceipt, runtime_provider: receipt.runtime_provider }]) {
+    expect((await daemon('ack_daemon_provider_snapshot', { request_id: official.request_id, application: wrong })).error).toBe('invalid_application_receipt');
+  }
+  expect((await daemon('ack_daemon_provider_snapshot', { request_id: official.request_id, application: officialReceipt })).status).toBe('succeeded');
+  expect((await human('daemon_provider_snapshot', { action: 'read', id: official.request_id, network_id: net })).application).toEqual(officialReceipt);
   const stale = await human('daemon_provider_snapshot', args);
   db.run("UPDATE node_daemon_bindings SET daemon_node_id='other' WHERE request_id='binding_apply906'");
   expect((await daemon('pull_daemon_provider_snapshots', { accept_applications: true })).requests).toEqual([]);
