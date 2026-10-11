@@ -40,7 +40,7 @@ export function validateDaemonProviderSnapshot(value: unknown, networkId: string
           if (a.account_id !== undefined) fail();
           if (a.credential_present !== true || typeof a.baseUrl !== "string" || a.baseUrl.length > 2048) fail();
           let u: URL; try { u = new URL(a.baseUrl); } catch { return fail(); }
-          if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash) fail();
+          if (!["https:", "http:"].includes(u.protocol) || u.username || u.password || u.search || u.hash) fail();
         } else fail();
       }
     }

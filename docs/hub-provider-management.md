@@ -12,7 +12,7 @@ credentials are not a local client demo and not a model inference proxy.
 - `read`: any authenticated network member reads redacted current-network
   metadata, configured models, protocol and revision. Node tokens are refused.
 - `put`: the network owner supplies `revision` and `provider` containing id,
-  label, enabled, protocol, HTTPS baseUrl, models and optionally key. Revision0
+  label, enabled, protocol, HTTP/HTTPS baseUrl, models and optionally key. Revision0
   creates. Later revisions require CAS. A missing key preserves an existing key
   only when endpoint and protocol are unchanged. No secret is echoed.
 - `bind`: owner/admin explicitly confirms an id + source revision, one daemon
@@ -22,7 +22,7 @@ credentials are not a local client demo and not a model inference proxy.
 
 The key uses the existing AES-GCM network vault with an opaque network/id-scoped
 reference. SQLite saves catalog revision and ciphertext atomically. The existing
-short-lived daemon write queue delivers a selected profile over HTTPS/loopback,
+short-lived daemon write queue delivers a selected profile over the configured HTTP/HTTPS Hub connection,
 never through a command-line argument. The daemon's pinned CLI writes its private
 store and returns redacted metadata. Other daemon profiles remain present.
 
@@ -32,6 +32,20 @@ can be saved but dispatch is refused until the corresponding adapter lands.
 No conversion to Responses, model access test, ChatGPT account copying, automatic
 node restart or background distribution is performed. After distribution, use
 the existing Daemon Provider selection/apply flow explicitly for an owned node.
+
+## Transport advice (#1045, source change; not yet released)
+
+HTTPS is recommended, not mandatory. Explicit HTTP Hub and Provider API URLs are
+accepted with a visible client advisory: keys, account-related messages and model
+requests can travel unencrypted. Use HTTP only on a trusted network; storage in
+the AES-GCM vault does not encrypt HTTP traffic. No automatic address conversion,
+TLS downgrade, save, dispatch or node switch is introduced. Existing explicit
+confirmation, scope/role/CAS checks, redaction and no-redirect secret writes remain.
+Non-HTTP schemes and embedded URL credentials remain refused. This does not
+relax vendor probe target policy or the official HTTPS OAuth verification URL.
+Client, Hub, CLI and daemon runtime need the matching implementation before HTTP
+endpoints can be saved, dispatched and read back across the whole chain; old
+versions may reject them. Do not recommend an unpublished version as available.
 
 Editing, rotating or disabling a source cancels still-pending queued bindings.
 This cannot recall a recipient which already fetched the request or remove
@@ -47,8 +61,8 @@ on #907; this slice does not complete the whole requirement.
    `deploy/hub/` (including `hub-provider906.sh` and its README); Daemon startup
    remains `deploy/daemon/` and `docs-site/docs/deploy/daemon.md`.
 2. **Topology:** no new port, reverse proxy or tunnel. Existing /mcp uses the
-   deployment's authenticated HTTPS routing. Secret distribution requires HTTPS
-   or machine-local loopback; existing plaintext remote routes do not qualify.
+   deployment's authenticated routing. HTTPS is recommended; explicitly configured
+   HTTP is allowed with the plaintext-risk advisory above, not called encrypted.
 3. **Secrets:** supply `ANET_HUB_SECRET_VAULT_KEY` from the deployment's secret
    source described in `deploy/hub/README.md`, not Git. Provider keys are owner
    input. No clone or anonymous fixture supplies production credentials.
@@ -60,6 +74,8 @@ on #907; this slice does not complete the whole requirement.
    the existing Hub deployment procedure. Tables are additive; older software
    will not serve this feature. Do not delete catalog/vault data as a rollback
    shortcut. Already distributed keys are not revoked by software rollback.
+   Older strict readers may reject newly stored HTTP endpoints; retain the data
+   and use compatible software or explicitly replace that endpoint, not erase it.
 6. **Data:** encrypted backups must include SQLite catalog, bindings, vault
    ciphertext and its separately protected master key. Each daemon's private
    Provider state requires its own identity-matched encrypted backup. Git

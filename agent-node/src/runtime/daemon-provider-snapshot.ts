@@ -17,8 +17,10 @@ export type SnapshotDeps = {
   login?: (intent: unknown) => Promise<unknown>;
 };
 export function secureProviderTransport(value?: string): boolean {
+  // Historical export name: this checks supported transport, not encryption.
+  // HTTPS is recommended; an explicitly configured HTTP Hub remains usable.
   try { const u = new URL(value || ''); return !u.username && !u.password &&
-    (u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname))); }
+    (u.protocol === 'https:' || u.protocol === 'http:'); }
   catch { return false; }
 }
 export async function applyLocalProvider(deps: Pick<SnapshotDeps, 'workDir' | 'alias' | 'networkId' | 'daemonId'>, request: any) {

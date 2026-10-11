@@ -46,7 +46,7 @@ function endpoint(value: unknown): string {
   try { url = new URL(value); } catch { fail("invalid_endpoint"); }
   // A saved endpoint is NOT permission to probe it: network requests must retain
   // the Hub/runtime's SSRF/redirect guard. No credentials in URLs or query strings.
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) fail("invalid_endpoint");
+  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) fail("invalid_endpoint");
   return url.toString().replace(/\/$/, "");
 }
 function parseProvider(value: unknown, previous?: Provider): Provider {

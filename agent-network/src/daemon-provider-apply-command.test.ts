@@ -10,7 +10,7 @@ import { REQUIRED_CHECKS } from './codex-lifecycle-receipt';
 // Actual CLI application dispatcher/filesystem, injected lifecycle subprocesses.
 // This is NOT a native Codex process acceptance test.
 test('apply command core: exact launch readback, lost ACK replay, busy refusal and failed-model rollback', async () => {
-  for (const mode of ['ok', 'busy', 'wrong-model', 'official', 'wrong-account'] as const) {
+  for (const mode of ['ok', 'http', 'busy', 'wrong-model', 'official', 'wrong-account'] as const) {
     const root = mkdtempSync(join(tmpdir(), 'provider-command906-'));
     let hub: ReturnType<typeof Bun.serve> | undefined;
     let runtime: ReturnType<typeof Bun.serve> | undefined;
@@ -49,7 +49,7 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
         });
       }
       const calls: string[][] = [], output: string[] = [];
-      hub = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async incoming => {
+      hub = Bun.serve({ hostname: mode === 'http' ? '0.0.0.0' : '127.0.0.1', port: 0, fetch: async incoming => {
         expect(incoming.headers.get('Authorization')).toBe('Bearer TEST-ONLY-hub-token');
         const rpc = await incoming.json() as any;
         const value = rpc.params.name === 'pull_daemon_provider_snapshots'
@@ -57,7 +57,7 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
           : { ok: true, session: { node_id: 'node_a', network_id: 'net_a', status: mode === 'busy' ? 'working' : 'idle', updated_at: new Date().toISOString() }, inbox_pending: 0 };
         return Response.json({ jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: JSON.stringify(value) }] } });
       } });
-      write(join(daemon, 'config.json'), { node_id: 'daemon_a', network_id: 'net_a', role: 'host_supervisor', hub: `http://127.0.0.1:${hub.port}`, token: 'TEST-ONLY-hub-token' });
+      write(join(daemon, 'config.json'), { node_id: 'daemon_a', network_id: 'net_a', role: 'host_supervisor', hub: `http://${mode === 'http' ? '127.0.0.2' : '127.0.0.1'}:${hub.port}`, token: 'TEST-ONLY-hub-token' });
       let launched = 0;
       const deps = { nodesDir: nodes, readInput: () => JSON.stringify(request), print: (v: string) => { output.push(v); },
         run: async (argv: string[], cwd: string) => {
@@ -76,7 +76,7 @@ test('apply command core: exact launch readback, lost ACK replay, busy refusal a
         } };
       const result = await runDaemonProviderApply(['apply', 'supervisor'], deps);
       expect(output.join('')).not.toContain('TEST-ONLY');
-      if (mode === 'ok' || mode === 'official') {
+      if (mode === 'ok' || mode === 'http' || mode === 'official') {
         expect(result).toBe(0); expect(JSON.parse(output[0]).application).toMatchObject({ status: 'applied', model: 'new', node_id: 'node_a' });
         expect(calls.map(a => a.slice(0, 3).join(' '))).toEqual(['node stop node_a', 'node start node_a', 'node codex verify']);
         expect(await runDaemonProviderApply(['apply', 'supervisor'], deps)).toBe(0); expect(calls).toHaveLength(3);

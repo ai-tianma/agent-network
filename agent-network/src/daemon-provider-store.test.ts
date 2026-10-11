@@ -142,12 +142,22 @@ describe("#906 daemon Provider persistence", () => {
   test("secret in official login, endpoint auth/query, unknown fields, invalid ids refused", () => {
     const { store } = setup(); const login: any = official(); login.runtimes[0].auth[0].key = SECRET;
     expect(() => store.upsert(login, 0)).toThrow("unsupported_auth_combination");
-    for (const baseUrl of ["http://api.example.test", "https://user:password@api.example.test", "https://api.example.test?key=secret"]) {
+    for (const baseUrl of ["ftp://api.example.test", "https://user:password@api.example.test", "https://api.example.test?key=secret", "http://user:password@api.example.test"]) {
       const p = keyProvider(); p.runtimes[0].auth[0].baseUrl = baseUrl;
       expect(() => store.upsert(p, 0)).toThrow("invalid_endpoint");
     }
     expect(() => store.upsert({ ...keyProvider(), token: SECRET }, 0)).toThrow("unsupported_field");
     expect(() => store.upsert({ ...keyProvider(), id: "../outside" }, 0)).toThrow("invalid_id");
+  });
+  test("explicit HTTP endpoint is stored and read back without credential exposure", async () => {
+    const { store } = setup(); const p = keyProvider();
+    p.runtimes[0].auth[0].baseUrl = 'http://api.example.test/v1';
+    store.upsert(p, 0);
+    expect(store.list().providers[0].runtimes[0].auth[0].baseUrl).toBe(p.runtimes[0].auth[0].baseUrl);
+    expect(JSON.stringify(store.list())).not.toContain(SECRET);
+    await store.withApiKey({ revision: 1, providerId: p.id, authId: p.runtimes[0].auth[0].id, model: p.runtimes[0].auth[0].models[0] }, async profile => {
+      expect(profile.baseUrl).toBe('http://api.example.test/v1'); expect(profile.key).toBe(SECRET);
+    });
   });
   test("symlinked state/root and nonprivate state fail closed", () => {
     const { store, dir, root } = setup(); store.upsert(keyProvider(), 0);
