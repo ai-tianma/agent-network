@@ -7,7 +7,7 @@ import { db } from './db';
 import { registerTools } from './tools';
 import { vaultGet } from './vault';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { reconcileProviderSnapshots } from '../../agent-node/src/runtime/daemon-provider-snapshot';
+import { reconcileProviderSnapshots, secureProviderTransport } from '../../agent-node/src/runtime/daemon-provider-snapshot';
 import { DaemonProviderStore } from '../../agent-network/src/daemon-provider-store';
 const net = 'net_hub907', user = 'u_hub907', daemonId = 'n_hub907', alias = 'daemon907', token = 'tok_hub907';
 const root = mkdtempSync(join(tmpdir(), 'hub907-')), key = 'TEST-ONLY-shared-provider-key';
@@ -39,6 +39,29 @@ function client(kind = 'human') {
 const provider = () => ({ id: 'shared', label: 'Shared model', enabled: true, protocol: 'openai-responses', baseUrl: 'https://provider.example/v1', models: ['fixture-model'], key });
 const save = (human: ReturnType<typeof client>, value = provider(), revision = 0) => human('daemon_provider_snapshot', { action: 'hub_put', id: value.id, network_id: net, revision, provider: value });
 const bind = (human: ReturnType<typeof client>, target = daemonId, revision = 1) => human('daemon_provider_snapshot', { action: 'hub_bind', network_id: net, id: 'shared', revision, provider: { daemon_node_id: target, daemon_revision: 0, confirm: true } });
+test('HTTP Hub and API endpoint support save, explicit bind and exact private-store readback', async () => {
+  expect(secureProviderTransport('http://hub907.example.test')).toBe(true);
+  expect(secureProviderTransport('ftp://hub907.example.test')).toBe(false);
+  expect(secureProviderTransport('http://user:password@hub907.example.test')).toBe(false);
+  const human = client(), daemon = client('daemon');
+  const config = { ...provider(), baseUrl: 'http://provider.example/v1' };
+  const saved = await save(human, config); expect(saved.ok).toBe(true);
+  expect(saved.provider.baseUrl).toBe(config.baseUrl);
+  const queued = await bind(human); expect(queued.ok).toBe(true);
+  await reconcileProviderSnapshots({ workDir: root, alias, networkId: net, daemonId,
+    serverUrl: 'http://hub907.example.test', callCommHub: daemon, warn: message => console.warn(message) });
+  const receipt = await human('daemon_provider_snapshot', { action: 'read', id: queued.request_id, network_id: net });
+  expect(receipt.status).toBe('succeeded');
+  expect(receipt.snapshot.providers[0].runtimes[0].auth[0].baseUrl).toBe(config.baseUrl);
+  expect(JSON.stringify([saved, queued, receipt])).not.toContain(key);
+  const store = new DaemonProviderStore(join(root, '.anet/nodes', alias));
+  await store.withApiKey({ revision: 1, providerId: queued.provider_reference.daemon_provider_id, authId: 'hub_key', model: 'fixture-model' }, async actual => {
+    expect(actual.baseUrl).toBe(config.baseUrl); expect(actual.key).toBe(key);
+  }); // Exact synthetic key in local callback, no external model request.
+  for (const baseUrl of ['ftp://provider.example/v1', 'http://user:pass@provider.example/v1', 'http://provider.example/v1?key=secret']) {
+    expect(await save(human, { ...provider(), id: 'invalid', baseUrl })).toMatchObject({ ok: false, error: 'invalid_hub_provider' });
+  }
+});
 test('existing names-only vault key → Provider reference → actual daemon store, without re-entering key', async () => {
   const human = client(), daemon = client('daemon');
   expect(await human('upsert_network_secret', { network_id: net, key: 'SHARED_API_KEY', value: key })).toMatchObject({ ok: true });

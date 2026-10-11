@@ -9,7 +9,7 @@ async function checkPendingIdle(daemonDir: string, request: ProviderApplicationR
   const config = readProviderNodeConfig(daemonDir);
   if (config.network_id !== request.networkId || config.node_id !== request.daemonId || !config.token) throw new DaemonProviderError('daemon_identity_required');
   const url = new URL(config.hub);
-  if (url.username || url.password || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))) throw new DaemonProviderError('insecure_transport');
+  if (url.username || url.password || !['https:', 'http:'].includes(url.protocol)) throw new DaemonProviderError('insecure_transport');
   url.pathname = url.pathname.replace(/\/$/, '') + '/mcp'; url.search = ''; url.hash = '';
   const call = async (name: string, args: object) => {
     const response = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),

@@ -24,7 +24,7 @@ function validConfig(value: any): value is Config {
     || !Array.isArray(value.models) || !value.models.length || value.models.length > 200
     || new Set(value.models).size !== value.models.length
     || value.models.some((m: unknown) => typeof m !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/.test(m))) return false;
-  try { const u = new URL(value.baseUrl); return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash; }
+  try { const u = new URL(value.baseUrl); return ['https:', 'http:'].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; }
   catch { return false; }
 }
 type Row = { revision: number; config_json: string; secret_key_ref: string; updated_at: number };

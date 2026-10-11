@@ -29,8 +29,11 @@ identifier-only selection in `provider`. There is no remote key or path input.
 Hub validates source identity/alias binding at enqueue, pull and receipt.
 The existing short-lived encrypted write queue is reused (no schema migration).
 An older daemon advertising only `accept_writes` never consumes collection.
-The new daemon advertises `accept_collections` only over HTTPS or loopback HTTP,
-then invokes its pinned CLI `collect` with the selection on stdin.
+The #1045 transport update advertises `accept_collections` over explicitly
+configured HTTP or HTTPS, then invokes its pinned CLI `collect` with the
+selection on stdin. HTTPS is recommended; HTTP can expose sensitive traffic and
+should only be used on a trusted network. No redirect, scope, identity or
+confirmation guard is relaxed; previous published runtimes may still refuse HTTP.
 
 Source revision CAS and the daemon store revision are checked locally; a lost
 ACK reuses the same durable request instead of incrementing twice. A successful
