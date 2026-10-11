@@ -19,3 +19,10 @@ Cleanup: container removed, no host/global package changes or production actions
 Source and version still require ordinary main merge and the exact full40 formal
 release.yml package/install/notes/pin gates; branch artifacts are test-only.
 Activation, encrypted backup and rollback remain a distinct deployed-main change.
+
+Increment 2026-10-11T15:07:57Z: implementation PR2607 ordinarily merged main
+debef8033b37c488ca475bf77e38d3123535cca1 after required guards and native core.
+Cloud run38149405097/job114499511182 tested merge
+88f0b373f90c5d395a22ec3f9191ef1837287a4f (head49988af17):6/6,43 assertions,
+audience12/12,320 assertions and native same-thread reference/apply all PASS.
+Version-only commit restacked onto merged main; no feature code changed by prep.
