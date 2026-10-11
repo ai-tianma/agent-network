@@ -10,9 +10,9 @@ const root = '/input/runtime';
 const packagePath = `${root}/node_modules/@sleep2agi/commhub-server`;
 const pkg = JSON.parse(readFileSync(`${packagePath}/package.json`, 'utf8'));
 const lock = JSON.parse(readFileSync(`${root}/package-lock.json`, 'utf8'));
-assert.equal(pkg.version, '0.9.0-preview.125');
+assert.equal(pkg.version, '0.9.0-preview.126');
 assert.equal(lock.packages['node_modules/@sleep2agi/commhub-server'].integrity,
-  'sha512-fvGb8fLlbsIuXsi8YtocnKGZp0DCgCWsKWa/ott84zsdThB2RdGjcCZBBLlmJohrtvkajmMFO4WZWKz/YLJlKQ==');
+  'sha512-YT1x3vnqaVdMaETIoN/5OebLZEcWiqPB0QOKk6LO6n48x8RHVDKr4M5f6EMtHdwn0M5EPlaotZ/fzRvWLBn3Tw==');
 copyFileSync('/input/before.db', '/tmp/http.db');
 mkdirSync('/tmp/isolated-home');
 const db = new Database('/tmp/http.db');

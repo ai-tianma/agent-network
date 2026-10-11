@@ -7,14 +7,14 @@ import { Database } from 'bun:sqlite';
 // the published tarball and the running Hub's Bun executable, all read-only.
 assert.equal(Bun.version, '1.4.0');
 assert.equal(process.env.DATABASE_URL, undefined);
-const expected = 'fvGb8fLlbsIuXsi8YtocnKGZp0DCgCWsKWa/ott84zsdThB2RdGjcCZBBLlmJohrtvkajmMFO4WZWKz/YLJlKQ==';
-const tarball = '/input/hub125.tgz';
+const expected = 'YT1x3vnqaVdMaETIoN/5OebLZEcWiqPB0QOKk6LO6n48x8RHVDKr4M5f6EMtHdwn0M5EPlaotZ/fzRvWLBn3Tw==';
+const tarball = '/input/hub126.tgz';
 assert.equal(createHash('sha512').update(readFileSync(tarball)).digest('base64'), expected);
 mkdirSync('/tmp/package-input');
 assert.equal(Bun.spawnSync(['tar', '-xzf', tarball, '-C', '/tmp/package-input']).exitCode, 0);
 const pkg = JSON.parse(readFileSync('/tmp/package-input/package/package.json', 'utf8'));
 assert.equal(pkg.name, '@sleep2agi/commhub-server');
-assert.equal(pkg.version, '0.9.0-preview.125');
+assert.equal(pkg.version, '0.9.0-preview.126');
 // db.ts's read-cache imports node-health-store, which requires this lockfile
 // dependency. Supply its exact tarball offline; never let Bun auto-install it.
 assert.equal(createHash('sha512').update(readFileSync('/input/zod.tgz')).digest('base64'),
