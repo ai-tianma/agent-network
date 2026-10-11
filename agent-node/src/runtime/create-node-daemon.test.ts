@@ -1285,6 +1285,27 @@ describe("#584 flags.copresence → child config codexCopresence", () => {
   });
 });
 
+// #1027 — opencode-cli 缺省写 opencodeGeneration=v1,否则 anet node start 因
+// 「OpenCode runtime binding is missing」拒绝启动 → daemon 记 ESRCH → hub 撤 token。
+// 默认发生在 handleCreateNodeDoorbell 的 childCfg 组装层(childConfigFieldsFromSpec
+// 本身不注入,以便显式 v2 能覆盖)。
+describe("#1027 opencode-cli generation handling", () => {
+  test("childConfigFieldsFromSpec does NOT inject a default (v1 default lives in childCfg assembly)", () => {
+    expect(childConfigFieldsFromSpec({ runtime: "opencode-cli", flags: {} }))
+      .toEqual({ flags: {} });
+  });
+  test("explicit v1 passes through", () => {
+    expect(childConfigFieldsFromSpec({ runtime: "opencode-cli", flags: { opencodeGeneration: "v1" } }))
+      .toEqual({ flags: {}, opencodeGeneration: "v1" });
+  });
+  test("explicit v2 implies copresence mode", () => {
+    expect(childConfigFieldsFromSpec({
+      runtime: "opencode-cli",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
+    })).toEqual({ flags: { opencodeUnsafeTools: true }, opencodeGeneration: "v2", opencodeMode: "copresence" });
+  });
+});
+
 // #603 — Apple Silicon Homebrew installs bun/bunx, tmux and codex into
 // /opt/homebrew/bin, which SAFE_PATH lacks; a daemon-created codex
 // co-presence node then failed its bunx/tmux/codex preflight on macOS.

@@ -1020,6 +1020,7 @@ interface GetCreateRequestResult {
   child_token?: string;
   env_blob?: Record<string, string>;
   clone?: { source_alias?: string };
+  network_id?: string;
 }
 
 /** #596 — a codex co-presence launcher (`anet node start` on a codexCopresence
@@ -1246,7 +1247,13 @@ export async function handleCreateNodeDoorbell(
   }
   const childCfgPath = join(childDir, "config.json");
   // #584 —— copresence 从 flags 里拆出来,变成 config 顶层的 codexCopresence。
-  const { flags: flagsObj, codexCopresence, codexCopresenceFullAccess, opencodeGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  // #1027 — opencode-cli 缺省写 opencodeGeneration=v1,否则 anet node start 因
+  // 「OpenCode runtime binding is missing」拒绝启动并在 5s 内退出 → daemon 记 ESRCH →
+  // hub 撤 token → 之后所有调用 401。hub 的 get_create_request 现在也返回 network_id。
+  const { flags: flagsObj, codexCopresence, codexCopresenceFullAccess, opencodeGeneration: rawGeneration, opencodeMode } = childConfigFieldsFromSpec(req.node_spec);
+  const opencodeGeneration = req.node_spec.runtime === "opencode-cli"
+    ? (rawGeneration ?? "v1")
+    : rawGeneration;
   const opencodeCopresence = req.node_spec.runtime === "opencode-cli"
     && opencodeGeneration === "v2" && opencodeMode === "copresence";
   // Best-effort: also derive `permissionMode` etc into a `flags` block
@@ -1258,6 +1265,7 @@ export async function handleCreateNodeDoorbell(
       node_name: req.node_spec.name,
       alias: req.node_spec.name,
       runtime: req.node_spec.runtime,
+      ...(req.network_id ? { network_id: req.network_id } : {}),
       ...(alignedOpenCode
         ? { model: alignedOpenCode.model }
         : req.node_spec.model ? { model: req.node_spec.model } : {}),
