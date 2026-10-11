@@ -4033,6 +4033,7 @@ async function processWithOpencode(
       // only for trusted coding tasks.
       workDir: NODE_DIR,
       unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+      model: MODEL,
       sessionId: opencodeSessionId,
       onClient: (client) => {
         opencodeRuntimeClient = client;
