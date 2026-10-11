@@ -290,7 +290,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(String(acks[0].error ?? "")).not.toContain("opencode_generation_mismatch");
     expect(spawned).toHaveLength(1);
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "legacy-v1", "config.json"), "utf8"));
-    expect(cfg.opencodeGeneration).toBeUndefined();
+    expect(cfg.opencodeGeneration).toBe("v1");
     expect(cfg.runtime).toBe("opencode-cli");
   });
 
