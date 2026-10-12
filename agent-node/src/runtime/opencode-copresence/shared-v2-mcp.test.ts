@@ -43,3 +43,31 @@ test("shared V2 MCP keeps the Hub token in the bridge and restores project confi
   proxy = undefined;
   expect(readFileSync(configPath, "utf8")).toBe(original);
 });
+
+test("a bridge restart preserves edits made to the live project config", async () => {
+  root = mkdtempSync(join(tmpdir(), "anet-shared-mcp-edit-"));
+  const configPath = join(root, "opencode.json");
+  writeFileSync(configPath, '{"model":"opencode/free"}\n');
+  hub = createServer((_request, response) => response.writeHead(200).end());
+  await new Promise<void>((resolve) => hub!.listen(0, "127.0.0.1", resolve));
+  const address = hub.address();
+  if (!address || typeof address === "string") throw new Error("hub port unavailable");
+  const hubUrl = `http://127.0.0.1:${address.port}/mcp`;
+  const instructionPath = join(root, "ANET-COMMHUB.md");
+  const first = await openSharedV2CommhubMcp(root, root, hubUrl, "node-secret", instructionPath);
+  const edited = JSON.parse(readFileSync(configPath, "utf8"));
+  edited.model = "opencode/changed";
+  writeFileSync(configPath, `${JSON.stringify(edited)}\n`);
+  try {
+    proxy = await openSharedV2CommhubMcp(root, root, hubUrl, "node-secret", instructionPath);
+    await first.close();
+    await proxy.close();
+    proxy = undefined;
+    const restored = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(restored.model).toBe("opencode/changed");
+    expect(restored.mcp?.servers?.commhub).toBeUndefined();
+    expect(restored.instructions).toBeUndefined();
+  } finally {
+    await first.close();
+  }
+});

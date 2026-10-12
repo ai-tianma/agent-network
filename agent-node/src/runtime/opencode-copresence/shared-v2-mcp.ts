@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -44,6 +44,33 @@ export async function openSharedV2CommhubMcp(
     target.on("error", () => { if (!outgoing.headersSent) outgoing.writeHead(502); outgoing.end(); });
     incoming.pipe(target);
   });
+  const configPath = join(cwd, "opencode.json");
+  const backupPath = join(workDir, "opencode-shared-project-config.backup");
+  const installedHashPath = join(workDir, "opencode-shared-project-config.installed.sha256");
+  const saved = existsSync(backupPath) ? readFileSync(backupPath) : undefined;
+  const current = existsSync(configPath) ? readFileSync(configPath) : undefined;
+  let original = saved?.length ? saved : current?.length ? current : undefined;
+  if (saved && current && (!existsSync(installedHashPath)
+    || readFileSync(installedHashPath, "utf8").trim() !== createHash("sha256").update(current).digest("hex"))) {
+    const edited = JSON.parse(current.toString("utf8"));
+    const priorMcp = edited.mcp?.servers?.commhub;
+    if (priorMcp) {
+      if (priorMcp.type !== "remote" || !/^http:\/\/127\.0\.0\.1:\d+\/mcp$/.test(priorMcp.url)
+        || !/^Bearer [A-Za-z0-9_-]+$/.test(priorMcp.headers?.Authorization ?? "")) {
+        throw new Error("Workspace CommHub MCP changed outside the bridge; refusing to replace it");
+      }
+      delete edited.mcp.servers.commhub;
+      if (Object.keys(edited.mcp.servers).length === 0) delete edited.mcp.servers;
+      if (Object.keys(edited.mcp).length === 0) delete edited.mcp;
+      if (Array.isArray(edited.instructions)) {
+        edited.instructions = edited.instructions.filter((value: unknown) => value !== instructionPath);
+        if (edited.instructions.length === 0) delete edited.instructions;
+      }
+      original = Buffer.from(`${JSON.stringify(edited, null, 2)}\n`);
+    } else {
+      original = current;
+    }
+  }
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -51,12 +78,6 @@ export async function openSharedV2CommhubMcp(
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Shared MCP proxy did not bind a TCP port");
   const url = `http://127.0.0.1:${address.port}/mcp`;
-  const configPath = join(cwd, "opencode.json");
-  const backupPath = join(workDir, "opencode-shared-project-config.backup");
-  const saved = existsSync(backupPath)
-    ? readFileSync(backupPath)
-    : existsSync(configPath) ? readFileSync(configPath) : undefined;
-  const original = saved?.length ? saved : undefined;
   const mode = existsSync(configPath) ? statSync(configPath).mode & 0o777 : 0o600;
   let installed: Buffer | undefined;
   try {
@@ -81,6 +102,7 @@ export async function openSharedV2CommhubMcp(
     writeFileSync(temporary, installed, { flag: "wx", mode: 0o600 });
     renameSync(temporary, configPath);
     chmodSync(configPath, 0o600);
+    writeFileSync(installedHashPath, createHash("sha256").update(installed).digest("hex"), { mode: 0o600 });
   } catch (error) {
     server.close();
     throw error;
@@ -102,6 +124,7 @@ export async function openSharedV2CommhubMcp(
         rmSync(configPath);
       }
       rmSync(backupPath, { force: true });
+      rmSync(installedHashPath, { force: true });
     },
   };
 }
