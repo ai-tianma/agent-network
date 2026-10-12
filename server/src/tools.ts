@@ -22,6 +22,7 @@ import { getSSEStats, hasSubscribers, hasUserSubscribers, pushEvent, pushNetwork
 import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js";
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
+import { resolveInboxCaller } from "./inbox-caller.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
@@ -1421,13 +1422,18 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_inbox",
-    "Get pending commands for your session.",
+    "Read your inbox.",
     {
-      alias: z.string().min(1).max(200).describe("Session alias"),
+      alias: z.string().min(1).max(200).describe("Alias"),
       limit: z.number().min(1).max(100).optional().default(10),
+      network_id: z.string().max(200).optional(),
     },
-    async ({ alias, limit }) => {
-      const readScope = resolveReadScope(null);
+    async ({ alias, limit, network_id: netId }) => {
+      const effectiveNetId = getNetworkId(netId);
+      const recipient = resolveInboxCaller(alias, { tokenId: callerTokenId, userId: enforceUserId, networkId: effectiveNetId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected });
+      if (!recipient.ok) return { content: [{ type: "text" as const, text: JSON.stringify(recipient) }] };
+      alias = recipient.alias;
+      const readScope = resolveReadScope(effectiveNetId);
       if (readScope.denied) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: readScope.denied }) }] };
       const countParams: any[] = [alias];
       let countSql = "SELECT COUNT(*) as cnt FROM inbox WHERE session_name = ?1 AND acked = 0";
@@ -1457,9 +1463,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "ack_inbox",
-    "Acknowledge receipt of a command.",
+    "ACK your inbox.",
     {
-      alias: z.string().min(1).max(200).describe("Session alias"),
+      alias: z.string().min(1).max(200).describe("Alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
@@ -1467,6 +1473,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     async ({ alias, message_id, response, network_id: netId }) => {
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
+      const recipient = resolveInboxCaller(alias, { tokenId: callerTokenId, userId: enforceUserId, networkId: effectiveNetId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected });
+      if (!recipient.ok) return { content: [{ type: "text" as const, text: JSON.stringify(recipient) }] };
+      alias = recipient.alias;
       console.log(`[${ts()}] ${alias} → ack_inbox: ${message_id.slice(0, 8)}`);
       // New task consumers ACK by the logical tasks.task_id exposed by
       // get_inbox. Keep exact inbox.id support for legacy consumers and for
