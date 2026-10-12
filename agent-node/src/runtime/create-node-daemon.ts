@@ -689,6 +689,7 @@ export function validateFlagValueDaemon(k: string, v: unknown): void {
       if (v !== "v1" && v !== "v2") throw new Error(`flag_value_invalid:${k}:must be v1 or v2`);
       return;
     case "opencodeUnsafeTools":
+    case "opencodeNewServer":
       if (typeof v !== "boolean") throw new Error(`flag_value_invalid:${k}:must be boolean`);
       return;
     case "permissionMode":
@@ -745,7 +746,7 @@ const COPRESENCE_FLAG_RUNTIMES_DAEMON: ReadonlySet<string> = new Set(["codex-app
 
 /** Mirrors Hub validateFlagsForRuntime; never infer unsafe opt-in from a template. */
 export function validateOpenCodeCreateFlags(runtime: string, flags: Record<string, unknown>): void {
-  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer"]) {
     if (!Object.prototype.hasOwnProperty.call(flags, field)) continue;
     validateFlagValueDaemon(field, flags[field]);
     if (runtime !== "opencode-cli") throw new Error(`flag_not_applicable_to_runtime:${field}:${runtime}`);
@@ -755,6 +756,9 @@ export function validateOpenCodeCreateFlags(runtime: string, flags: Record<strin
   }
   if (flags.opencodeGeneration === "v2" && flags.opencodeUnsafeTools !== true) {
     throw new Error("opencode_v2_requires_unsafe_opt_in:V2 preview enables every local tool; trusted tasks only. Explicit opencodeUnsafeTools=true required.");
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "opencodeNewServer") && flags.opencodeGeneration !== "v2") {
+    throw new Error("opencode_new_server_requires_v2:opencodeNewServer requires explicit opencodeGeneration=v2");
   }
 }
 
@@ -802,6 +806,7 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
   }
   const generation = flags.opencodeGeneration;
   delete flags.opencodeGeneration;
+  delete flags.opencodeNewServer;
   const wanted = flags.copresence === true;
   delete flags.copresence;
   const fullAccessOpt = flags.copresenceFullAccess;
@@ -821,7 +826,7 @@ export function childConfigFieldsFromSpec(spec: Pick<DaemonNodeSpec, "runtime" |
 }
 
 export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
-  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer"]) {
     if (Object.prototype.hasOwnProperty.call(spec, field)) throw new Error(`flag_location_invalid:${field}:use node_spec.flags`);
   }
   {
@@ -847,7 +852,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
   for (const [k, v] of Object.entries(spec.flags || {})) {
     const allowed = [
       "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
-      "copresence", "opencodeGeneration", "opencodeUnsafeTools",
+      "copresence", "opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer",
       "daemonProvider",
       ...CODEX_CONFIG_ONLY_FLAG_KEYS,
     ];
@@ -860,6 +865,7 @@ export function buildAnetArgsDaemon(spec: DaemonNodeSpec): string[] {
     // check before String() coerces into argv.
     validateFlagValueDaemon(k, v);
     if (k === "opencodeUnsafeTools") { if (v === true) args.push("--opencode-unsafe-tools"); continue; }
+    if (k === "opencodeNewServer") { if (v === true) args.push("--opencode-new-server"); continue; }
     if (k === "copresence") {
       // #584 —— 同 hub validateFlagsForRuntime:别的 runtime 收下它而不生效 = 又一个静默无头。
       if (!COPRESENCE_FLAG_RUNTIMES_DAEMON.has(spec.runtime)) throw new Error(`flag_not_applicable_to_runtime:${k}:${spec.runtime}`);
@@ -1261,7 +1267,7 @@ export async function handleCreateNodeDoorbell(
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
   try {
-    const sharedOpenCodeServer = opencodeCopresence
+    const sharedOpenCodeServer = opencodeCopresence && req.node_spec.flags?.opencodeNewServer !== true
       ? readHostSharedOpenCodeServer(join(resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"))
       : undefined;
     const childCfg: Record<string, any> = {
