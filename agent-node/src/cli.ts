@@ -220,6 +220,8 @@ import {
   readOpencodeConfig,
   writeOpencodeConfig,
   writebackOpencodeSession,
+  writebackOpencodeConfiguredModel,
+  shouldReconcileOpencodeSessionModel,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN, isAcceptedOpencodeVersion, opencodeTransitionNote } from "./runtime/opencode-acp/binary";
 import {
@@ -4142,9 +4144,14 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
       sharedServer,
       resumeSessionId: opencodeSessionId,
+      reconcileResumedModel: OPENCODE_GENERATION === "v2" &&
+        shouldReconcileOpencodeSessionModel(fileConfig, MODEL),
       onSession: async (id) => {
         opencodeSessionId = id;
         writebackSession(id);
+        if (OPENCODE_GENERATION === "v2" && configFilePath && MODEL) {
+          writebackOpencodeConfiguredModel(configFilePath, MODEL);
+        }
         if (id !== SESSION_ID) {
           await register().catch((e: any) => warn(`[opencode-copresence] session registration retry needed: ${e?.message || e}`));
         }

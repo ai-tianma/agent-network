@@ -171,6 +171,8 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   sharedServer?: { url: string; password: string; passwordFile?: string };
   sharedMcpUrl?: string;
   resumeSessionId?: string;
+  /** Reconcile a resumed V2 session only after an explicit configured-model change. */
+  reconcileResumedModel?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -198,6 +200,7 @@ export interface OpenOpenCodeCopresenceOptions {
   /** V2 only. The server must have workspace-scoped MCP configured separately. */
   sharedServer?: { url: string; password: string; passwordFile?: string };
   resumeSessionId?: string;
+  reconcileResumedModel?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -1102,6 +1105,7 @@ export async function openOpenCodeCopresenceRuntime(
       sharedServer: opts.sharedServer,
       sharedMcpUrl: sharedMcp?.url,
       resumeSessionId: opts.resumeSessionId,
+      reconcileResumedModel: opts.reconcileResumedModel,
       tmuxRespawn: opts.tmuxRespawn,
       tmuxRunner: opts.tmuxRunner,
       log: opts.log,
