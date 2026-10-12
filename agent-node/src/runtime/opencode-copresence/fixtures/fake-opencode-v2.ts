@@ -89,7 +89,7 @@ Bun.serve({
     const url = new URL(request.url);
     const path = url.pathname;
     if (process.env.TEST832_TRACE) appendFileSync(process.env.TEST832_TRACE, `${process.pid} ${path}\n`);
-    if (path === "/api/info") return json({ version: "2.0.22", pid: process.pid, urls: [`http://${hostname}:${port}`] });
+    if (path === "/api/info") return json({ version: process.env.TEST_INFO_VERSION ?? "2.0.22", pid: process.pid, urls: [`http://${hostname}:${port}`] });
     if (path === "/api/mcp") return json({ data: [{ name: "commhub", status: { status: "connected" } }] });
     if (path === "/api/rpc/anet.commhub-readiness/ready") {
       return json({ output: { ready: process.env.TEST832_MISSING !== "1" } });

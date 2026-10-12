@@ -164,6 +164,7 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   cwd: string;
   workDir: string;
   model?: string;
+  expectedVersion?: string;
   title?: string;
   startupTimeoutMs?: number;
   /** An independently owned V2 server. Closing this node must not stop it. */
@@ -1095,6 +1096,7 @@ export async function openOpenCodeCopresenceRuntime(
       cwd: effectiveCwd,
       workDir,
       model,
+      expectedVersion: opts.expectedVersion,
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
       sharedServer: opts.sharedServer,

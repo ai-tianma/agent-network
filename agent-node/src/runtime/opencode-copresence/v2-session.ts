@@ -331,6 +331,9 @@ export async function openVettedOpenCodeV2Copresence(
   };
   try {
     const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    if (!backend.isSupportedVersion(version) || (opts.expectedVersion && version !== opts.expectedVersion)) {
+      throw new Error(`OpenCode v2 server version ${version} does not match the accepted version`);
+    }
     if (shared && opts.sharedMcpUrl) {
       const sources = await fetchOpenCodeJson(url, password, "/api/config", {
         headers: { "x-opencode-directory": resolve(opts.cwd) },

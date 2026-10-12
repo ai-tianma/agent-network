@@ -150,6 +150,11 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     } finally { rmSync(traceRoot, { recursive: true, force: true }); }
   });
 
+  test("rejects an unsupported server before creating a session", async () => {
+    await expect(open({ TEST_INFO_VERSION: "2.0.99" })).rejects.toThrow(/server version 2\.0\.99/);
+    expect(existsSync(join(root!, "opencode-attach.sh"))).toBe(false);
+  });
+
   test("MCP observation precedes session and ready launcher; close reaps serve", async () => {
     const traceRoot = mkdtempSync(join(tmpdir(), "anet-832-order-"));
     const trace = join(traceRoot, "requests");
