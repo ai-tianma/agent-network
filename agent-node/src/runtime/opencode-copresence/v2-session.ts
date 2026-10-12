@@ -374,6 +374,17 @@ export async function openVettedOpenCodeV2Copresence(
     if (created?.data?.location?.directory !== resolve(opts.cwd)) {
       throw new Error("OpenCode v2 session directory does not match the node workspace");
     }
+    if (shared && opts.resumeSessionId &&
+      (created?.data?.model?.providerID !== model.providerID || created?.data?.model?.id !== model.modelID)) {
+      await fetchOpenCodeJson(url, password, `/api/session/${sessionId}/model`, {
+        method: "POST",
+        body: JSON.stringify({ model: { providerID: model.providerID, id: model.modelID } }),
+      });
+      const updated = await fetchOpenCodeJson(url, password, `/api/session/${sessionId}`);
+      if (updated?.data?.model?.providerID !== model.providerID || updated?.data?.model?.id !== model.modelID) {
+        throw new Error("OpenCode v2 resumed session model did not match the node configuration");
+      }
+    }
     if (child?.pid) clearLaunchHealth = publishLaunchHealth(opts.workDir, sessionId, child.pid);
     writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir,
       opts.sharedServer?.passwordFile);

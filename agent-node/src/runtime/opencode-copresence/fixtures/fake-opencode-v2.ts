@@ -28,7 +28,7 @@ const password = process.env.OPENCODE_SERVER_PASSWORD ?? process.env.OPENCODE_PA
 const expectedAuth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
 
 type Entry = Record<string, any>;
-const sessions = new Map<string, { entries: Entry[]; inbox: Entry[]; running: boolean; steer: string[]; location?: unknown }>();
+const sessions = new Map<string, { entries: Entry[]; inbox: Entry[]; running: boolean; steer: string[]; location?: unknown; model?: any }>();
 let counter = 0;
 const id = (prefix: string) => `${prefix}_${Date.now().toString(16)}${(++counter).toString().padStart(6, "0")}Fk`;
 
@@ -97,13 +97,21 @@ Bun.serve({
     if (path === "/api/session" && request.method === "POST") {
       const body: any = await request.json();
       const sid = `ses_${Date.now().toString(16)}Fake${++counter}`;
-      sessions.set(sid, { entries: [], inbox: [], running: false, steer: [], location: body.location });
-      return json({ data: { id: sid, location: process.env.TEST_WRONG_LOCATION === "1" ? { directory: "/wrong-workspace" } : body.location } });
+      sessions.set(sid, { entries: [], inbox: [], running: false, steer: [], location: body.location, model: body.model });
+      return json({ data: { id: sid, location: process.env.TEST_WRONG_LOCATION === "1" ? { directory: "/wrong-workspace" } : body.location, model: body.model } });
     }
     const sessionLookup = /^\/api\/session\/(ses_[A-Za-z0-9]+)$/.exec(path);
     if (sessionLookup && request.method === "GET") {
       const existing = sessions.get(sessionLookup[1]);
-      return existing ? json({ data: { id: sessionLookup[1], location: existing.location } }) : json({ error: "session not found" }, 404);
+      return existing ? json({ data: { id: sessionLookup[1], location: existing.location, model: existing.model } }) : json({ error: "session not found" }, 404);
+    }
+    const modelSwitch = /^\/api\/session\/(ses_[A-Za-z0-9]+)\/model$/.exec(path);
+    if (modelSwitch && request.method === "POST") {
+      const existing = sessions.get(modelSwitch[1]);
+      if (!existing) return json({ error: "session not found" }, 404);
+      const body: any = await request.json();
+      existing.model = body.model;
+      return new Response(null, { status: 204 });
     }
     if (path === "/test/state") return json(Object.fromEntries(sessions));
     let m = /^\/api\/session\/(ses_[A-Za-z0-9]+)\/(prompt|message|inbox)(?:\/(msg_[A-Za-z0-9]+))?$/.exec(path)

@@ -226,9 +226,9 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     let first: OpenCodeCopresenceSession | undefined;
     let second: OpenCodeCopresenceSession | undefined;
     try {
-      const openShared = (cwd: string, resumeSessionId?: string) => openVettedOpenCodeCopresence({
+      const openShared = (cwd: string, resumeSessionId?: string, model = "stub/stub-model") => openVettedOpenCodeCopresence({
         backend: OPENCODE_V2_BACKEND, binary, env: { PATH: process.env.PATH ?? "", HOME: root },
-        cwd, workDir: cwd, model: "stub/stub-model", sharedServer: { url, password, passwordFile }, resumeSessionId,
+        cwd, workDir: cwd, model, sharedServer: { url, password, passwordFile }, resumeSessionId,
         tmuxRunner: noTmux, tmuxRespawn: noTmux,
       });
       first = await openShared(firstDir);
@@ -244,6 +244,13 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       const resumed = await openShared(firstDir, firstId);
       first = resumed;
       expect(resumed.sessionId).toBe(firstId);
+      await first.close();
+      first = await openShared(firstDir, firstId, "stub/new-model");
+      expect(first.sessionId).toBe(firstId);
+      const state = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as any;
+      expect(state[firstId].model).toEqual({ providerID: "stub", id: "new-model" });
     } finally {
       await first?.close();
       await second?.close();
