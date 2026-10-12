@@ -1,9 +1,8 @@
 // Finite V2 launcher: spawn is progress, never evidence that the runtime is ready.
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAnetBinAbs, minimalEnv, resolveChildHome } from "./create-node-daemon.js";
-import { readHostSharedOpenCodeServer, withSharedOpenCodeClientPath } from "./opencode-shared-server-registry.js";
+import { readHostSharedOpenCodeServer, withHostOpenCodeV2ClientPath } from "./opencode-shared-server-registry.js";
 import { forgetSpawnedChildIfPid, recordSpawnedChild } from "./stop-daemon.js";
 import { waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import type { StartDoorbellDeps } from "./start-daemon.js";
@@ -38,16 +37,10 @@ export async function completeOpenCodeStart(
       const admitted = await deps.callCommHub("ack_start_request", { request_id: requestId, status: "starting" });
       if (!admitted?.ok || admitted.status !== "starting") return { status: "start_failed", error: "opencode_start_progress_not_available" };
       const launchedAt = Date.now();
-      const config = JSON.parse(readFileSync(join(nodeDir, "config.json"), "utf8"));
-      const registered = config.opencodeSharedServerUrl
-        ? readHostSharedOpenCodeServer(join(resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"))
-        : undefined;
-      if (registered && (registered.opencodeSharedServerUrl !== config.opencodeSharedServerUrl
-        || registered.opencodeSharedServerPasswordFile !== config.opencodeSharedServerPasswordFile)) {
-        throw new Error("shared_opencode_registry_node_mismatch");
-      }
+      const registered = readHostSharedOpenCodeServer(join(
+        resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"));
       const child = (deps.spawnChild ?? spawn)(bin, ["node", "start", dirName], {
-        cwd, env: withSharedOpenCodeClientPath(minimalEnv(), registered),
+        cwd, env: withHostOpenCodeV2ClientPath(minimalEnv(), registered),
         stdio: ["ignore", "ignore", "ignore"], detached: true,
       });
       return await new Promise<Result>(resolve => {

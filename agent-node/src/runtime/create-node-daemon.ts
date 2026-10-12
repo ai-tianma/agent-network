@@ -40,7 +40,7 @@ import {
   type OpenCodeConfiguredSelection,
 } from "../opencode-v2-configured-model.js";
 import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
-import { readHostSharedOpenCodeServer, withSharedOpenCodeClientPath } from "./opencode-shared-server-registry.js";
+import { readHostSharedOpenCodeServer, withHostOpenCodeV2ClientPath } from "./opencode-shared-server-registry.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
@@ -1095,8 +1095,7 @@ export async function handleCreateNodeDoorbell(
   // PATH 与下面的 spawn 都来自 minimalEnv()。超时(unknown)不在这里拒绝。
   let sharedOpenCodeServerForCreate: ReturnType<typeof readHostSharedOpenCodeServer>;
   try {
-    if (req.node_spec.runtime === "opencode-cli" && req.node_spec.flags?.opencodeGeneration === "v2"
-      && req.node_spec.flags?.opencodeNewServer !== true) {
+    if (req.node_spec.runtime === "opencode-cli" && req.node_spec.flags?.opencodeGeneration === "v2") {
       sharedOpenCodeServerForCreate = readHostSharedOpenCodeServer(join(
         resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"));
     }
@@ -1105,7 +1104,7 @@ export async function handleCreateNodeDoorbell(
       error: `shared_opencode_registry: ${error?.message || error}` }).catch(() => {});
     return;
   }
-  const childEnvForCli = withSharedOpenCodeClientPath(
+  const childEnvForCli = withHostOpenCodeV2ClientPath(
     minimalEnv() as Record<string, string | undefined>, sharedOpenCodeServerForCreate);
   const cliStatus = await requiredCliStatus(
     req.node_spec.runtime,
@@ -1280,7 +1279,9 @@ export async function handleCreateNodeDoorbell(
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
   try {
-    const { clientBinDir: _clientBinDir, ...sharedOpenCodeServer } = sharedOpenCodeServerForCreate ?? {};
+    const { clientBinDir: _clientBinDir, ...registeredSharedServer } = sharedOpenCodeServerForCreate ?? {};
+    const sharedOpenCodeServer = opencodeCopresence && req.node_spec.flags?.opencodeNewServer !== true
+      ? registeredSharedServer : {};
     const childCfg: Record<string, any> = {
       node_id: `node_${request_id.replace(/^cr_/, "")}`,
       node_name: req.node_spec.name,

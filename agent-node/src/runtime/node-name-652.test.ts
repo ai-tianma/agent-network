@@ -272,6 +272,12 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "shared-v2", "config.json"), "utf8"));
     expect(cfg.opencodeSharedServerUrl).toBe("http://127.0.0.1:4097");
     expect(cfg.clientBinDir).toBeUndefined();
+    const owned = await runCreate({ name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } }, "cr_ownedv2client");
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    const ownedCfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "owned-v2", "config.json"), "utf8"));
+    expect(ownedCfg.opencodeSharedServerUrl).toBeUndefined();
   });
 
   test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {

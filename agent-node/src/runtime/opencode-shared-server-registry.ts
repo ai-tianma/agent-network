@@ -35,7 +35,7 @@ export function readHostSharedOpenCodeServer(path: string): HostSharedOpenCodeSe
     ...(clientBinDir ? { clientBinDir } : {}) };
 }
 
-export function withSharedOpenCodeClientPath<T extends { PATH?: string }>(env: T, server: HostSharedOpenCodeServer | undefined): T {
+export function withHostOpenCodeV2ClientPath<T extends { PATH?: string }>(env: T, server: HostSharedOpenCodeServer | undefined): T {
   if (!server?.clientBinDir) return env;
   return { ...env, PATH: `${server.clientBinDir}:${env.PATH ?? ""}` };
 }
