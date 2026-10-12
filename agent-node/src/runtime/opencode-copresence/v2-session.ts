@@ -33,7 +33,7 @@
 
 import { spawn } from "child_process";
 import { randomBytes } from "crypto";
-import { publishLaunchHealth } from "./launcher-health";
+import { publishLaunchHealth, publishSharedLaunchHealth } from "./launcher-health";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
@@ -229,7 +229,7 @@ async function waitForV2Health(
   url: string,
   password: string,
   timeoutMs: number,
-): Promise<string> {
+): Promise<{ version: string; pid: number }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child && (child.exitCode !== null || child.signalCode !== null)) {
@@ -237,12 +237,12 @@ async function waitForV2Health(
     }
     try {
       const info = await fetchOpenCodeJson(url, password, "/api/info", {}, 500);
-      if (typeof info?.version === "string") {
+      if (typeof info?.version === "string" && Number.isSafeInteger(info?.pid) && info.pid > 1) {
         const unauthenticated = await fetch(`${url}/api/info`, { signal: AbortSignal.timeout(500) });
         if (unauthenticated.status !== 401) {
           throw new Error(`OpenCode v2 serve authentication gate returned HTTP ${unauthenticated.status}`);
         }
-        return info.version;
+        return { version: info.version, pid: info.pid };
       }
     } catch (error: any) {
       if (/authentication gate/.test(error?.message ?? "")) throw error;
@@ -330,7 +330,7 @@ export async function openVettedOpenCodeV2Copresence(
     try { removeOpenCodeV2CatalogEndpoint(opts.workDir); } catch { /* already gone */ }
   };
   try {
-    const version = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
+    const { version, pid: serverPid } = await waitForV2Health(child, url, password, opts.startupTimeoutMs ?? 20_000);
     if (!backend.isSupportedVersion(version) || (opts.expectedVersion && version !== opts.expectedVersion)) {
       throw new Error(`OpenCode v2 server version ${version} does not match the accepted version`);
     }
@@ -385,7 +385,9 @@ export async function openVettedOpenCodeV2Copresence(
         throw new Error("OpenCode v2 resumed session model did not match the node configuration");
       }
     }
-    if (child?.pid) clearLaunchHealth = publishLaunchHealth(opts.workDir, sessionId, child.pid);
+    clearLaunchHealth = shared
+      ? publishSharedLaunchHealth(opts.workDir, sessionId, serverPid)
+      : publishLaunchHealth(opts.workDir, sessionId, child!.pid!);
     writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir,
       opts.sharedServer?.passwordFile);
     try {
