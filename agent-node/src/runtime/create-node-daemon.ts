@@ -40,6 +40,7 @@ import {
   type OpenCodeConfiguredSelection,
 } from "../opencode-v2-configured-model.js";
 import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
+import { readHostSharedOpenCodeServer } from "./opencode-shared-server-registry.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
@@ -1260,6 +1261,9 @@ export async function handleCreateNodeDoorbell(
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
   try {
+    const sharedOpenCodeServer = opencodeCopresence
+      ? readHostSharedOpenCodeServer(join(resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"))
+      : undefined;
     const childCfg: Record<string, any> = {
       node_id: `node_${request_id.replace(/^cr_/, "")}`,
       node_name: req.node_spec.name,
@@ -1279,6 +1283,7 @@ export async function handleCreateNodeDoorbell(
       ...(codexCopresenceFullAccess ? { codexCopresenceFullAccess } : {}),
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
+      ...(sharedOpenCodeServer ?? {}),
     };
     let initializedReplay = false;
     if (req.node_spec.flags?.daemonProvider) {
