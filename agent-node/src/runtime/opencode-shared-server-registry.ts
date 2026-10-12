@@ -1,7 +1,13 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 
-export function readHostSharedOpenCodeServer(path: string): { opencodeSharedServerUrl: string; opencodeSharedServerPasswordFile: string } | undefined {
+export type HostSharedOpenCodeServer = {
+  opencodeSharedServerUrl: string;
+  opencodeSharedServerPasswordFile: string;
+  clientBinDir?: string;
+};
+
+export function readHostSharedOpenCodeServer(path: string): HostSharedOpenCodeServer | undefined {
   if (!existsSync(path)) return undefined;
   const entry = JSON.parse(readFileSync(path, "utf8"));
   if (!entry || typeof entry.url !== "string" || !/^http:\/\/127\.0\.0\.1:\d+$/.test(entry.url)
@@ -12,5 +18,24 @@ export function readHostSharedOpenCodeServer(path: string): { opencodeSharedServ
   if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
     throw new Error("shared_opencode_password_file_not_private");
   }
-  return { opencodeSharedServerUrl: entry.url, opencodeSharedServerPasswordFile: entry.passwordFile };
+  let clientBinDir: string | undefined;
+  if (entry.clientBinDir !== undefined) {
+    if (typeof entry.clientBinDir !== "string" || !isAbsolute(entry.clientBinDir)
+      || entry.clientBinDir.includes(":") || entry.clientBinDir.includes("\0")) {
+      throw new Error("shared_opencode_client_bin_dir_invalid");
+    }
+    clientBinDir = resolve(entry.clientBinDir);
+    const binDirStat = lstatSync(clientBinDir);
+    if (!binDirStat.isDirectory() || binDirStat.isSymbolicLink() || realpathSync(clientBinDir) !== clientBinDir
+      || (binDirStat.mode & 0o022) !== 0 || (process.getuid && binDirStat.uid !== process.getuid())) {
+      throw new Error("shared_opencode_client_bin_dir_unsafe");
+    }
+  }
+  return { opencodeSharedServerUrl: entry.url, opencodeSharedServerPasswordFile: entry.passwordFile,
+    ...(clientBinDir ? { clientBinDir } : {}) };
+}
+
+export function withSharedOpenCodeClientPath<T extends { PATH?: string }>(env: T, server: HostSharedOpenCodeServer | undefined): T {
+  if (!server?.clientBinDir) return env;
+  return { ...env, PATH: `${server.clientBinDir}:${env.PATH ?? ""}` };
 }

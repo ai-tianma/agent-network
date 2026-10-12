@@ -40,7 +40,7 @@ import {
   type OpenCodeConfiguredSelection,
 } from "../opencode-v2-configured-model.js";
 import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
-import { readHostSharedOpenCodeServer } from "./opencode-shared-server-registry.js";
+import { readHostSharedOpenCodeServer, withSharedOpenCodeClientPath } from "./opencode-shared-server-registry.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
@@ -1093,7 +1093,20 @@ export async function handleCreateNodeDoorbell(
 
   // #648 — missing_cli 在写 config 和 spawn 之前拒绝。判据与就绪自检同一函数,
   // PATH 与下面的 spawn 都来自 minimalEnv()。超时(unknown)不在这里拒绝。
-  const childEnvForCli = minimalEnv() as Record<string, string | undefined>;
+  let sharedOpenCodeServerForCreate: ReturnType<typeof readHostSharedOpenCodeServer>;
+  try {
+    if (req.node_spec.runtime === "opencode-cli" && req.node_spec.flags?.opencodeGeneration === "v2"
+      && req.node_spec.flags?.opencodeNewServer !== true) {
+      sharedOpenCodeServerForCreate = readHostSharedOpenCodeServer(join(
+        resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"));
+    }
+  } catch (error: any) {
+    await deps.callCommHub("ack_create_request", { request_id, status: "rejected",
+      error: `shared_opencode_registry: ${error?.message || error}` }).catch(() => {});
+    return;
+  }
+  const childEnvForCli = withSharedOpenCodeClientPath(
+    minimalEnv() as Record<string, string | undefined>, sharedOpenCodeServerForCreate);
   const cliStatus = await requiredCliStatus(
     req.node_spec.runtime,
     childEnvForCli.PATH ?? "",
@@ -1267,9 +1280,7 @@ export async function handleCreateNodeDoorbell(
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
   try {
-    const sharedOpenCodeServer = opencodeCopresence && req.node_spec.flags?.opencodeNewServer !== true
-      ? readHostSharedOpenCodeServer(join(resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"))
-      : undefined;
+    const { clientBinDir: _clientBinDir, ...sharedOpenCodeServer } = sharedOpenCodeServerForCreate ?? {};
     const childCfg: Record<string, any> = {
       node_id: `node_${request_id.replace(/^cr_/, "")}`,
       node_name: req.node_spec.name,
@@ -1289,7 +1300,7 @@ export async function handleCreateNodeDoorbell(
       ...(codexCopresenceFullAccess ? { codexCopresenceFullAccess } : {}),
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
-      ...(sharedOpenCodeServer ?? {}),
+      ...sharedOpenCodeServer,
     };
     let initializedReplay = false;
     if (req.node_spec.flags?.daemonProvider) {
@@ -1422,7 +1433,7 @@ export async function handleCreateNodeDoorbell(
     // #652 — start by directory name: exact within this .anet root, and always ASCII.
     const child = launch(anetBin, ["node", "start", childDirName], {
       cwd: childWorkDir,
-      env: minimalEnv(),
+      env: childEnvForCli,
     });
     childPid = child.pid || -1;
     const spawnedPid = childPid;
