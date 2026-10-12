@@ -20,7 +20,7 @@ import {
   type CodexBinResolution,
 } from "./runtime/codex-bin";
 import { accessSync, constants as fsConstants } from "node:fs";
-import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync, statSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
@@ -1697,7 +1697,9 @@ const register = async () => {
   const alias = await liveAlias();
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
-    : SESSION_ID || undefined;
+    : RUNTIME === "opencode"
+      ? opencodeSessionId
+      : SESSION_ID || undefined;
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
@@ -4110,6 +4112,19 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     const { openOpenCodeCopresenceRuntime } =
       await import("./runtime/opencode-copresence/runtime");
     const { opencodeBackendFor } = await import("./runtime/opencode-backend");
+    const sharedServerUrl = fileConfig.opencodeSharedServerUrl;
+    const sharedServerPasswordFile = fileConfig.opencodeSharedServerPasswordFile;
+    let sharedServer: { url: string; password: string; passwordFile: string } | undefined;
+    if (sharedServerUrl !== undefined || sharedServerPasswordFile !== undefined) {
+      if (typeof sharedServerUrl !== "string" || typeof sharedServerPasswordFile !== "string") {
+        throw new Error("Shared OpenCode Server requires URL and password file");
+      }
+      const passwordStat = statSync(sharedServerPasswordFile);
+      if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
+        throw new Error("Shared OpenCode Server password file must be a private regular file");
+      }
+      sharedServer = { url: sharedServerUrl, password: readFileSync(sharedServerPasswordFile, "utf8").trim(), passwordFile: sharedServerPasswordFile };
+    }
     const opened = await openOpenCodeCopresenceRuntime({
       // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
       backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
@@ -4125,9 +4140,14 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       commhubToken: AUTH_TOKEN,
       commhubAlias: ALIAS,
       providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+      sharedServer,
+      resumeSessionId: opencodeSessionId,
       onSession: async (id) => {
         opencodeSessionId = id;
         writebackSession(id);
+        if (id !== SESSION_ID) {
+          await register().catch((e: any) => warn(`[opencode-copresence] session registration retry needed: ${e?.message || e}`));
+        }
       },
       log,
       warn,
