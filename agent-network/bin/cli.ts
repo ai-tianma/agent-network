@@ -92,6 +92,7 @@ import {
 } from "../src/opencode-generation-create";
 import { opencodeGenerationOfConfig, opencodeGenerationSupport } from "../src/opencode-versions";
 import { planOpencodeV2Create } from "../src/opencode-v2-create-align";
+import { resolveSharedOpenCodeServer } from "../src/opencode-shared-server-create";
 import { OpenCodeV2AlignError } from "../src/opencode-v2-configured-model";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
@@ -5210,15 +5211,17 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
     console.error(`[anet] ❌ ${generationApplied.refusal}`);
     process.exit(1);
   }
-  const sharedUrl = opts["opencode-shared-server-url"];
-  const sharedPasswordFile = opts["opencode-shared-server-password-file"];
-  if (sharedUrl !== undefined || sharedPasswordFile !== undefined) {
-    if (opts["opencode-generation"] !== "v2" || typeof sharedUrl !== "string" || typeof sharedPasswordFile !== "string"
-      || !/^http:\/\/127\.0\.0\.1:\d+$/.test(sharedUrl) || !isAbsolute(sharedPasswordFile)) {
-      console.error("[anet] ❌ Shared OpenCode requires V2, --opencode-shared-server-url http://127.0.0.1:<port>, and an absolute --opencode-shared-server-password-file.");
+  if (opts["opencode-generation"] === "v2") {
+    try {
+      const shared = resolveSharedOpenCodeServer(opts, join(home, ".anet", "opencode-shared-server.json"));
+      if (shared) return { ...generationApplied.profile, opencodeSharedServerUrl: shared.url, opencodeSharedServerPasswordFile: shared.passwordFile };
+    } catch (error) {
+      console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
-    return { ...generationApplied.profile, opencodeSharedServerUrl: sharedUrl, opencodeSharedServerPasswordFile: sharedPasswordFile };
+  } else if (opts["opencode-shared-server-url"] !== undefined || opts["opencode-shared-server-password-file"] !== undefined || opts["opencode-new-server"] !== undefined) {
+    console.error("[anet] ❌ Shared OpenCode Server options require --opencode-generation v2.");
+    process.exit(1);
   }
   return generationApplied.profile;
 }

@@ -79,8 +79,12 @@ Options:
                          Export NAME in the shell; do not pass --api-key.
   --opencode-shared-server-url <url>  OpenCode V2 existing loopback server URL
   --opencode-shared-server-password-file <path>  Absolute private password file
-                         Use both with --opencode-generation v2; each node keeps
+                         Use both with --opencode-generation v2, or register
+                         {url,passwordFile} in ~/.anet/opencode-shared-server.json
+                         to reuse that Server by default. Each node keeps
                          its own Bridge, workdir, Hub identity and session.
+  --opencode-new-server  Create a node-owned V2 Server instead of reusing the
+                         registered shared Server.
   --channel <spec>       Attach a channel (repeatable)
   --resume <id>          Bind an existing Claude session
   --resume-latest        Bind the latest Claude session
