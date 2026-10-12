@@ -31,7 +31,10 @@ test("shared V2 MCP keeps the Hub token in the bridge and restores project confi
   proxy = await openSharedV2CommhubMcp(root, root, `http://127.0.0.1:${address.port}/mcp`, "node-secret", join(root, "ANET-COMMHUB.md"));
   const installed = readFileSync(configPath, "utf8");
   expect(installed).not.toContain("node-secret");
-  expect(JSON.parse(installed).permission).toEqual({ "*": "allow" });
+  expect(JSON.parse(installed).permissions).toEqual([
+    { action: "*", resource: "*", effect: "allow" },
+    { action: "external_directory", resource: "*", effect: "allow" },
+  ]);
   const authorization = JSON.parse(installed).mcp.servers.commhub.headers.Authorization;
   const response = await fetch(proxy.url, { method: "POST", headers: { Authorization: authorization }, body: "{}" });
   expect(response.status).toBe(200);

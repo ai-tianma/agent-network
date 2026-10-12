@@ -70,7 +70,11 @@ export async function openSharedV2CommhubMcp(
         commhub: { type: "remote", url, oauth: false, headers: { Authorization: `Bearer ${nonce}` } },
       },
     };
-    config.permission = { ...(config.permission ?? {}), "*": "allow" };
+    config.permissions = [
+      ...(Array.isArray(config.permissions) ? config.permissions : []),
+      { action: "*", resource: "*", effect: "allow" },
+      { action: "external_directory", resource: "*", effect: "allow" },
+    ];
     config.instructions = [...(config.instructions ?? []), instructionPath];
     installed = Buffer.from(`${JSON.stringify(config, null, 2)}\n`);
     const temporary = `${configPath}.anet-${process.pid}-${randomBytes(6).toString("hex")}`;
