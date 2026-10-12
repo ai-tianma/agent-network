@@ -10,6 +10,7 @@ import { tmpdir } from "os";
 import { join, resolve } from "path";
 import { readOpenCodeV2CatalogEndpoint } from "../opencode-v2-catalog-endpoint";
 import { OPENCODE_V2_BACKEND } from "../opencode-backend";
+import { openSharedV2CommhubMcp } from "./shared-v2-mcp";
 import { OpenCodeProviderError } from "../opencode-provider-error";
 import { OpenCodeCopresenceTimeoutError, openVettedOpenCodeCopresence, reserveLoopbackPort, type OpenCodeCopresenceSession } from "./runtime";
 import {
@@ -254,6 +255,33 @@ describe("V2 core against a protocol-shaped fake serve", () => {
     } finally {
       await first?.close();
       await second?.close();
+      server.kill("SIGTERM");
+    }
+  });
+
+  test("shared server waits for workspace MCP and registered tools", async () => {
+    root = mkdtempSync(join(tmpdir(), "anet-543-shared-ready-"));
+    const binary = join(root, "fake-opencode-v2.ts");
+    copyFileSync(FAKE, binary); chmodSync(binary, 0o755);
+    const port = await reserveLoopbackPort();
+    const url = `http://127.0.0.1:${port}`;
+    const password = "test-only";
+    const server = spawn(binary, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+      cwd: root, env: { ...process.env, OPENCODE_SERVER_PASSWORD: password, TEST_REQUIRE_PROJECT_PLUGIN: "1" }, stdio: "ignore",
+    });
+    const cwd = join(root, "project"); mkdirSync(cwd);
+    const workDir = join(root, "node-private"); mkdirSync(workDir, { mode: 0o700 });
+    const proxy = await openSharedV2CommhubMcp(cwd, workDir, "http://127.0.0.1:9999/mcp", "test-node-token", join(cwd, "ANET-COMMHUB.md"));
+    try {
+      session = await openVettedOpenCodeCopresence({
+        backend: OPENCODE_V2_BACKEND, binary, env: { PATH: process.env.PATH ?? "", HOME: root },
+        cwd, workDir, model: "stub/stub-model", sharedServer: { url, password }, sharedMcpUrl: proxy.url,
+        tmuxRunner: noTmux, tmuxRespawn: noTmux,
+      });
+      expect(session.sessionId).toMatch(/^ses_/);
+    } finally {
+      await session?.close(); session = undefined;
+      await proxy.close();
       server.kill("SIGTERM");
     }
   });

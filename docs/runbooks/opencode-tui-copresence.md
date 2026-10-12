@@ -2,6 +2,20 @@
 
 用户向导（anet.sh，中英）在 `docs-site/docs/guide/opencode.md`。本手册保留操作边界和尚未验收的部分，不把向导里的创建命令再抄成第二套。
 
+## V2 共享 Server 迁移候选（PR #2645，未发布）
+
+同一台受信主机可让多个 V2 节点复用一个持久、仅监听 `127.0.0.1` 的 OpenCode Server。各节点仍有独立工作目录、Hub 身份、Bridge、TUI 和 `ses_` 会话；不能用同一个 session ID 代表多个节点。Server 的认证密码不是 Hub 节点令牌。共享 Server 的项目配置通过节点自有的短期 loopback MCP 代理连接 Hub，Hub 令牌只在 Bridge 内持有；Server 不得继承其他节点的令牌环境。
+
+创建时可显式提供 `--opencode-shared-server-url http://127.0.0.1:<port>` 和 `--opencode-shared-server-password-file <绝对路径>`。也可在主机用户的私有 `~/.anet/opencode-shared-server.json` 中登记 `{ "url": "http://127.0.0.1:<port>", "passwordFile": "<绝对路径>" }`，之后新建 V2 节点默认复用它。显式 `--opencode-new-server` 则创建节点自有 Server，且不能和共享参数同时使用。密码文件须为私有普通文件，不应把密码写进命令行、URL、日志或项目 Git。上述选项只有该 PR 合并并发布对应 CLI/runtime 后才可作为正式命令使用；旧版本不能靠手改配置冒充支持。
+
+共享 Server 的数据库应放在持久磁盘。OpenCode V2 默认使用 `~/.local/share/opencode/opencode.db`，`OPENCODE_DB` 可覆盖位置；先核实际进程环境、数据库路径、文件系统和备份，再停旧实例迁移。不得在活动写入期间直接复制数据库，不得把临时目录当作持久目录。原节点可以保留各自工作区并换用新 session，但这不自动迁移旧对话历史；要保留历史须单独验证数据库迁移和会话归属。共享 Server 关闭或重启不应被单个节点的 stop/close 连带终止。
+
+权限不是由不同 session 自动隔离。Server 的全局配置影响全部接入者，项目 `opencode.json` 按工作区加载，session 只保存该会话状态及待批权限请求。高权限 opt-in 仍需对每个 V2 节点显式授权；不要为一个节点的 YOLO 需求扩大共享 Server 的全局权限。不同工作区不等于不同操作系统安全身份；需要强隔离时使用独立运行用户或独立 Server。
+
+启动验收依次核：受认证 `/api/info` 的版本和 PID、Server 独立持久进程、项目配置和工作区匹配、该工作区 `/api/mcp` 的 `commhub=connected`、只读插件 RPC 确认 `commhub_send_task`/`commhub_get_task` 已注册、Bridge 与 TUI 的真实 PID/配置路径/完整 session、Hub 固定 `from_name/from_node_id` 出站和接收 ACK。只看到 `connected` 或 Hub 在线不算工具就绪。旧 session 复用时先核工作区，再核模型；配置模型变更应在原 session 内切换并回读，失败则停止启动。每个节点的回滚只恢复它自己的 Bridge/TUI、项目配置备份与旧启动路径；共享 Server/数据库的回滚必须作为单独变更，不能因单节点失败而重启全体。
+
+截至本节编写时，PR #2645 的共享运行态和测试仍在审查，现有节点的上线证据不能替代正式发布与逐节点验收。以下旧章节描述此前的逐节点 V2 Server 路径；其中“没有新增常驻服务”仅适用于旧切片，不适用于本共享 Server 候选。
+
 ## 本地创建、远程切片、目录读取，三件不同的事
 
 **本地 CLI 创建是当前操作入口。** `anet node create --runtime opencode-cli --opencode-generation v2 --opencode-unsafe-tools` 会写下 `opencodeGeneration: "v2"`、`opencodeMode: "copresence"`、`flags.opencodeUnsafeTools: true`。不带 `--opencode-unsafe-tools` 时创建和启动都拒绝。不带 `--opencode-generation` 仍是 V1。这条路径随 preview 线发布（自 `agent-network@2.3.0-preview.140` / `agent-node@2.5.0-preview.107`）。2026-10-11 量到 npm `preview` = `2.3.0-preview.162`、`latest` = `2.3.0-preview.76`；`.76` 没有这条标志。dist-tag 会动，以 `anet -v` 为准。成熟度仍是 preview：没有 V2 安全预设。

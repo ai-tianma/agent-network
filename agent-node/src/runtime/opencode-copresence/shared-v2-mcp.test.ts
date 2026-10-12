@@ -36,6 +36,8 @@ test("shared V2 MCP keeps the Hub token in the bridge and restores project confi
     { action: "external_directory", resource: "*", effect: "allow" },
   ]);
   const authorization = JSON.parse(installed).mcp.servers.commhub.headers.Authorization;
+  const pluginDirectory = JSON.parse(installed).plugins[0].package;
+  expect(readFileSync(join(pluginDirectory, "index.js"), "utf8")).toContain("ctx.tool.list()");
   const response = await fetch(proxy.url, { method: "POST", headers: { Authorization: authorization }, body: "{}" });
   expect(response.status).toBe(200);
   expect(observedAuth).toBe("Bearer node-secret");
@@ -67,6 +69,7 @@ test("a bridge restart preserves edits made to the live project config", async (
     expect(restored.model).toBe("opencode/changed");
     expect(restored.mcp?.servers?.commhub).toBeUndefined();
     expect(restored.instructions).toBeUndefined();
+    expect(restored.plugins).toBeUndefined();
   } finally {
     await first.close();
   }

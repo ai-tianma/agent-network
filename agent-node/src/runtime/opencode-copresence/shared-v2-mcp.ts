@@ -2,7 +2,8 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { installSharedV2RegistryPlugin } from "./v2-readiness";
 
 export interface SharedV2McpHandle {
   url: string;
@@ -45,6 +46,10 @@ export async function openSharedV2CommhubMcp(
     incoming.pipe(target);
   });
   const configPath = join(cwd, "opencode.json");
+  const pluginDirectory = installSharedV2RegistryPlugin(workDir);
+  const isBridgePlugin = (entry: any) => typeof entry?.package === "string"
+    && dirname(entry.package) === resolve(workDir)
+    && /^anet-commhub-registry-[a-f0-9]{16}$/.test(basename(entry.package));
   const backupPath = join(workDir, "opencode-shared-project-config.backup");
   const installedHashPath = join(workDir, "opencode-shared-project-config.installed.sha256");
   const saved = existsSync(backupPath) ? readFileSync(backupPath) : undefined;
@@ -66,6 +71,10 @@ export async function openSharedV2CommhubMcp(
         edited.instructions = edited.instructions.filter((value: unknown) => value !== instructionPath);
         if (edited.instructions.length === 0) delete edited.instructions;
       }
+      if (Array.isArray(edited.plugins)) {
+        edited.plugins = edited.plugins.filter((entry: unknown) => !isBridgePlugin(entry));
+        if (edited.plugins.length === 0) delete edited.plugins;
+      }
       original = Buffer.from(`${JSON.stringify(edited, null, 2)}\n`);
     } else {
       original = current;
@@ -83,6 +92,7 @@ export async function openSharedV2CommhubMcp(
   try {
     const config = original ? JSON.parse(original.toString("utf8")) : {};
     if (config.mcp?.servers?.commhub) throw new Error("Workspace already defines a CommHub MCP server");
+    if (config.plugins !== undefined && !Array.isArray(config.plugins)) throw new Error("Workspace OpenCode plugins must be an array");
     if (!existsSync(backupPath)) writeFileSync(backupPath, original ?? Buffer.alloc(0), { flag: "wx", mode: 0o600 });
     config.mcp = {
       ...(config.mcp ?? {}),
@@ -97,6 +107,7 @@ export async function openSharedV2CommhubMcp(
       { action: "external_directory", resource: "*", effect: "allow" },
     ];
     config.instructions = [...(config.instructions ?? []), instructionPath];
+    config.plugins = [...(config.plugins ?? []), { package: pluginDirectory }];
     installed = Buffer.from(`${JSON.stringify(config, null, 2)}\n`);
     const temporary = `${configPath}.anet-${process.pid}-${randomBytes(6).toString("hex")}`;
     writeFileSync(temporary, installed, { flag: "wx", mode: 0o600 });

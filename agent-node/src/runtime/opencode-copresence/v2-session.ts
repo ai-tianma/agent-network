@@ -344,7 +344,9 @@ export async function openVettedOpenCodeV2Copresence(
         throw new Error("OpenCode v2 shared server did not load this workspace's CommHub MCP");
       }
     }
-    if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
+    if (shared && opts.sharedMcpUrl) {
+      await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000, () => true, resolve(opts.cwd));
+    } else if (JSON.parse(childEnv.OPENCODE_CONFIG_CONTENT ?? "{}").mcp?.servers?.commhub) {
       await waitForOpenCodeV2Commhub(url, password, opts.startupTimeoutMs ?? 20_000,
         () => !child || (child.exitCode === null && child.signalCode === null));
     }
