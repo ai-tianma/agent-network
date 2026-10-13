@@ -325,6 +325,8 @@ export async function openVettedOpenCodeV2Copresence(
   let queue = Promise.resolve();
   let notifyWarned = false;
   const attachScriptPath = join(opts.workDir, "opencode-attach.sh");
+  let attachScriptWritten = false;
+  let catalogEndpointWritten = false;
   let clearLaunchHealth = () => {};
   const clearCatalogEndpoint = () => {
     try { removeOpenCodeV2CatalogEndpoint(opts.workDir); } catch { /* already gone */ }
@@ -398,12 +400,14 @@ export async function openVettedOpenCodeV2Copresence(
       : publishLaunchHealth(opts.workDir, sessionId, child!.pid!);
     writeAttachScript(backend, attachScriptPath, opts.binary, opts.env, url, password, sessionId, opts.cwd, opts.workDir,
       opts.sharedServer?.passwordFile);
+    attachScriptWritten = true;
     try {
       writeOpenCodeV2CatalogEndpoint(opts.workDir, {
         url,
         authorization: `Basic ${Buffer.from(`${USERNAME}:${password}`).toString("base64")}`,
         directory: resolve(opts.cwd),
       });
+      catalogEndpointWritten = true;
     } catch {
       warn("[opencode-copresence] v2 catalog endpoint was not recorded");
     }
@@ -569,8 +573,8 @@ export async function openVettedOpenCodeV2Copresence(
     return session;
   } catch (error) {
     clearLaunchHealth();
-    clearCatalogEndpoint();
-    rmSync(attachScriptPath, { force: true });
+    if (catalogEndpointWritten) clearCatalogEndpoint();
+    if (attachScriptWritten) rmSync(attachScriptPath, { force: true });
     if (identity) await stopProcessGroup(child as any, identity).catch(() => {});
     else if (child) try { child.kill("SIGKILL"); } catch {}
     throw Object.assign(error instanceof Error ? error : new Error(String(error)), {

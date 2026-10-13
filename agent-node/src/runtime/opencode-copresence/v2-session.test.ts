@@ -241,6 +241,8 @@ describe("V2 core against a protocol-shaped fake serve", () => {
         headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
       })).json() as Record<string, unknown>;
       expect(Object.keys(sessionsAfterMissing)).toHaveLength(2);
+      expect(existsSync(first.attachScriptPath)).toBe(true);
+      expect(readOpenCodeV2CatalogEndpoint(firstDir)?.directory).toBe(resolve(firstDir));
       const launcher = readFileSync(first.attachScriptPath, "utf8");
       expect(launcher).not.toContain(password);
       expect(launcher).toContain(passwordFile);
