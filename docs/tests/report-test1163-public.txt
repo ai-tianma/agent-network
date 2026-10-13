@@ -69,3 +69,15 @@ maintenance window; node/thread/cwd/model/provider/login are preserved. V2
 answer-intent receipts must not be downgraded to unsupported V1 readers. Rollback
 uses compatible immutable software and private-state snapshots, not context
 reset/fork/credential copies. No production restart or native adoption here.
+
+Later registry checkpoint (completed): 2026-10-13T19:20:25.319625+00:00
+CLI177 npm preview=177/latest=76; complete2127222B SHA256 cf0aac1030f494db5cf7834e655a554ffaf07a55f87b68057d7d1172fa487875,
+SHA1 5060e945195c249d023a7b0bb0734c3695bba26b, SHA512 sha512-VCCYYw+rrvOzlbVFospMR5H9FV8oU6Z3iEqgbecvnR+h1MZ90dxe7jYdC1XzIfXVF65bGEXlyUQYhfwWgYtiLQ== all matched the original main5bab
+four-gated archive and anonymous official GitHub bytes. All three npm packages
+are now fully verified and latest tags remain unchanged. #1171 completed; no
+immutable republish/rebuild/retag. The retry workflow still remains FAIL because
+its 900-second verification window ended before this successful later read;
+actual four-gate and npm-publish successes do not erase that timed failure.
+A private presence probe mistakenly searched the CLI entry shim for the pair
+constant; corrected to package-level metadata and artifact equality. Pair143 in
+the declaration file is not a claim of native runtime or original-device proof.

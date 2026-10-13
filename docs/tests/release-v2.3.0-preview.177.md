@@ -1,6 +1,6 @@
 # Agent Network — paired owned follow-up runtime v2.3.0-preview.177
 
-Released software pair: CLI 2.3.0-preview.177, Node 2.5.0-preview.143, Hub 0.9.0-preview.139. Hub139/Node143 npm full archives and the official CLI177 GitHub archive match the four-gated main builds. CLI npm propagation was pending at this checkpoint; use the official archive. Native adoption remains unverified. See `report-test1163-public.txt` for exact SHA/bytes and retained pipeline failures.
+Released software pair: CLI 2.3.0-preview.177, Node 2.5.0-preview.143, Hub 0.9.0-preview.139. Hub139/Node143 npm full archives and the official CLI177 GitHub archive match the four-gated main builds. CLI npm propagation was pending at the first checkpoint and has since been verified: its complete bytes match the official archive and gated tarball. Native adoption remains unverified. See `report-test1163-public.txt` for exact SHA/bytes and retained pipeline failures.
 
 ## Install
 
