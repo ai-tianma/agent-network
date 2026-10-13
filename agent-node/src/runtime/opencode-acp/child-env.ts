@@ -635,11 +635,7 @@ function renderSafeRuntimeAuth(source: string | undefined): string | undefined {
     if (entry.type !== "api" || typeof entry.key !== "string" || entry.key.length === 0) continue;
     auth[id] = { type: "api", key: entry.key };
   }
-  const rendered = JSON.stringify(auth, null, 2) + "\n";
-  if (Buffer.byteLength(rendered) > 1024 * 1024) {
-    throw new Error("opencode refuses co-presence auth: rendered data exceeds size limit");
-  }
-  return rendered;
+  return JSON.stringify(auth, null, 2) + "\n";
 }
 
 /** V1 human co-presence login data, following upstream Auth.Info (v1.18.1).
@@ -682,7 +678,11 @@ function renderCopresenceAuth(source: string | undefined): string {
       auth[id] = { type: "wellknown", key: entry.key, token: entry.token };
     } else throw new Error("opencode refuses co-presence auth: unsupported credential shape");
   }
-  return JSON.stringify(auth, null, 2) + "\n";
+  const rendered = JSON.stringify(auth, null, 2) + "\n";
+  if (Buffer.byteLength(rendered) > 1024 * 1024) {
+    throw new Error("opencode refuses co-presence auth: rendered data exceeds size limit");
+  }
+  return rendered;
 }
 
 function atomicWritePrivateFile(path: string, body: string, label: string,
