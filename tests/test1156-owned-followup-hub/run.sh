@@ -15,13 +15,16 @@ cp src/runtime/codex-app-server/followup-hub-check.ts /tmp/followup1156-check.ts
 for seam in identity terminal unknown replay; do
   cp /tmp/followup1156-cli.ts src/cli.ts
   cp /tmp/followup1156-check.ts src/runtime/codex-app-server/followup-hub-check.ts
-  SEAM="$seam" bun -e '
-    const seams={
-      identity:["src/runtime/codex-app-server/followup-hub-check.ts","task.to_node_id !== nodeId","false"],
-      terminal:["src/cli.ts","if (state === \"terminal\") {","if (false) {"],
-      unknown:["src/cli.ts","if (state === \"unknown\") continue;","if (false) continue;"],
-      replay:["src/cli.ts","if (await codexFollowUpHubState(entry) === \"terminal\") {","if (false) {"],
-    };const [p,a,b]=seams[process.env.SEAM];const s=await Bun.file(p).text();if(s.split(a).length!==2)throw Error("mutation anchor "+process.env.SEAM);await Bun.write(p,s.replace(a,b));'
+  case "$seam" in
+    identity)
+      bun -e 'const p="src/runtime/codex-app-server/followup-hub-check.ts";const a="task.to_node_id !== nodeId";const s=await Bun.file(p).text();if(s.split(a).length!==2)throw Error("identity anchor");await Bun.write(p,s.replace(a,"false"));' ;;
+    terminal)
+      bun -e 'const p="src/cli.ts";const a="if (state === \"terminal\") {";const s=await Bun.file(p).text();if(s.split(a).length!==2)throw Error("terminal anchor");await Bun.write(p,s.replace(a,"if (false) {"));' ;;
+    unknown)
+      bun -e 'const p="src/cli.ts";const a="if (state === \"unknown\") continue;";const s=await Bun.file(p).text();if(s.split(a).length!==2)throw Error("unknown anchor");await Bun.write(p,s.replace(a,"if (false) continue;"));' ;;
+    replay)
+      bun -e 'const p="src/cli.ts";const a="if (await codexFollowUpHubState(entry) === \"terminal\") {";const s=await Bun.file(p).text();if(s.split(a).length!==2)throw Error("replay anchor");await Bun.write(p,s.replace(a,"if (false) {"));' ;;
+  esac
   if [[ "$seam" = replay ]]; then
     target=src/runtime/codex-app-server/followup-receipts.test.ts
     pattern='production legacy adapter refuses'

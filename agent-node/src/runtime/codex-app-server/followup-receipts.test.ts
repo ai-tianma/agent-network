@@ -85,10 +85,10 @@ test("production legacy adapter refuses a persisted V2 action before runtime imp
   expect(begin).toBeGreaterThan(0); expect(end).toBeGreaterThan(begin); expect(gate.length).toBeGreaterThan(0);
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
   const execute=new AsyncFunction("taskId","turnReceiptLedger","codexFollowUpHubState","clearPendingReply",new Bun.Transpiler({loader:"ts"}).transformSync(gate)+"; return 'allowed';");
-  const {ledger}=accepted(); await expect(execute("follow",ledger,async()=>"unknown",()=>{})).rejects.toThrow();
+  const {ledger}=accepted(); expect(await execute("follow",ledger,async()=>"unknown",()=>{}).catch((error:any)=>error)).toBeInstanceOf(Error);
   expect(await execute("other",ledger)).toBe("allowed");
   expect(await execute("normal",{load:()=>[{taskId:"normal",version:1}]})).toBe("allowed");
-  await expect(execute("follow",ledger,async()=>"pending",()=>{})).rejects.toThrow();
+  expect(await execute("follow",ledger,async()=>"pending",()=>{}).catch((error:any)=>error)).toBeInstanceOf(Error);
   expect(ledger.load()).toHaveLength(1);
   const cleared:any[]=[];
   const skipped=await execute("follow",ledger,async()=>"terminal",(...args:any[])=>cleared.push(args)).catch((error:any)=>error);

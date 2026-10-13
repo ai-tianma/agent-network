@@ -32,6 +32,13 @@ shared tmux, live node, Hub credentials or installed package was changed.
 - Existing authenticated human queue Docker core: 138 PASS / 0 FAIL,
   505 assertions, 21.47 seconds; all 4 original production priority mutations
   witnessed ASSERTION RED.
+- First PR CI at source f1667fb8044fc93c423e89b730b6405f591584ee:
+  new joint core, queue core and typecheck passed. The old receipt mutation
+  witness rejected the changed async matcher output despite its green core;
+  the mutation-pin ratchet also rejected a dynamic destructured mutation table.
+  Retained both failures. Use equivalent explicit Error assertions and literal
+  target/anchor mutations; keep the original 5 receipt witnesses, new 4
+  witnesses and the static ratchet baseline unchanged. Final CI must pass.
 
 The real Hub rejects second consumed bindings and answer-turn activity for an
 input consumed on owner-turn. The existing authenticated node reply route can
