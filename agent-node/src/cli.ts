@@ -4268,7 +4268,8 @@ async function processWithOwnedFollowUpReplyOnly(entry: OwnedFollowUpReceiptEntr
   if (outcome.failed) codexModelAuth.noteError(outcome.replyText);
   else if (!outcome.skipped && !outcome.queued) codexModelAuth.noteSuccess();
   codexHealthMonitor?.noteModelAuthMaybeChanged();
-  return codexAppServerReplyOrThrow(outcome);
+  const replyText = codexAppServerReplyOrThrow(outcome);
+  return replyText;
 }
 
 let codexFollowUpRecoveryPump: Promise<void> | null = null;

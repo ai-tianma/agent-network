@@ -284,7 +284,8 @@ export class CodexAppServerBridge extends EventEmitter {
     if (opts.ownedFollowUpAdapter) this.ownedFollowUps = new OwnedFollowUpController(opts.ownedFollowUpAdapter, {
       threadId: () => this.threadId,
       steer: async (entry, text) => {
-        const request = this.client.request("turn/steer", { threadId: entry.threadId, expectedTurnId: entry.ownerTurnId, input: [{ type: "text", text }] });
+        const steerInput = { threadId: entry.threadId, expectedTurnId: entry.ownerTurnId, input: [{ type: "text", text }] };
+        const request = this.client.request("turn/steer", steerInput);
         this.emit("task_runtime_submitted", { taskId: entry.taskId, turnId: entry.ownerTurnId, steered: true, ownedFollowUp: true });
         if (extractTurnId(await request) !== entry.ownerTurnId) throw new Error("owned steer did not confirm the expected turn");
       },
@@ -745,7 +746,12 @@ export class CodexAppServerBridge extends EventEmitter {
       if (owner?.identityConfirmed && !owner.followUpAnswer && owner.turnId && await this.ownedFollowUps.admit(input, { taskId: owner.taskId, turnId: owner.turnId }))
         return { started: true, turnId: owner.turnId, steered: true };
     }
-    if (this.turnClaimed || this.activeTurnId || this.draining || this.followUpSettlement) {
+    if (this.followUpSettlement) {
+      this.enqueueWaitingTask(input);
+      this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
+      return { started: false, queuedAt: this.taskQueue.length };
+    }
+    if (this.turnClaimed || this.activeTurnId || this.draining) {
       this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
@@ -859,7 +865,8 @@ export class CodexAppServerBridge extends EventEmitter {
   /** Drain waiting work after a turn finishes. Already claimed work is never preempted. */
   private async drainQueue(): Promise<void> {
     if (this.draining) return;
-    if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId || this.followUpSettlement) return;
+    if (this.followUpSettlement) return;
+    if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId) return;
     let next = this.taskQueue.shift();
     if (!next) return;
     this.draining = true;

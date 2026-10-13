@@ -751,7 +751,7 @@ export function codexAppServerThink(
     armQueueTimer();
 
     const submission = opts.resumeOwnedFollowUp
-      ? bridge.resumeOwnedFollowUp(opts.resumeOwnedFollowUp).then(() => ({ started: true, turnId: opts.resumeOwnedFollowUp!.ownerTurnId }))
+      ? bridge.resumeOwnedFollowUp(opts.resumeOwnedFollowUp).then(() => ({ started: true as const, turnId: opts.resumeOwnedFollowUp!.ownerTurnId, steered: false }))
       : bridge.submitTask({
         taskId: opts.taskId,
         text: opts.text,

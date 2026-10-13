@@ -91,9 +91,11 @@ test("steer response loss reconciles nonce + exact input hash instead of submitt
 });
 test("unproven steer loss stays intent, finite, and never enqueues the original body",async()=>{
   const s=setup();s.client.lostSteer=true;s.client.noSteerInput=true;
-  const owner=s.think({taskId:"owner",text:"owner"});await flush();const follow=s.think(human(),{timeoutMs:10});await flush();
+  let consumed=0;
+  const owner=s.think({taskId:"owner",text:"owner"});await flush();const follow=s.think(human(),{timeoutMs:10,onConsumed:()=>{consumed++;}});await flush();
   await s.complete("owner");await owner;await s.bridge.reconcileOwnedFollowUps();expect(s.read("follow").phase).toBe("intent");
   expect((await follow).failed).toBe(true);expect(s.client.starts).toHaveLength(1);expect(s.client.steers).toHaveLength(1);
+  expect(consumed).toBe(0);
 });
 test("answer response loss recovers its client identity without launching a duplicate answer",async()=>{
   const s=setup();s.client.lostAnswer=true;const owner=s.think({taskId:"owner",text:"owner"});await flush();const follow=s.think(human());await flush();

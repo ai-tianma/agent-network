@@ -19,7 +19,8 @@ Candidate source was copied from read-only mounts into isolated containers;
 mutations do not write the checkout or a live node. No real shared tmux used.
 
 Local results (2026-10-13 UTC / Oct14 +08):
-- Controller 10 PASS / 0 FAIL, 66 assertions; 4 production mutations witness
+- Controller 10 PASS / 0 FAIL, 66 initial assertions (final adds an explicit
+  no-consumption check for unproved input, 67 assertions); 4 production mutations witness
   ASSERTION RED: answer body replay, missing input proof, accepted-input
   capacity retry, explicit-reply settlement.
 - Hub/SQLite + real WS + production CLI factory 3 PASS / 0 FAIL, 56 assertions;
@@ -35,6 +36,11 @@ fixture reused another case's body and hit real Hub dedup; old V2 admission
 fixture parsed a new return at module top level. Fix source boundaries,
 parameterize the private recovery Symbol, keep max=1 reserve=0, use unique
 fixture text and compile the actual admission block inside an async function.
+First CI also found one new return-shape type error (82 versus baseline81)
+and five old mutation anchors changed/duplicated by integration. Preserve the
+baseline and existing assertions: restore the old ordinary guard boundaries,
+build owned RPC parameters separately, keep the old CLI reply mutation on the
+ordinary path, and type the resume result explicitly. Final CI must pass.
 Original counts/assertions, authentication, dedup and mutation baselines were
 not disabled. Stronger explicit delegation assertions were added.
 
