@@ -170,7 +170,8 @@ curl -s localhost:9200/health          # version 与 sessions_count
 HTTP回归、8次断言反证、会话令牌兼容和10required通过。
 改密码可显式撤销本人具名网络令牌，默认列出脱敏保留清单，节点令牌和其他用户保留。
 正式main运行38351821700构建、四门、publish与registry元数据回读全部成功；
-npm tarball独立GET仍404，差额由#1123维护。采用既有同字节GitHub原包方式：
+npm tarball独立GET曾404；2026-10-13 14:03:47+08晚回读已可下载且完整byte/SRI一致，
+#1123分发差额已具备结案证据。继续使用经核验的同字节GitHub原包lock，无需再次切换现役：
 精确main tag `commhub-server-v0.9.0-preview.136`，匿名完整byte/SRI与gated一致。
 公开包SHA256 `47449d1e6163e4ec7595d3124676ad655845ead7e22d0184777c2dade3dd7e81`，348安装文件一致。
 
@@ -183,7 +184,8 @@ lock只替换包resolved到GitHub原包，SRI/version/transitive保持。
 保留 `runtime-v118-preview135` 回退；恢复该历史版本时使用deployment main
 `6109c69773069eb0adc8035326ebc887a6d3b7cb` 的135 profile/lock。
 生产数据与原值密钥来自既有私有来源，完整密钥恢复仍NOT_COVERED。
-CLI173已有正式main-gated GitHub下载，原npm超时和客户端139活动验收仍独立未结。
+CLI173的正式main-gated GitHub下载和14:03:48+08 npm完整包均已核验；
+原npm运行超时仍保留FAILURE，真实原客户端139活动验收仍独立未结。
 来源/SRI、backup/预检、自然流量及剩余CLI173/Node139差额见
 `report-test717-hub136-publication.txt`；公开包/Hub激活不代签原客户端139实际活动。
 
