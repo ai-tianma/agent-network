@@ -132,7 +132,7 @@ test("#730 production CLI dispatcher uses authenticated priority", async () => {
   const start = source.indexOf("const codexInboxDispatcher = createDetachedInboxDispatcher");
   const end = source.indexOf("\n});", start) + 4; expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start);
   const code = new Bun.Transpiler({ loader: "ts" }).transformSync(source.slice(start, end));
-  const dispatcher = new Function("createDetachedInboxDispatcher", "isInteractiveDashboardTask", "CODEX_INBOX_MAX_CONCURRENT", "warn", "scheduleWorkInboxDrain", code + ";return codexInboxDispatcher;")(createDetachedInboxDispatcher, isInteractiveDashboardTask, 1, () => {}, () => {});
+  const dispatcher = new Function("createDetachedInboxDispatcher", "isInteractiveDashboardTask", "CODEX_INBOX_MAX_CONCURRENT", "warn", "scheduleWorkInboxDrain", "CODEX_FOLLOWUP_RECOVERY", code + ";return codexInboxDispatcher;")(createDetachedInboxDispatcher, isInteractiveDashboardTask, 1, () => {}, () => {}, Symbol("fixture-recovery"));
   const gates = new Map<string, ReturnType<typeof deferred>>(); const starts: string[] = [];
   const run = async (m: ReturnType<typeof human>) => { starts.push(m.id); const gate = deferred(); gates.set(m.id, gate); await gate.promise; };
   dispatcher.submit([machine("active")], run); dispatcher.submit([machine("m1"), human("h1"), machine("m2")], run);

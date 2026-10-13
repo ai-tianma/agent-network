@@ -200,6 +200,7 @@ export async function openCodexAppServerRuntime(opts: {
   onExit?: (info: { code: number | null; signal: NodeJS.Signals | null }) => void;
   /** #1930 — see CodexAppServerBridgeOptions.shouldStartQueued. */
   shouldStartQueued?: (task: { taskId: string; text: string; from?: string }) => Promise<boolean>;
+  ownedFollowUpAdapter?: import("./owned-followup-controller").OwnedFollowUpAdapter;
   log?: (msg: string) => void;
   warn?: (msg: string) => void;
 }): Promise<CodexAppServerRuntimeSession> {
@@ -309,6 +310,7 @@ export async function openCodexAppServerRuntime(opts: {
         ? (threadId) => findCodexRolloutFile(codexSessionsRoot({ ...process.env, CODEX_HOME: opts.codexHome }), threadId) !== null
         : undefined,
       shouldStartQueued: opts.shouldStartQueued,
+      ownedFollowUpAdapter: opts.ownedFollowUpAdapter,
       // Fresh-TUI materialization and persisted-thread resume are the same
       // recovery operation from an operator's perspective. One environment
       // setting governs both; the old hidden ~20 s retry cap is gone.
@@ -444,6 +446,7 @@ export function codexAppServerThink(
     queueTimeoutMs?: number;
     /** Set only after isInteractiveDashboardTask verifies Hub-stamped origin; not inferred from alias or steering. */
     interactiveDashboardTask?: boolean;
+    resumeOwnedFollowUp?: import("./receipt-ledger").OwnedFollowUpReceiptEntry;
     /** Test seam; production defaults to a 5s authoritative thread/read. */
     reconciliationIntervalMs?: number;
     log?: (m: string) => void;
@@ -485,10 +488,12 @@ export function codexAppServerThink(
     let capacityRetrying = false;
     let attemptTurnId: string | undefined;
     let toolsRan = false;
+    let acceptedFollowUpInput = false;
     const sideEffectTurns = new Set<string>();
     const finish = (r: CodexAppServerThinkResult) => {
       if (settled) return;
       settled = true;
+      bridge.detachOwnedFollowUp?.(opts.taskId);
       bridge.off("task_reply", onReply);
       bridge.off("task_skipped", onSkipped);
       bridge.off("task_error", onError);
@@ -558,6 +563,10 @@ export function codexAppServerThink(
     const failCapacityOrFinish = (raw: string, queued = false) => {
       if (settled || capacityRetrying) return;
       log(`[codex-app-server] task_error ${opts.taskId}: ${raw}`);
+      if (acceptedFollowUpInput) {
+        finish({ replyText: `codex-app-server 错误: ${raw}`, failed: true, queued });
+        return;
+      }
       // Mutation anchor: a fake app-server test goes red if this call stops
       // deciding to retry (board #656).
       const capacityDecision = capacityRetryDecision(capacityRetries, raw, toolsRan);
@@ -636,7 +645,8 @@ export function codexAppServerThink(
       // it immediately instead of leaving a ghost row behind a model timer.
       if (bridge.cancelQueuedTask(opts.taskId)) finishQueueTimeout();
     };
-    const onSubmitted = (ev: { taskId: string; turnId?: string; steered?: boolean }) => {
+    const onSubmitted = (ev: { taskId: string; turnId?: string; steered?: boolean; ownedFollowUp?: boolean }) => {
+      if (ev.taskId === opts.taskId && ev.ownedFollowUp === true) acceptedFollowUpInput = true;
       if (ev.taskId !== opts.taskId || submittedReported) return;
       submittedReported = true;
       try {
@@ -691,6 +701,7 @@ export function codexAppServerThink(
       reconciliationTimer = setTimeout(async () => {
         try {
           const reconciled = await bridge.reconcileActiveTurn();
+          await bridge.reconcileOwnedFollowUps?.();
           if (reconciled.recovered) {
             log(`[codex-app-server] recovered missed terminal event for turn ${reconciled.turnId}`);
           }
@@ -739,15 +750,16 @@ export function codexAppServerThink(
     };
     armQueueTimer();
 
-    bridge
-      .submitTask({
+    const submission = opts.resumeOwnedFollowUp
+      ? bridge.resumeOwnedFollowUp(opts.resumeOwnedFollowUp).then(() => ({ started: true as const, turnId: opts.resumeOwnedFollowUp!.ownerTurnId, steered: false }))
+      : bridge.submitTask({
         taskId: opts.taskId,
         text: opts.text,
         from: opts.from,
         steerIfExternalTurn: opts.steerIfExternalTurn,
         interactiveDashboardTask: opts.interactiveDashboardTask === true,
-      })
-      .then((r) => {
+      });
+    submission.then((r) => {
         // Compatibility fallback for bridge implementations predating the
         // task_started event. The real bridge emits before this continuation;
         // armResponseIdleTimer is idempotent, so both paths cannot double-arm.

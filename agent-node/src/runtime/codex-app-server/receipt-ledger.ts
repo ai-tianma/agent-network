@@ -33,7 +33,7 @@ export type OwnedFollowUpReceiptEntry = Omit<TurnReceiptEntry, "version"> & {
   ownerTurnId: string;
   nonce: string;
   inputSha256: string;
-  phase: "intent" | "accepted" | "answering";
+  phase: "intent" | "accepted" | "answer_intent" | "answering";
   answerClientUserMessageId?: string;
 };
 
@@ -79,13 +79,15 @@ function sanitizeEntry(value: unknown): AnyTurnReceiptEntry | null {
   if (!validString(row.ownerTaskId) || row.ownerTaskId === row.taskId || !validString(row.ownerTurnId) ||
       typeof row.nonce !== "string" || !/^[a-f0-9]{32}$/.test(row.nonce) ||
       typeof row.inputSha256 !== "string" || !/^[a-f0-9]{64}$/.test(row.inputSha256) ||
-      !["intent", "accepted", "answering"].includes(row.phase ?? "") ||
+      !["intent", "accepted", "answer_intent", "answering"].includes(row.phase ?? "") ||
       (row.phase === "answering"
         ? row.turnId === row.ownerTurnId || row.answerClientUserMessageId !== `anet:${row.taskId}`
-        : row.turnId !== row.ownerTurnId || row.answerClientUserMessageId !== undefined)) throw new IncompatibleTurnReceiptError();
+        : row.turnId !== row.ownerTurnId || (row.phase === "answer_intent"
+          ? row.answerClientUserMessageId !== `anet:${row.taskId}`
+          : row.answerClientUserMessageId !== undefined))) throw new IncompatibleTurnReceiptError();
   return { ...common, version: 2, mode: "owned_followup", ownerTaskId: row.ownerTaskId,
     ownerTurnId: row.ownerTurnId, nonce: row.nonce, inputSha256: row.inputSha256,
-    phase: row.phase!, ...(row.phase === "answering" ? { answerClientUserMessageId: row.answerClientUserMessageId } : {}) };
+    phase: row.phase!, ...(["answer_intent", "answering"].includes(row.phase!) ? { answerClientUserMessageId: row.answerClientUserMessageId } : {}) };
 }
 
 /** Crash-safe, 0600 ledger. It stores routing and turn identity, never prompt/result text. */
@@ -158,18 +160,27 @@ export class TurnReceiptLedger {
   acceptFollowUp(taskId: string, proof: { ownerTurnId: string; nonce: string }): void {
     const rows = this.load();
     const row = rows.find(item => item.taskId === taskId);
-    if (row?.version !== 2 || row.state !== "watching" || row.phase === "answering" ||
+    if (row?.version !== 2 || row.state !== "watching" || !["intent", "accepted"].includes(row.phase) ||
         proof.ownerTurnId !== row.ownerTurnId || proof.nonce !== row.nonce) throw new Error("Follow-up acceptance requires its own pending intent");
     row.phase = "accepted";
     this.save(rows);
   }
 
-  bindFollowUpAnswer(taskId: string, context: { threadId: string; turnId: string; clientUserMessageId: string }): void {
+  prepareFollowUpAnswer(taskId: string): void {
+    const rows = this.load(), row = rows.find(item => item.taskId === taskId);
+    if (row?.version !== 2 || row.phase !== "accepted" || row.state !== "watching") throw new Error("Answer submission requires a previously accepted follow-up");
+    row.phase = "answer_intent";
+    row.answerClientUserMessageId = `anet:${taskId}`;
+    this.save(rows);
+  }
+
+  bindFollowUpAnswer(taskId: string, context: { threadId: string; turnId: string; clientUserMessageId: string; identityConfirmed?: boolean }): void {
     const rows = this.load();
     const row = rows.find(item => item.taskId === taskId);
     if (row?.version === 2 && row.phase === "answering" && row.threadId === context.threadId &&
         row.turnId === context.turnId && row.answerClientUserMessageId === context.clientUserMessageId) return;
-    if (row?.version !== 2 || row.state !== "watching" || row.phase !== "accepted" ||
+    if (row?.version !== 2 || row.state !== "watching" ||
+        (!["accepted", "answer_intent"].includes(row.phase) && !(row.phase === "answering" && context.identityConfirmed === true)) ||
         context.threadId !== row.threadId || context.turnId === row.ownerTurnId || !validString(context.turnId) ||
         context.clientUserMessageId !== `anet:${row.taskId}`) throw new Error("Follow-up answer requires its exact independent user-message identity");
     row.turnId = context.turnId;
