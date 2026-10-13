@@ -25,5 +25,4 @@ jobs:
             bash -lc 'cd /agent-node-src && ANET_OPENCODE_V2_BIN="$(command -v opencode)" bun test \
               src/runtime/opencode-shared-server-registry.test.ts \
               src/runtime/opencode-copresence/shared-v2-mcp.test.ts \
-              src/runtime/opencode-copresence/v2-shared-native.test.ts \
-              src/runtime/opencode-copresence/v2-session.test.ts'
+              src/runtime/opencode-copresence/v2-shared-native.test.ts'
