@@ -1,6 +1,7 @@
 # Human follow-ups during an owned Codex turn (#730)
 
-Status: protocol contract and current fallback regression coverage. Active
+Status: protocol contract, current fallback regression coverage, and the first
+V2 receipt compatibility implementation slice (#1155). Active
 owned-turn injection is **not implemented** by this change. The current
 runtime continues to queue authenticated Dashboard requests ahead of other
 waiting work, without interrupting an already claimed turn. This contract
@@ -83,6 +84,50 @@ steering compatibility remains outside this owned-turn implementation slice.
    answer text. A local lease/deadline is not the original Hub expiry.
 
 ## Incremental acceptance and delivery
+
+### Implemented receipt compatibility slice (#1155)
+
+The existing `NODE_DIR/codex-turn-receipts.json` now supports V1 original-task
+rows together with V2 `owned_followup` rows. V2 keeps routing metadata, owner
+task/turn relationship, a nonce and SHA256 of intended input; it does not copy
+the input or result text. Its stages are `intent`, `accepted`, and `answering`.
+Acceptance requires the persisted owner turn and nonce. An answer binding
+requires the same thread, a distinct turn and the exact `anet:<follow-up id>`
+user-message identity. Repeating that exact answer binding is idempotent.
+
+Recovery retains intent/accepted rows without reading or delivering the owner's
+terminal text. An answering row requires that exact user-message client id in
+persisted app-server history before it may recover a final answer/error.
+Missing or unsupported identity evidence stays unresolved; existing 48-hour
+retention bounds still apply. V1 recovery remains compatible. The inspector
+performs only history reads; it starts no turn and changes no Hub binding.
+
+Unknown versioned rows/envelopes and malformed V2 rows cause recovery and all
+ledger mutations (including direct `save`) to fail before rewriting the file.
+The previous bytes are retained. The legacy runtime admission path also refuses
+to run an action whose task id already has a V2 receipt, before importing the
+runtime. This stops a partially supported adapter from replaying accepted work.
+The error is scoped to that request; it does not interrupt the original turn.
+
+This slice does **not** call `prepareFollowUp` from production admission or add
+owned `turn/steer`. It does not yet reconcile explicit Hub replies or schedule
+answer-only continuations. Those must be wired together in #1151. Hub runtime
+evidence currently rejects a conflicting thread/turn binding; integration must
+respect that immutable context and cannot invent activity for the old turn.
+The legacy external-human steering policy is unchanged.
+
+Upgrade/rollback: the same existing launcher, node directory and credential
+sources apply; no new service, port/proxy mapping, environment variable or
+private state file is introduced. This source slice creates no V2 row during
+normal admission, and publishes no new runtime package on its own. Before a
+later adapter writes V2, the authorized lifecycle owner must back up the existing
+ledger and pending-reply state using the established private backup process.
+Runtimes older than this codec may discard V2 rows: do not downgrade with V2
+pending. Drain/resolve those rows using a compatible runtime in the normal
+owner window before rollback. Never clear the ledger as a downgrade shortcut.
+Git recreates code/schema/fixture, not those private receipts, Hub data or login
+state; recovery needs authorized data backups or independent re-registration.
+No complete node disaster-recovery claim follows from the fixture alone.
 
 The first slice adds the contract and Docker tests across the real classifier,
 bridge and runtime. They verify the current fallback: no owned injection,
