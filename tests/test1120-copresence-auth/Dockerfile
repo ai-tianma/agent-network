@@ -5,5 +5,7 @@ WORKDIR /repo/agent-node
 COPY agent-node/package.json agent-node/package-lock.json ./
 RUN npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-node/src/ ./src/
+COPY tests/test1120-copresence-auth/run.sh /fixture/run.sh
+RUN chmod +x /fixture/run.sh
 USER bun
-CMD ["bun", "test", "src/runtime/opencode-acp/copresence-auth.test.ts", "src/runtime/opencode-acp/child-env.test.ts", "src/runtime/opencode-v1-spawn-snapshot.test.ts"]
+CMD ["bash", "/fixture/run.sh"]

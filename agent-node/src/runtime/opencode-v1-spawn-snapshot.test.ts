@@ -269,6 +269,7 @@ describe("OpenCode V1 spawn snapshot (#542 — backend refactor changes nothing)
         expires: 0, accountId: "fixture-account" } };
       writeFileSync(join(first.env.XDG_DATA_HOME, "opencode/auth.json"), JSON.stringify(auth), { mode: 0o600 });
       await session.close(); session = undefined;
+      expect(existsSync(join(workDir, ".local/share/opencode/auth.json"))).toBe(true);
       expect(JSON.parse(readFileSync(join(workDir, ".local/share/opencode/auth.json"), "utf8"))).toEqual(auth);
       expect(existsSync(first.env.XDG_DATA_HOME)).toBe(false);
       session = await open();
