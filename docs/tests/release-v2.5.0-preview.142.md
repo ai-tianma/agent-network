@@ -2,7 +2,7 @@
 
 ## Install
 
-All four exact-main gates passed. Node142 is verified on npm; CLI176 is available through the official immutable GitHub gated download while its npm registry visibility remains unconfirmed. Use Node >=22.13 and a new private prefix:
+All four exact-main gates passed. Node142 and CLI176 are now verified on npm after delayed registry visibility. The official immutable GitHub CLI176 download remains byte-identical to its npm tarball. Use Node >=22.13 and a new private prefix:
 
 ```bash
 set -e
