@@ -12,14 +12,18 @@ const nativeTest = binary ? test : test.skip;
 nativeTest("a real V2 shared server loads the project-scoped registry without a model turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "anet-v2-shared-native-"));
   const project = join(root, "project");
+  const secondProject = join(root, "second-project");
   const nodeDir = join(root, "node-private");
+  const secondNodeDir = join(root, "second-node-private");
   const config = join(root, "config");
   const data = join(root, "data");
   let activeData = data;
   const state = join(root, "state");
-  for (const dir of [project, nodeDir, config, data, state]) mkdirSync(dir, { mode: 0o700 });
+  for (const dir of [project, secondProject, nodeDir, secondNodeDir, config, data, state]) mkdirSync(dir, { mode: 0o700 });
   const plugin = installSharedV2RegistryPlugin(nodeDir);
+  const secondPlugin = installSharedV2RegistryPlugin(secondNodeDir);
   writeFileSync(join(project, "opencode.json"), JSON.stringify({ plugins: [{ package: plugin }] }), { mode: 0o600 });
+  writeFileSync(join(secondProject, "opencode.json"), JSON.stringify({ plugins: [{ package: secondPlugin }] }), { mode: 0o600 });
   const port = await new Promise<number>((resolve, reject) => {
     const listener = createServer();
     listener.once("error", reject);
@@ -36,6 +40,7 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
     "x-opencode-directory": project,
     "content-type": "application/json",
   };
+  const secondHeaders = { ...headers, "x-opencode-directory": secondProject };
   const spawnServer = () => spawn(binary!, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: project,
     env: {
@@ -99,6 +104,19 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
     const created = await createdResponse.json() as any;
     const sessionId = created?.data?.id;
     expect(sessionId).toMatch(/^ses_[A-Za-z0-9]+$/);
+    const secondCreatedResponse = await fetch(`${url}/api/session`, {
+      method: "POST", headers: secondHeaders,
+      body: JSON.stringify({
+        title: "Second shared-server project",
+        location: { directory: secondProject },
+        model: { providerID: "stub", id: "stub-model" },
+      }),
+    });
+    expect(secondCreatedResponse.status).toBe(200);
+    const secondCreated = await secondCreatedResponse.json() as any;
+    const secondSessionId = secondCreated?.data?.id;
+    expect(secondSessionId).toMatch(/^ses_[A-Za-z0-9]+$/);
+    expect(secondSessionId).not.toBe(sessionId);
     await stopServer();
     server = spawnServer();
     await waitReady();
@@ -107,6 +125,11 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
     const resumed = await resumedResponse.json() as any;
     expect(resumed?.data?.id).toBe(sessionId);
     expect(resumed?.data?.location?.directory).toBe(project);
+    const secondResumedResponse = await fetch(`${url}/api/session/${secondSessionId}`, { headers: secondHeaders });
+    expect(secondResumedResponse.status).toBe(200);
+    const secondResumed = await secondResumedResponse.json() as any;
+    expect(secondResumed?.data?.id).toBe(secondSessionId);
+    expect(secondResumed?.data?.location?.directory).toBe(secondProject);
     await stopServer();
     const restoredData = join(root, "restored-data");
     cpSync(data, restoredData, { recursive: true });
@@ -119,6 +142,11 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
     const restored = await restoredResponse.json() as any;
     expect(restored?.data?.id).toBe(sessionId);
     expect(restored?.data?.location?.directory).toBe(project);
+    const secondRestoredResponse = await fetch(`${url}/api/session/${secondSessionId}`, { headers: secondHeaders });
+    expect(secondRestoredResponse.status).toBe(200);
+    const secondRestored = await secondRestoredResponse.json() as any;
+    expect(secondRestored?.data?.id).toBe(secondSessionId);
+    expect(secondRestored?.data?.location?.directory).toBe(secondProject);
   } finally {
     try { await stopServer(); }
     finally { rmSync(root, { recursive: true, force: true }); }
