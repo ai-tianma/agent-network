@@ -1,0 +1,26 @@
+#1120 V1 co-presence auth persistence candidate — 2026-10-13
+
+No local functional suites or real account/production-node operations.
+First Docker run 38358963602 on fa056aa291605ec9a189ba10b09806f6fe4d0719:
+26 PASS / 0 FAIL / 360 assertions. Synthetic API/OAuth/wellknown login survives
+launch cleanup → fresh launch; logout stays empty; probes/discard/ACP do not
+save/expand auth; concurrent edits and credential symlinks are protected.
+
+Native V1 checkpoint run 38358963719 passed both pinned 1.18.1 and 1.18.34.
+Exact CLI 174 / Node 140 pair run 38359263601 passed on candidate 470e4359.
+Later source/fixture changes require fresh final-head results before main merge.
+
+Added production openOpenCodeCopresenceRuntime → auth update → close → fresh
+server coverage, the original argv/cwd/env/launcher golden, and a TEST-ONLY
+missing-persistence-wiring mutation requiring the restart assertion to fail.
+Run 38359263659 FAILED while building this larger fixture: apt/npm dependency
+installation was under docker build --network none. No functional result was
+reached. The build now has network access; test execution retains --network none.
+Fixture source files are owned by its non-root user for container-only mutation.
+No assertion, isolation policy or source runtime was weakened for this failure.
+
+Scope: V1 human co-presence Auth.Info persistence on normal stop/restart only.
+Session-history recovery, crash/SIGKILL auth updates and original-node live
+login/restart verification remain separate; #1120 must stay open for them.
+CLI174/Node140 remain release candidates until exact main, formal gates and
+full public-byte verification pass. This report does not certify publication.

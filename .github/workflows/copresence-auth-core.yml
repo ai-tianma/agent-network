@@ -18,6 +18,6 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
       - name: Login, fresh restart, logout, private path and ACP/probe boundaries
         run: >-
-          sg docker -c 'docker build --network none
+          sg docker -c 'docker build
           -f tests/test1120-copresence-auth/Dockerfile -t copresence-auth-core .
           && docker run --rm --network none copresence-auth-core'
