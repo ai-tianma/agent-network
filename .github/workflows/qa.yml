@@ -12,6 +12,7 @@ name: anet QA (v0)
 on:
   pull_request:
     paths:
+      - 'tests/test1120-copresence-auth/**'
       - 'tests/test1113-node-profile/**'
       - 'tests/test961-download-platforms/**'
       - 'server/**'
@@ -271,6 +272,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'tests/test1120-copresence-auth/**'
       - 'tests/test1113-node-profile/**'
       - 'tests/test961-download-platforms/**'
       - 'server/**'

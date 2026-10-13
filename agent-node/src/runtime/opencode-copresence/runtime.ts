@@ -1057,6 +1057,7 @@ export async function openOpenCodeCopresenceRuntime(
     unsafeTools,
     launchBase: opts.launchBase,
     credentialMode: "runtime",
+    persistAuth: backend.generation === "v1",
   });
   let core: OpenCodeCopresenceSession | undefined;
   let cleaned = false;
