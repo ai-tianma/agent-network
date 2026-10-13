@@ -164,18 +164,27 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.137` 部署准备（2026-10-13，尚未激活）
+### `.137` 部署（2026-10-13 已激活）
 
-#1109 MCP/REST Daemon 列表按权威 node_id 核有效凭据与心跳；保留已验证旧 unbound
-和唯一旧心跳，轮换凭据去重，按 scope 批量三次读取，不修改 schema/生命周期。
+#1109 MCP/REST Daemon 列表按权威 node_id 核有效凭据与心跳；旧兼容验证保留，
+旋转去重、三次 scope 批量读取，不修改 schema/节点生命周期。
 源码PR2696/main `36ed82249f661eb593375e72e375e59472bd41c7` 与实际 Docker 测试完整树一致；
-运行38368490408为 SQLite123/PG123正常与6次断言反证；10required通过。
-正式main运行38368892713仍须四门和匿名完整包/SRI核验。准备安装坐标
-`runtime-v120-preview137`，profile/lock合main且私有一致性备份与离线预检通过后，
-才允许选择性激活 `commhub-hub`；不修改 hub.env/base，不带 `--update-env`。
-之前的 `runtime-v119-preview136` 和main `1a5b1a69e07902eef489342ca573fd7851889a55`
-的136 profile/lock保留回退；数据库/原密钥依既有私有来源，完整恢复仍NOT_COVERED。
-准备态不代表137已运行，也不代签Node139自然活动或OpenCode原账号正常重启验收。
+38368490408 SQLite123/PG123正常与6次断言反证、10required通过。
+正式main运行38368892713全部四门/上传/registry成功；16:29:45+08匿名NPM整包
+1253469B/SHA256 `6349cc906aa7d8c5ef603beea69117073d769703d2ec29fa4d9354c57720219a`
+及SHA1/SRI与原gated相同，preview137/latest30已核。
+部署PR2697/main `62edb5e34b9958ff5443b728202cb456aca4cb96` 的profile/lock已合，
+Docker profile38369437748、身份38369437789和10required通过；350安装文件匹配公开包。
+私有一致性备份integrity ok、network-none离线预检保留快照行数后，16:34:49+08
+仅 `commhub-hub` secured137生效，PID828760/restart95；实际入口 `runtime-v120-preview137`。
+profile等于deployment main，hub.env元数据/base不变，不带 `--update-env`。
+MCP现役列表7唯一daemon（4online/3offline），原task绑定未变；16:36:28+08
+113自然心跳/128SSE、2真实回复/2投递，新增关键错误0、PID/restart不变。
+这些是有界观察，非全节点/长期健康证明。
+回退保留 `runtime-v119-preview136` 和main `1a5b1a69e07902eef489342ca573fd7851889a55`
+的136 profile/lock；数据库/原密钥依既有私有来源，完整恢复仍NOT_COVERED。
+完整坐标/备份/预检/范围见 `report-test1109-hub137-publication.txt`；
+Node139自然活动与OpenCode原账号正常重启验收仍分别保持未结。
 
 ### `.136` 部署（2026-10-13 已激活）
 
