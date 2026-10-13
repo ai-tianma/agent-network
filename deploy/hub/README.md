@@ -164,17 +164,31 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.135` 部署输入（待现场激活）
+### `.135` 部署（2026-10-13 已激活）
 
-#1113 活动续租候选已正常main `47816a61095f196cf726f194f482739bc09f6a82`。
-Hub135/Node139/CLI173同一源码，先发布Node139再公开exact-pair CLI173。
-Hub正式运行38345772164需四道门与preview发布/registry全绿、公开字节与main
-制品相同；profile/managed lock准备选择 `runtime-v118-preview135`，保留
-`runtime-v117-preview134` 回滚，传递依赖保持原lock。安装独立prefix、一致
-私有备份与离线schema预检通过后，才切选定Hub。当前只是准备输入，不声明
-现场生效。原base/env、端口/代理与私有密钥来源沿用本runbook，完整key DR
-仍NOT_COVERED。客户端正常139启动及原turn真实pulse验收单列，当前通信牛
-Node121未重启，不由Hub135升级代签其采用139。
+#1113 按精确任务/node/network/原thread/turn上报活动，续租空闲预算，保留
+派发总cap；重复消费、ACK及节点heartbeat不续租，terminal不复活。
+源码 PR2683/main `47816a61095f196cf726f194f482739bc09f6a82`；SQLite130/PG121/runtime+pair52及
+11次断言反证、既有caller/sender/pair及10个必需门通过。
+Hub135/Node139正式运行 `38345772164` / `38345774136` 的四门与
+preview发布/registry回读成功。Node139可用且字节验证后才派CLI173。
+CLI首跑38346683979因文档preview172版本断言失败，未发布；文档PR2685/main
+`064ed34c9eba20f852a32dbe42b98389c3c2ce63` 修戳后以该精确main重新构建CLI173，正式运行
+`38347806170` 四门成功及npm publish成功，但registry900秒回读失败；CLI173仍未核实公开，preview仍172。保留该失败，不重发173，出现后只读核byte/SRI。各包源码目录保持相同，完整来源SHA
+分别记录，不把文档修正后的CLI仓库SHA称作既有Hub/Node的发布SHA。
+
+部署 PR2684/main `6109c69773069eb0adc8035326ebc887a6d3b7cb`，profile/lock选择
+`runtime-v118-preview135`，保留 `runtime-v117-preview134` 回退，传递依赖不变。
+公开Hub与main gated字节一致，SHA256 `4bf1d5bb25065cf7dbd52b6834a0b1563c7a6575c20b0a1346d92674ad20c29a`；347安装文件一致。
+私有一致备份及离线schema预检通过后于 `2026-10-13T04:29:38.150364+00:00` 确认
+secured135、真实v118入口、PID650734/restart93。
+原base/env保持，端口/代理/环境来源沿用下方runbook。
+
+具体三包制品、快照、自然流量和恢复边界见
+`docs/tests/report-test1113-hub135-activation.txt`。原通信牛仍控制器153/Node121，
+未中断本原turn，也没有以Hub135冒充已采用Node139。#1113/#1105保持2/3，
+待正常升级入口、原vendor thread保持及真实139活动pulse验收。私有数据仍靠
+备份，完整key DR仍NOT_COVERED；短观察不代签全舰模型链路。
 
 ### `.134` 部署（2026-10-13 已激活）
 
