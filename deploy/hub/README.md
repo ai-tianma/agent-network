@@ -164,21 +164,28 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
-### `.136` 部署（2026-10-13 准备，尚未激活）
+### `.136` 部署（2026-10-13 已激活）
 
-源码 PR2687/main `8c2dcb3a16cbd78581d783e7ae1b2e87b9d82e3b` 与实际测试树一致。
-改密码 HTTP 可显式撤销本人具名网络令牌；默认列出脱敏保留清单，节点令牌和其他用户保留。
-SQLite24/PG24 正常 HTTP 回归及8次定向断言反证、既有会话令牌兼容和10个必需门通过。
-正式 main 发布运行 `38351821700` 尚待完整四门、公开回读与 byte/SRI 核验。
-正式运行38351821700的构建、四门、publish与registry元数据回读均已成功，
-但 npm tarball 独立GET仍404。沿用既有同字节GitHub原包方式：main标签
-`commhub-server-v0.9.0-preview.136` 精确指向上述源码，匿名下载完整字节已与gated包一致。
-lock只切换该包resolved URL到GitHub原包，SRI及transitive条目保持；来源及回读差额明确记录。
-本 profile 目标是独立 `runtime-v119-preview136`，回退 `runtime-v118-preview135`。
-只有公开核验、正常 main profile/lock、一致私有数据库备份与离线 schema 预检齐备后，
-才按本页流程仅激活选定 Hub；不更改原 base/env 来源、端口、Provider 或业务节点线程。
-Git 只记录软件和入口，原值密钥与生产数据依赖既有私有来源，完整密钥恢复仍 NOT_COVERED。
-本候选不声明 CLI173 传播或原 Node139 活动验收完成。
+源码PR2687/main `8c2dcb3a16cbd78581d783e7ae1b2e87b9d82e3b` 与实际测试树一致；SQLite24/PG24
+HTTP回归、8次断言反证、会话令牌兼容和10required通过。
+改密码可显式撤销本人具名网络令牌，默认列出脱敏保留清单，节点令牌和其他用户保留。
+正式main运行38351821700构建、四门、publish与registry元数据回读全部成功；
+npm tarball独立GET仍404，差额由#1123维护。采用既有同字节GitHub原包方式：
+精确main tag `commhub-server-v0.9.0-preview.136`，匿名完整byte/SRI与gated一致。
+公开包SHA256 `47449d1e6163e4ec7595d3124676ad655845ead7e22d0184777c2dade3dd7e81`，348安装文件一致。
+
+准备profile PR2688/main `b51ae1574be397ca618fe2e32eacec164774cf94`；同字节下载源PR2690/main
+`1a5b1a69e07902eef489342ca573fd7851889a55` 均通过专用Docker/10required。
+lock只替换包resolved到GitHub原包，SRI/version/transitive保持。
+私有一致DB备份完整性ok，Bun1.4.0隔离离线schema预检保留快照行数后，
+于 `2026-10-13T05:52:53.308633+00:00` 仅选定Hub升级为secured136，PID712535/restart94。
+实际入口 `runtime-v119-preview136`；profile与deployment main一致，base/env文件元数据不变。
+保留 `runtime-v118-preview135` 回退；恢复该历史版本时使用deployment main
+`6109c69773069eb0adc8035326ebc887a6d3b7cb` 的135 profile/lock。
+生产数据与原值密钥来自既有私有来源，完整密钥恢复仍NOT_COVERED。
+CLI173已有正式main-gated GitHub下载，原npm超时和客户端139活动验收仍独立未结。
+来源/SRI、backup/预检、自然流量及剩余CLI173/Node139差额见
+`report-test717-hub136-publication.txt`；公开包/Hub激活不代签原客户端139实际活动。
 
 ### `.135` 部署（2026-10-13 已激活）
 
