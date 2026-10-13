@@ -1,3 +1,4 @@
+import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { buildServeErrorResponse } from "./serve-error.js";
 import { sanitizeRuntimeReadiness } from "./runtime-readiness.js";
 import { markGzipReusable, maybeGzipResponse, trimLightTask } from "./http-gzip";
@@ -4574,31 +4575,10 @@ return Bun.serve({
         isPrivileged = true;
       }
 
-      // EXISTS subquery handles BOTH revoked_at SET and DELETEd token
-      // rows (revokeToken DELETEs the row in production — PR2 v1
-      // SHOULD-FIX per 通信龙 audit). EXISTS naturally dedupes daemons
-      // with rotated tokens.
-      const sqlRows = db.all<Record<string, any>>(`
-        SELECT
-          n.node_id, n.alias, n.hostname, n.network_id,
+      const sqlRows = hostSupervisorIdentityRows(`SELECT n.node_id, n.alias, n.hostname, n.network_id, n.owner_user_id,
           n.runtimes_supported, n.allowed_secret_keys,
-          n.created_at, n.updated_at,
-          s.last_seen_at AS session_last_seen,
-          s.cpu_cores AS session_cpu_cores,
-          s.mem_total_gb AS session_mem_total_gb,
-          s.ip AS session_ip,
-          n.config_snapshot
-        FROM nodes n
-        LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
-        WHERE n.network_id = ?1
-          AND EXISTS (
-            SELECT 1 FROM api_tokens t
-            WHERE t.network_id = n.network_id
-              AND t.name = 'node:' || n.alias
-              AND t.revoked_at IS NULL
-          )
-        ORDER BY n.updated_at DESC
-      `, effectiveNetId);
+          n.created_at, n.updated_at, n.config_snapshot
+        FROM nodes n WHERE n.network_id = ?1 ORDER BY n.updated_at DESC`, [effectiveNetId]);
 
       const nowMs = Date.now();
       // 心跳周期是 3 分钟（agent-node/src/cli.ts 的 report_status 定时器），

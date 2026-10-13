@@ -1,0 +1,19 @@
+#1109 Daemon list identity
+
+Candidate: immutable node credentials + heartbeat identity shared by MCP/REST.
+Three scoped DB reads independent of daemon count; no token secret fields.
+Legacy unbound ownership/epoch-zero compatibility uses the caller resolver's
+same extracted decision function. NULL-node heartbeat needs a unique alias;
+NULL-network and NULL-node additionally requires a globally unique alias.
+Revoked/deleted/expired/wrong-scope tokens cannot authenticate a list row.
+
+Docker CI: pending. SQLite/PostgreSQL HTTP + MCP cases and existing caller/
+legacy regressions, with separate token-name and heartbeat-alias red witnesses.
+No local functional test, real credential mutation, or production restart.
+Release/actual-node display verification: pending; no public completion claim.
+
+Recovery: unchanged Hub service/ports/secrets/data; software uses Git main and
+the existing locked deployment profile. Existing deploy/hub profile documents
+startup, private secret source, activation/health checks and rollback. This list
+read changes no schema or data; rollback chooses the previous verified Hub
+artifact. Private provider/auth/session data still requires independent backups.
