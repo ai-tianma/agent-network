@@ -1,10 +1,10 @@
 # Windows native ongoing TUI health — agent-network2.3.0-preview.179
 
-Candidate only: CLI2.3.0-preview.179 / Node2.5.0-preview.145 / existing Hub0.9.0-preview.139. Publication requires exact merged main and four formal gates. Stable/latest unchanged. See report-test1175-windows-tui-health.txt for evidence and limits. Original-device and real-model acceptance remain separate.
+Software alpha: CLI2.3.0-preview.179 / Node2.5.0-preview.145 / existing Hub0.9.0-preview.139. Both official GitHub archives are exact-main four-gated and fully byte-verified; Node npm is fully verified, CLI npm remains pending visibility. See report-test1175-public.txt for the checkpoint. Stable/latest unchanged. See report-test1175-windows-tui-health.txt for evidence and limits. Original-device and real-model acceptance remain separate.
 
 ## Install
 
-After formal publication and full archive verification, install the immutable pair in a fresh private prefix (Node>=22.13, Bun1.3.14 for Hub):
+Install the verified official archives as an immutable pair in a fresh private prefix (Node>=22.13, Bun1.3.14 for Hub):
 
 ```bash
 set -e
@@ -13,9 +13,10 @@ test ! -e "$ANET_PAIR_DIR"
 install -d -m 700 "$ANET_PAIR_DIR"
 umask 077
 npm install --prefix "$ANET_PAIR_DIR" --ignore-scripts --no-audit --no-fund \
-  @sleep2agi/agent-network@2.3.0-preview.179 \
-  @sleep2agi/agent-node@2.5.0-preview.145 \
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.179/sleep2agi-agent-network-2.3.0-preview.179.tgz \
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.179/sleep2agi-agent-node-2.5.0-preview.145.tgz \
   @sleep2agi/commhub-server@0.9.0-preview.139
+export ANET_AGENT_NODE_BIN="$ANET_PAIR_DIR/node_modules/@sleep2agi/agent-node/dist/cli.js"
 ```
 
 ## Upgrade
