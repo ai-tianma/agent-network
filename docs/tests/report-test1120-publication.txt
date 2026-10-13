@@ -24,8 +24,9 @@ Node140:
 
 CLI174:
 - Formal38362063112 built from same mainb4cd36f7, build job115178350613.
-  Four gates SUCCESS and npm publish step SUCCESS; registry verification still
-  running as of 07:35Z. Overall formal conclusion is not called SUCCESS.
+  Four gates SUCCESS and npm publish step SUCCESS; registry verification was
+  still running at 07:35Z and later timed out. Overall formal38362063112 is
+  FAILURE, retained as a registry-wait failure; it is not rewritten SUCCESS.
 - Existing official gated-download workflow38363323117 SUCCESS: independently
   authenticates original run/build log/source guard/four gates and inner digest,
   rechecks current-main ancestry and publishes those same bytes without npm retry.

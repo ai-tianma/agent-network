@@ -3,8 +3,9 @@
 ## Install
 
 The exact-main Node140 package is public and byte/SRI verified. CLI174's same
-gated tarball has an official fixed download while npm registry verification is
-pending. Install this exact pair in a new private directory with Node >=22.13:
+gated tarball has an official fixed download; its original npm registry-wait
+timed out and the formal failure is retained. Install this exact pair in a new
+private directory with Node >=22.13:
 
 ```bash
 set -e

@@ -194,7 +194,7 @@ TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥
 源码 PR2693/main `299cd2273033c33026de397c206843440b7ba96c`；正式构建源
 PR2694/main `b4cd36f7a31385af0765533b1a8edf397841d19a`，两 package 源码树相同。
 runtime140 正式发行与完整 npm 包已核；CLI174 四门通过、npm publish 步骤成功，
-registry 核验仍在等待，已有同一原门控包的
+原 formal 因 registry 核验等待超时而 FAILURE，已有同一原门控包的
 [官方固定下载](https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz)。
 完整来源、摘要及原失败见 [发布记录](../tests/report-test1120-publication.txt)。
 
