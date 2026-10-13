@@ -164,6 +164,19 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.137` 部署准备（2026-10-13，尚未激活）
+
+#1109 MCP/REST Daemon 列表按权威 node_id 核有效凭据与心跳；保留已验证旧 unbound
+和唯一旧心跳，轮换凭据去重，按 scope 批量三次读取，不修改 schema/生命周期。
+源码PR2696/main `36ed82249f661eb593375e72e375e59472bd41c7` 与实际 Docker 测试完整树一致；
+运行38368490408为 SQLite123/PG123正常与6次断言反证；10required通过。
+正式main运行38368892713仍须四门和匿名完整包/SRI核验。准备安装坐标
+`runtime-v120-preview137`，profile/lock合main且私有一致性备份与离线预检通过后，
+才允许选择性激活 `commhub-hub`；不修改 hub.env/base，不带 `--update-env`。
+之前的 `runtime-v119-preview136` 和main `1a5b1a69e07902eef489342ca573fd7851889a55`
+的136 profile/lock保留回退；数据库/原密钥依既有私有来源，完整恢复仍NOT_COVERED。
+准备态不代表137已运行，也不代签Node139自然活动或OpenCode原账号正常重启验收。
+
 ### `.136` 部署（2026-10-13 已激活）
 
 源码PR2687/main `8c2dcb3a16cbd78581d783e7ae1b2e87b9d82e3b` 与实际测试树一致；SQLite24/PG24
