@@ -8,6 +8,7 @@ on:
       - 'server/src/tools.ts'
       - 'server/src/server.ts'
       - 'tests/test1109-supervisor-identity/**'
+      - 'tests/test678-daemon-token-owner/mutations.ts'
       - '.github/workflows/supervisor-identity-core.yml'
 permissions:
   contents: read

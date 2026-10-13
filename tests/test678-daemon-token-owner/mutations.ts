@@ -27,6 +27,6 @@ await runMutation("boundlookup", "src/create-node.ts", 'const rows = tokRow.boun
 await runMutation("ambiguous", "src/create-node.ts", `  const nodeRow = rows.length === 1
     ? rows[0]
     : (!tokRow.bound_node_id && rows.length > 1
-      ? disambiguateUnboundAlias(rows, tokRow.user_id, tokenAlias, tokRow.network_id)
+      ? disambiguateUnboundAlias(rows, tokRow.user_id, recentNodeId)
       : undefined);`, 'const nodeRow = rows[0];', 'duplicate legacy aliases use bound IDs and an unbound token follows its owner');
 await runMutation("registration", "src/tools.ts", 'WHERE token_id=?2 AND node_identity_epoch=2 AND bound_node_id IS NULL', 'WHERE token_id=?2 AND node_identity_epoch=999 AND bound_node_id IS NULL', 'new name-only registration binds once and its holder can refresh with either shape');

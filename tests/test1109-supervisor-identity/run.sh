@@ -17,6 +17,10 @@ run_case() {
     identity) file=src/host-supervisor-identity-http.test.ts ;;
     legacy) file=src/list-host-supervisors.test.ts ;;
     caller) file=src/node-caller-identity-http.test.ts ;;
+    daemon) file=src/daemon-token-owner-http.test.ts ;;
+    ambiguous_red)
+      env HOME="$fixture_dir" COMMHUB_DB="$fixture_dir/hub.db" COMMHUB_PG_EXPERIMENTAL=1 MUTATION_CASE=ambiguous bun run /work/tests/test678-daemon-token-owner/mutations.ts
+      return ;;
     token_red|heartbeat_red)
       file=src/host-supervisor-identity-http.test.ts
       cp src/host-supervisor-identity.ts /tmp/supervisor1109-green.ts
@@ -25,13 +29,13 @@ from pathlib import Path
 import sys
 p=Path('src/host-supervisor-identity.ts');s=p.read_text()
 if sys.argv[1]=='token_red':
-    anchor='if (caller.ok && caller.kind === "node") credentialed.add(caller.nodeId);'
-    replacement='for (const n of nodes) { if (n.network_id === t.network_id && n.alias === t.name.slice(5)) credentialed.add(n.node_id); }'
+    token_anchor='if (caller.ok && caller.kind === "node") credentialed.add(caller.nodeId);'
+    assert s.count(token_anchor)==1
+    p.write_text(s.replace(token_anchor,'for (const n of nodes) { if (n.network_id === t.network_id && n.alias === t.name.slice(5)) credentialed.add(n.node_id); }'))
 else:
-    anchor='node = byId.get(s.node_id);'
-    replacement='node = (byAlias.get(key(s.network_id ?? "", s.alias)) ?? [])[0];'
-assert s.count(anchor)==1
-p.write_text(s.replace(anchor,replacement))
+    heartbeat_anchor='node = byId.get(s.node_id);'
+    assert s.count(heartbeat_anchor)==1
+    p.write_text(s.replace(heartbeat_anchor,'node = (byAlias.get(key(s.network_id ?? "", s.alias)) ?? [])[0];'))
 MUT
       if [[ "$suite" == token_red ]]; then pattern='same-name foreign binding'; else pattern='sibling heartbeat'; fi
       env HOME="$fixture_dir" COMMHUB_DB="$fixture_dir/hub.db" COMMHUB_PG_EXPERIMENTAL=1 bun test "$file" -t "$pattern" >/tmp/supervisor1109-red.log 2>&1 || rc=$?
@@ -42,7 +46,7 @@ MUT
   esac
   env HOME="$fixture_dir" COMMHUB_DB="$fixture_dir/hub.db" COMMHUB_PG_EXPERIMENTAL=1 bun test "$file"
 }
-for suite in identity legacy caller token_red heartbeat_red; do run_case sqlite "$suite"; done
+for suite in identity legacy caller daemon token_red heartbeat_red ambiguous_red; do run_case sqlite "$suite"; done
 echo 'RESULT sqlite PASS'
 pg_bin=$(find /usr/lib/postgresql -name initdb -printf '%h\n' | sort -V | tail -1)
 pg_root=$(mktemp -d /tmp/supervisor1109-pg.XXXXXX)
@@ -54,5 +58,5 @@ runuser -u postgres -- "$pg_bin/initdb" -D "$pg_data" --auth-local=trust --auth-
 runuser -u postgres -- "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_socket/log" -o "-p 25109 -k $pg_socket -c listen_addresses=127.0.0.1" -w start >/dev/null
 fixture_password="fixture-$(od -An -tx8 -N8 /dev/urandom | tr -d ' ')"
 runuser -u postgres -- "$pg_bin/psql" -h "$pg_socket" -p 25109 -c "CREATE ROLE session_tester LOGIN PASSWORD '$fixture_password'" >/dev/null
-for suite in identity legacy caller token_red heartbeat_red; do run_case pg "$suite"; done
+for suite in identity legacy caller daemon token_red heartbeat_red ambiguous_red; do run_case pg "$suite"; done
 echo 'RESULT postgres PASS'

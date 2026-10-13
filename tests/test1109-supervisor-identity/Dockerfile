@@ -9,6 +9,7 @@ COPY agent-node/src /work/agent-node/src
 COPY agent-network/src /work/agent-network/src
 COPY agent-network/bin /work/agent-network/bin
 COPY tests/test1109-supervisor-identity /work/tests/test1109-supervisor-identity
+COPY tests/test678-daemon-token-owner/mutations.ts /work/tests/test678-daemon-token-owner/mutations.ts
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT
 CMD ["bash", "/work/tests/test1109-supervisor-identity/run.sh"]
