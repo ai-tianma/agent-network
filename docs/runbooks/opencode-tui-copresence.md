@@ -196,6 +196,8 @@ PR2694/main `b4cd36f7a31385af0765533b1a8edf397841d19a`，两 package 源码树�
 runtime140 正式发行与完整 npm 包已核；CLI174 四门通过、npm publish 步骤成功，
 原 formal 因 registry 核验等待超时而 FAILURE，已有同一原门控包的
 [官方固定下载](https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz)。
+15:47:34+08 的迟到 npm 回读也已核对完整原包 byte/SRI，相同公开包的
+npm 与固定下载均可用；原 formal 超时 FAILURE 保留，不补写 green。
 完整来源、摘要及原失败见 [发布记录](../tests/report-test1120-publication.txt)。
 
 V1 共存 runtime 的 `persistAuth` 路径将节点私有

@@ -10,6 +10,10 @@ npm publish succeeded; its registry verification timed out and the original
 formal run remains FAILURE. Use a new
 private directory with this same gated tarball, the public Node140, and Node >=22.13:
 
+Late npm full-byte/SRI verification also passed at 15:47:34+08. npm174 and the
+fixed download are the same original artifact; the failed formal verdict stays
+in history. The available fixed-download command below is retained unchanged.
+
 ```bash
 set -e
 PAIR_DIR="$HOME/.anet-bin/opencode1120-174-140"

@@ -38,6 +38,12 @@ CLI174:
   SRI sha512-xxZx7a9D0Z8iMpWXG4EevpzuKM32XObdfRZK62JZw3N6J7xtM1bSyTThC2ZGWu92Edu/9boXNGRbYxMwg+nnQQ==
   https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz
 
+- Late npm readback at 2026-10-13T07:47:34.226419Z: version174 metadata and
+  complete tarball became available. Anonymous full bytes, SHA1/SHA256/SRI
+  equal both the original gated artifact and official GitHub asset above.
+  preview174/latest76 retained; original38362063112 FAILURE is preserved.
+  No npm republish, tag reset or software activation performed for this readback.
+
 Delivery boundary: original nodes were not restarted or switched, and no real
 account auth content was read. #1120 remains 2/3 for original-user login → normal
 restart → still logged in and cleanup feedback. Session-history recovery and

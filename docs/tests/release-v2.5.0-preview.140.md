@@ -7,6 +7,10 @@ gated tarball has an official fixed download; its original npm registry-wait
 timed out and the formal failure is retained. Install this exact pair in a new
 private directory with Node >=22.13:
 
+Late CLI174 npm byte/SRI verification passed at 15:47:34+08; its original
+formal timeout failure remains recorded. Both CLI distributions contain the
+same gated artifact, and the fixed-download command below stays valid.
+
 ```bash
 set -e
 PAIR_DIR="$HOME/.anet-bin/opencode1120-174-140"
