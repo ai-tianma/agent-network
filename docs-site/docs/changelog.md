@@ -1,8 +1,8 @@
 # 更新日志
 
-## 候选：Windows 共存健康探针对齐原生进程（2026-10-14）
+## 软件 alpha 已公开：Windows 共存健康探针对齐原生进程（2026-10-14）
 
-- 候选配套 CLI 2.3.0-preview.178 / Node 2.5.0-preview.144，沿用 Hub 0.9.0-preview.139；精确 main 正式发布门及完整制品核验前，不代表已公开。
+- 配套 CLI 2.3.0-preview.178 / Node 2.5.0-preview.144，沿用 Hub 0.9.0-preview.139。两包从精确 main 通过四道发布门，官方 GitHub 完整包已匿名核对；Node npm 已完整匹配，CLI npm 传播后验仍待确认。原机采用另验。
 - Windows 共存节点不再用 tmux 会话缺失判断原生 TUI。持续原生 TUI 健康仍为未知；App Server 断连和登录失效仍由原健康门拒绝投递。
 - Windows CI 在 PID/出生时间/连接归属及 Hub 新鲜健康快照后，验证普通和高优先级消息接续同一回合。CI 不代替原机反馈或现役采用。
 
