@@ -26,12 +26,12 @@ republished merely to align documentation commit IDs.
 
 Hub 0.9.0-preview.139: source fddca21f; formal38445197841 all four gates/workflow
 SUCCESS; npm anonymous full archive 1256148B SHA256 bcfc3e60747d29bf61a9d2d97501d044b4733d14f9c10ccf6496194fad9732e5.
-Registry shasum/integrity/gitHead/preview and exact gated artifact bytes matched.
+Registry name/version/shasum/integrity/preview and exact gated artifact bytes matched.
 Node 2.5.0-preview.143: same source; formal38445194354 four gates and npm publish
 step SUCCESS, but workflow FAILED the 900-second visibility check (preview still
 142 at18:36:36Z). This failure is retained, not relabeled PASS. Later anonymous
 full npm read 600314B SHA256 0d7c32c8cdcb9c7b84fde92dc5e11714f27af0d80ae69e3df41baa36caafbd0d matched the gated bytes,
-registry shasum/integrity/gitHead/preview; no immutable npm republish.
+registry name/version/shasum/integrity/preview; no immutable npm republish.
 CLI 2.3.0-preview.177: source main5bab2d836; first formal38447125714 gate4 FAIL /
 publish SKIPPED retained. Retry38448399593 all FOUR actual gates SUCCESS and npm
 publish step SUCCESS; registry verification pending at this report checkpoint.
@@ -81,3 +81,7 @@ actual four-gate and npm-publish successes do not erase that timed failure.
 A private presence probe mistakenly searched the CLI entry shim for the pair
 constant; corrected to package-level metadata and artifact equality. Pair143 in
 the declaration file is not a claim of native runtime or original-device proof.
+Registry metadata for these tarball publications omits gitHead; it is recorded
+as absent, not invented as a matching SHA. Main provenance comes from the
+explicit checked source SHAs, main ancestry, formal artifacts and full public
+archive equality.
