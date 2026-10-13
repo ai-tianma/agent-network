@@ -7,7 +7,7 @@ same extracted decision function. NULL-node heartbeat needs a unique alias;
 NULL-network and NULL-node additionally requires a globally unique alias.
 Revoked/deleted/expired/wrong-scope tokens cannot authenticate a list row.
 
-Docker CI: pending. SQLite/PostgreSQL HTTP + MCP cases and existing caller/
+Docker CI: final38368490408 SUCCESS. SQLite/PostgreSQL HTTP + MCP cases and existing caller/
 legacy regressions, with separate token-name and heartbeat-alias red witnesses.
 First run38367661564: Docker build succeeded; SQLite identity17pass/2fail
 because the NULL-network legacy fixtures used a fresh NOT NULL sessions table.
@@ -22,6 +22,15 @@ assertion-red witnesses passed; PostgreSQL new identity19 passed, but the old
 legacy suite stopped at SQLite-only INSERT OR REPLACE fixture syntax. Those
 four inserts now use portable INSERT (beforeEach cleans the same rows), without
 changing behavioral assertions or product SQL. Full rerun required.
+Final candidate3d43309227913ea6bbe967740dca639b1adee0ea:
+Docker38368490408 SQLite123 + PostgreSQL123 =246 normal, 0 failures;
+token-name, heartbeat-alias and original678 ambiguous assertion-red witnesses
+on both backends =6. Mutation-pin CI38368490487 and10required PASS.
+PR2696 merged2026-10-13T08:23:01Z at main36ed82249f661eb593375e72e375e59472bd41c7.
+Actual tested merge e2e742eae6b613c27854cb15449dfec222b72800 has the same complete
+tree e2ddf91a91674447ef4606ef3c00494d96c21454 as source main.
+Formal main-only Hub137 release38368892713 queued; publication/activation remain
+separate and are not asserted by the source CI result.
 Release/actual-node display verification: pending; no public completion claim.
 
 Recovery: unchanged Hub service/ports/secrets/data; software uses Git main and
