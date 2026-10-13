@@ -70,6 +70,22 @@ Codex app-server node. External app-server/co-presence and daemon-managed nodes
 must use their existing owner's lifecycle; do not apply this procedure to them
 by guessing process or tmux names.
 
+For a node already recorded with `codexLaunchLayout=external-appserver`, the
+existing controller has `node restart <alias> --bridge-only`; run that controller
+from this paired CLI with `ANET_AGENT_NODE_BIN` set after the same idle-window
+checks. It resolves the new bridge before replacing it and verifies the resumed
+thread while retaining the app-server/TUI. Do not add `--external-appserver` just
+to force this path: that flag writes launch-layout metadata.
+
+The selected legacy node examined on 2026-10-13 is a different case: its original
+thread matches `codexThreadId`, it has a shared app-server URL and co-presence
+enabled, but has no recorded external-appserver layout or generation marker.
+Its old supervisor uses CLI 153/Node 121. A generic `node stop` can include legacy
+co-presence sessions; a Hub restart reuses the old supervisor. Neither establishes
+a verified bridge-only upgrade for this layout. Keep this installation inactive
+until its existing lifecycle owner confirms a handoff that retains that server,
+TUI and original thread. This profile does not change that layout automatically.
+
 ## Live acceptance and rollback
 
 After same-identity heartbeat and SSE return, use a normally assigned real task.
