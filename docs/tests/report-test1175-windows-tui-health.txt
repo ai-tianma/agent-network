@@ -1,0 +1,36 @@
+# test1175 — Windows native ongoing TUI health
+2026-10-14; requirement #1175; source/native/formal/original-device scopes separate.
+
+Previous CLI178/Node144 correctly stopped probing tmux on Windows, but native
+TUI health after startup remained unknown. This candidate writes a private
+windows-tui-health.json only after successful startup PID/birth/socket attribution.
+The bridge requires exact node, generation marker and configured remote before
+an asynchronous, non-overlapping, 10s-bounded PowerShell probe. It checks root
+birth before and after one process snapshot plus established loopback ownership.
+Running means an attributable connection to this exact remote. Exit/birth change
+maps to the existing pane-dead reason; connection loss to session-missing.
+Missing/stale receipt, access error, timeout or malformed probe output means
+unknown and clears the previous TUI layer. It never certifies model availability.
+AppServer and auth checks remain; no force dispatch or Hub schema change.
+
+Docker corrected core: 54PASS/179 assertions, 1native-Windows skip, 0FAIL,
+1.339seconds; runtime and real Hub HTTP dispatch guard on isolated SQLite.
+Initial mount tried /source without image dependencies: 37PASS, module-import
+error before Hub assertions; corrected by overlaying source into the image's
+dependency-backed /repo. Both outcomes retained in private iteration logs.
+Local application test time remains below the two-minute ceiling.
+
+Windows CI pending: actual PID/birth/TCP connection, a live unrelated sibling,
+different remote, mismatched birth and exit; fake-Codex co-presence must now wait
+for current Hub native TUI running evidence before normal/high Dashboard tasks.
+No credentialed Windows real-Codex gate is invoked. CI success is not original
+device/model acceptance. Main merge and formal/public archives remain pending.
+
+Recovery: native launch stays anet node start through the existing deploy/fleet
+and deploy/hub runbooks; ports/proxies and credential sources are unchanged.
+No existing runtime is restarted/upgraded here. Exact immutable CLI179/Node145
+candidate must be verified and adopted by the lifecycle owner. Rollback178/144
+ignores the additive private launch receipt; native ongoing health becomes unknown.
+Git/frozen locks restore software, not private login/task/receipt data, which
+remain in the existing authorized backups. Fresh launch regenerates its native
+identity evidence. Hub vault recovery is NOT COVERED; no production restore drill.

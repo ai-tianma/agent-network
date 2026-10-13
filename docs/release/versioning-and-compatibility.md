@@ -48,6 +48,8 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 
 ## 5. Bump-together 规则
 
+2026-10-14 #1175 候选 CLI179/Node145 与既有 Hub139 配套。Windows 私有 windows-tui-health.json 保存本代 node/marker/remote/PID/birth，不含凭据；仅匹配原启动身份后探测。健康字段仍用既有 running/pane-dead/session-missing，无 Hub schema 或派活绕过。未知清除旧证据，真实退出/换代及连接缺失沿用降级拒收门。回滚178/144时保留原私有状态；旧 Node 忽略新增回执，持续原生健康退回 unknown。公开门禁与原机验收分别记。
+
 2026-10-14 #1168 健康修复软件alpha：CLI2.3.0-preview.178 / Node2.5.0-preview.144 / 已公开Hub0.9.0-preview.139。仅Windows共存的tmux探针选择与精确runtime配套更新，无Hub协议/结构变更；原深层入口及V2回执兼容范围沿用177/143/139。两包exact-main四门PASS且官方GH完整archive均已验证，两包完整npm均匹配，CLI首传播timeout失败保留并完成后验；现役采用及真实模型验收另记。Windows持续原生TUI健康仍unknown，不等同healthy；App Server和登录降级仍拒收任务。旧177/143可回滚软件，但需保留兼容的V2私有回执，且恢复旧误判缺口。
 
 - 改 **C1**（runtime/config）→ agent-network + agent-node 同一次一起发 preview，矩阵加新行。

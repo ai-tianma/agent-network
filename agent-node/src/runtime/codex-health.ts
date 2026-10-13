@@ -227,8 +227,8 @@ export function probeTmuxTui(session: string): TuiHealth {
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 
-/** Windows co-presence uses native processes, never a tmux session. Absence
- * of a native ongoing TUI probe is unknown, not a failed tmux probe or healthy. */
+/** Windows co-presence uses native processes, never a tmux session.
+ * Native health is supplied separately; absent native evidence is unknown. */
 export function copresenceTmuxSession(platform: string, env: Record<string, string | undefined>, alias: string): string | undefined {
   return platform !== "win32" && env.ANET_COPRESENCE_BRIDGE === "1"
     ? (env.ANET_CODEX_TUI_SESSION || alias)
@@ -244,6 +244,8 @@ export interface CodexHealthMonitorOptions {
   modelAuth: ModelAuthTracker;
   probeAppServer: (url: string) => Promise<AppServerHealth>;
   probeTui?: (session: string) => TuiHealth;
+  /** Native co-presence evidence; undefined means unknown, never stale healthy. */
+  probeNativeTui?: () => Promise<TuiHealth | undefined>;
   /** 任一层的 ok 翻转时回调(用于立刻补一次上报,而不是等 3 分钟心跳)。 */
   onChange?: (report: NodeHealthReport) => void;
   /** 本节点 CODEX_HOME/auth.json 的 mtime(ms);用于发现「已重新登录」。没有就 null。 */
@@ -309,6 +311,9 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
       appServer = url ? await opts.probeAppServer(url) : undefined;
       if (appServer && opts.onAppServerProbe) appServer = opts.onAppServerProbe(appServer);
       if (opts.tuiSession) tui = (opts.probeTui ?? probeTmuxTui)(opts.tuiSession);
+      if (opts.probeNativeTui) {
+        try { tui = await opts.probeNativeTui(); } catch { tui = undefined; }
+      }
       if (opts.authFileMtimeMs) opts.modelAuth.reconsiderAfterLogin(opts.authFileMtimeMs());
     } catch (e: any) {
       appServer = { ok: false, rtt_ms: null, last_error: String(e?.message ?? e).slice(0, 200) };
@@ -322,7 +327,8 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
     // app-server the bridge already connected to died before the first probe (the watchdog is already restarting
     // it), which the Hub would otherwise not see until the next flip or the 3-minute heartbeat. A layer that has
     // never been up (start-up, a TUI not opened yet, no tmux on this platform) stays quiet, as before.
-    const firstAndDown = lastSig === null && report.app_server?.ok === false && opts.appServerWasUp?.() === true;
+    const firstAndDown = lastSig === null && ((report.app_server?.ok === false && opts.appServerWasUp?.() === true)
+      || (opts.probeNativeTui !== undefined && report.tui?.ok === false));
     if (firstAndDown || (lastSig !== null && sig !== lastSig)) opts.onChange?.(report);
     lastSig = sig;
     return report;

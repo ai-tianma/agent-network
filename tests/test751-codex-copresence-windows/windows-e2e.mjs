@@ -225,14 +225,12 @@ const longTurnOutput = await terminal(["node", "start", "windows-picker", "--no-
       const row = payload.sessions?.find((s) => s.alias === "windows-picker" && s.network_id === networkId);
       observedHealth = row?.health;
       if (!observedHealth) return false;
-      // A tmux failure on Windows is a product bug, not something to retry
-      // past. Native startup attribution above does not certify ongoing TUI health.
-      if (observedHealth.tui !== undefined) throw new Error(`unexpected Windows tmux health: ${JSON.stringify(observedHealth.tui)}`);
       return observedHealth.bridge === "ok" && observedHealth.app_server?.ok === true
+        && observedHealth.tui?.ok === true && observedHealth.tui?.reason === "running"
         && !["revoked", "expired"].includes(observedHealth.model_auth)
         && Number.isFinite(row.health_observed_ms_ago) && row.health_observed_ms_ago < 5000;
     });
-    console.log(`PASS Hub current health before Dashboard: app_server=ok; native TUI PID attributed; ongoing tui=unknown; model_auth=${observedHealth.model_auth}`);
+    console.log(`PASS Hub current health before Dashboard: app_server=ok; native TUI PID attributed; ongoing tui=running; model_auth=${observedHealth.model_auth}`);
     const beforeWire = readFileSync(rpcLog, "utf8");
     turnStartCountBeforeDashboard = (beforeWire.match(/^rpc:turn\/start(?::|$)/gm) || []).length;
     const normalTask = await postDashboardTask("normal", "a");

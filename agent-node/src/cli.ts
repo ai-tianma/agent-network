@@ -1339,6 +1339,7 @@ import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
 import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runtime/codex-reasoning-effort.js";
 import { installTeamSkills } from "./runtime/node-skills";
 import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { probeWindowsTuiHealth, readWindowsTuiIdentity } from "./runtime/windows-tui-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -7878,6 +7879,16 @@ if (RUNTIME === "codex-app-server") {
       return codexAppServerWatchdog ? codexAppServerWatchdog.observe(h) : h;
     },
     tuiSession,
+    probeNativeTui: process.platform === "win32" && process.env.ANET_COPRESENCE_BRIDGE === "1" && nodeMarker && NODE_ID
+      ? async () => {
+        const remote = codexAppServerUrl || codexAppServerSessionManager.current()?.url || lastCodexAppServerUrl;
+        if (!remote) return undefined;
+        const identity = readWindowsTuiIdentity(join(NODE_DIR, "windows-tui-health.json"), {
+          nodeId: NODE_ID!, marker: nodeMarker, remote,
+        });
+        return identity ? probeWindowsTuiHealth(identity) : undefined;
+      }
+      : undefined,
     modelAuth: codexModelAuth,
     probeAppServer: async (url) => {
       const { resolveWebSocketCtor } = await import("./runtime/codex-app-server-client");

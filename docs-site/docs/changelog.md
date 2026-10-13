@@ -1,5 +1,9 @@
 # 更新日志
 
+## 2026-10-14 Windows native TUI health candidate
+
+CLI2.3.0-preview.179 / Node2.5.0-preview.145 candidate: ongoing Windows co-presence health verifies the exact launch generation and owned loopback connection. Missing evidence remains unknown; proven exit or lost connection uses the existing Hub degradation guard. Source/native fake-Codex CI and formal publication are tracked separately in `report-test1175-windows-tui-health.txt`. Original-device/model acceptance remains pending.
+
 ## 软件 alpha 已公开：Windows 共存健康探针对齐原生进程（2026-10-14）
 
 - 配套 CLI 2.3.0-preview.178 / Node 2.5.0-preview.144，沿用 Hub 0.9.0-preview.139。两包从精确 main 通过四道发布门，官方 GitHub 完整包已匿名核对；两包 npm 完整包也已匹配；CLI 首次传播核验超时失败保留，随后完整回下载确认。原机采用另验。
