@@ -17,7 +17,7 @@ Initial mutation-pin38367661964 failed due to an extracted resolver anchor and
 dynamic new script anchors. Updated the old anchor, kept its assertion-red
 witness, made new anchors literal: static727 anchors green/unchecked4 unchanged.
 No local functional test, real credential mutation, or production restart.
-Run38368137650: SQLite identity19/legacy9/caller47/daemon20 and three
+Run38368137650: SQLite identity19/legacy9/caller72/daemon23 and three
 assertion-red witnesses passed; PostgreSQL new identity19 passed, but the old
 legacy suite stopped at SQLite-only INSERT OR REPLACE fixture syntax. Those
 four inserts now use portable INSERT (beforeEach cleans the same rows), without
