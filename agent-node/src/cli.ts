@@ -4325,6 +4325,7 @@ async function processWithCodexAppServer(
   const session = await ensureCodexAppServerSession();
 
   let lastActivityHeartbeatAt = Date.now();
+  let followUpOwnerTurnId: string | undefined;
   const outcome = await codexAppServerThink(session, {
     taskId: taskId || `local-${Date.now()}`,
     text: task,
@@ -4335,8 +4336,7 @@ async function processWithCodexAppServer(
     interactiveDashboardTask: steerIfExternalTurn,
     log,
     onActivity: (event) => {
-      const receipt = taskId ? turnReceiptLedger?.load().find(row => row.taskId === taskId && row.version === 2) : undefined;
-      if (!receipt || (receipt.version === 2 && event.turnId === receipt.ownerTurnId))
+      if (!followUpOwnerTurnId || event.turnId === followUpOwnerTurnId)
         evidence?.activity({ taskId: event.taskId, threadId: session.bridge.getThreadId(), turnId: event.turnId });
       const now = Date.now();
       if (now - lastActivityHeartbeatAt < 30_000) return;
@@ -4358,6 +4358,7 @@ async function processWithCodexAppServer(
         try {
           const followUp = turnReceiptLedger.load().find(row => row.taskId === taskId && row.version === 2);
           if (followUp?.version === 2) {
+            followUpOwnerTurnId = followUp.ownerTurnId;
             if (followUp.threadId !== threadId || followUp.ownerTurnId !== event.turnId) throw new Error("follow-up consumed context mismatch");
           } else turnReceiptLedger.watch({
             taskId,
