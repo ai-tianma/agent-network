@@ -154,13 +154,76 @@ are rejected. Terminal tasks are not reopened. This protocol proof uses an
 isolated synthetic app-server; it is not a native model or production-node
 adoption result.
 
-This increment does not yet admit owned steering or launch answer-only turns
-from production. The fixture starts the independent answer turn explicitly;
-the adapter retains its no-action-replay refusal for live/unknown V2 rows until
-the full controller is integrated. Accepted-input capacity retry, unknown
-transport acceptance, nonce/history reconciliation, reserved human admission
-and owner-terminal races remain gates for that controller. No follow-up's
-reply text is copied from an unrelated owner outcome.
+That protocol increment alone did not admit owned steering or launch answer
+turns from production. The subsequent controller below supplies that wiring;
+it never copies reply text from an unrelated owner outcome.
+
+### Production controller (#1162)
+
+The production CLI now supplies a durable adapter to the bridge. Only an
+explicit authenticated Dashboard audience may join a locally owned turn whose
+exact user-message client id has confirmed ownership. A plain alias, generic
+steer permission, unknown starting turn, scheduler or orphaned network turn
+cannot grant this authority. Unconfirmed work retains the waiting fallback.
+Before `turn/steer`, the adapter writes a V2 intent containing nonce/input hash
+and the exact original task/turn relationship. It sends exactly one request
+with `expectedTurnId`. The response must confirm that turn before acceptance;
+lost/uncertain responses retain intent and may only be reconciled against the
+original turn's user-message nonce and exact input hash. They never fall back
+to resubmitting the action body.
+
+Each accepted follow-up is checked independently on the Hub. Explicit terminal
+status settles only that row and frees its handler while the owner continues.
+The original final answer belongs only to the original task. At original
+completion, the controller checks unresolved rows and queues an answer-only
+prompt by the same task id in the same thread; this prompt contains routing
+identity and existing-result instructions, never the original action body.
+The model is instructed not to run new actions/tools. The code does not resend
+the original action, and automatic capacity retry is disabled after owned
+follow-up submission, including uncertain acceptance and answer shaping.
+This is not a claim of native model/tool isolation acceptance.
+
+Before an answer RPC, a durable V2 `answer_intent` records the expected
+`anet:<follow-up id>` identity without inventing a turn id. A missing response
+cannot authorize another answer RPC. Exact same-thread history/client identity
+binds an `answering` row, including a verified successor echo; ambiguous or
+absent identity remains unresolved with finite deadlines. Recovery can adopt
+that verified running answer or recover its own verified final text. A
+separate bounded reply controller resumes persisted V2 work without accepting
+an original action body. The existing receipt/history recovery function itself
+remains read-only against Codex. Physical ACK stays on inbox.id; local delivery
+dedup and Hub model-consumption evidence remain distinct.
+
+Consumed Hub context stays on the original owner turn; the new answer turn
+does not rebind it or renew its lease by pretending to be original-turn
+activity. Cancelling one follow-up does not interrupt a shared/owner turn.
+The dispatcher still caps total handlers at 20, with one opt-in trusted
+priority slot that ordinary handlers cannot occupy. A private recovery Symbol
+does not create a forgeable auth-origin flag. Existing ordinary and external
+human policies remain compatible without an owned adapter.
+
+The real Hub/SQLite + real WS fixture now also executes the production CLI
+adapter and bridge/runtime through owner start, one steer and automatic own
+answer. Controller fixtures cover explicit reply, cancellation, both lost RPC
+responses, nonce/body mismatch, owner-terminal races, restart answer identity,
+capacity and saturation. These are isolated protocol/model fixtures, not
+original-device adoption or native-model execution acceptance.
+
+Known inlet boundary: old Hub `get_inbox` still selects the first 20 rows by
+legacy priority/time. A human beyond that page may not reach this dispatcher
+yet. The local reserved slot does not prove full-depth Hub selection; that is
+a separate P0 inlet task. This increment does not claim that every backlog
+depth is now immediately reachable or that existing live nodes have upgraded.
+
+Recovery/upgrade/rollback keep the same launcher, node directory, proxy/ports,
+environment/credential sources and existing private ledger/outbound store.
+Git reconstructs this source, lockfiles and fixture, not Hub/private/login
+data. Back up the private receipt/outbound state through the existing
+authorized process before adoption. Earlier codecs cannot read `answer_intent`
+and may reject or discard V2; never downgrade with these rows pending. Resolve
+them with a compatible controller in a normal owner window before rollback.
+Verify the exact installed build/version and a scoped known-task behavior
+after authorized adoption; this source/core result alone is not that check.
 
 Recovery inputs remain the same ledger, pending replies and existing Hub/node
 authority; no new service, startup script, proxy/port, environment variable,

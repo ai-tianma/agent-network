@@ -84,12 +84,16 @@ test("production legacy adapter refuses a persisted V2 action before runtime imp
   const gate=cli.slice(cli.indexOf("  // This compatibility slice",begin),end);
   expect(begin).toBeGreaterThan(0); expect(end).toBeGreaterThan(begin); expect(gate.length).toBeGreaterThan(0);
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-  const execute=new AsyncFunction("taskId","turnReceiptLedger","codexFollowUpHubState","clearPendingReply",new Bun.Transpiler({loader:"ts"}).transformSync(gate)+"; return 'allowed';");
+  const compiled=new Bun.Transpiler({loader:"ts"}).transformSync("async function fixtureAdmission(){\n"+gate+"\nreturn 'allowed';\n}");
+  const invoke=new AsyncFunction("taskId","turnReceiptLedger","codexFollowUpHubState","clearPendingReply","processWithOwnedFollowUpReplyOnly","evidence",compiled+"; return fixtureAdmission();");
+  const delegated:any[]=[];
+  const execute=(id:string,ledger:any,state?:any,clear?:any)=>invoke(id,ledger,state,clear,(entry:any)=>{delegated.push(entry);throw Error("test reply controller defers an unproved answer");},null);
   const {ledger}=accepted(); expect(await execute("follow",ledger,async()=>"unknown",()=>{}).catch((error:any)=>error)).toBeInstanceOf(Error);
   expect(await execute("other",ledger)).toBe("allowed");
   expect(await execute("normal",{load:()=>[{taskId:"normal",version:1}]})).toBe("allowed");
   expect(await execute("follow",ledger,async()=>"pending",()=>{}).catch((error:any)=>error)).toBeInstanceOf(Error);
   expect(ledger.load()).toHaveLength(1);
+  expect(delegated.map(x=>x.taskId)).toEqual(["follow","follow"]);
   const cleared:any[]=[];
   const skipped=await execute("follow",ledger,async()=>"terminal",(...args:any[])=>cleared.push(args)).catch((error:any)=>error);
   expect(skipped.code).toBe("codex_task_skipped");expect(cleared).toEqual([["admin","follow"]]);expect(ledger.load()).toEqual([]);

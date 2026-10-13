@@ -46,6 +46,8 @@ import {
 } from "./runtime/codex-app-server/receipt-ledger";
 import { decideFollowUpHubState } from "./runtime/codex-app-server/followup-hub-check";
 import type { OwnedFollowUpReceiptEntry } from "./runtime/codex-app-server/receipt-ledger";
+import { followUpInputHash, followUpAnswerPrompt, type OwnedFollowUpAdapter } from "./runtime/codex-app-server/owned-followup-controller";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
 import { hostname as osHostname, homedir } from "os";
@@ -2037,9 +2039,12 @@ const informationalInboxDrain = createInboxDrainLane((cause) => {
 // Authenticated Dashboard requests lead waiting work in both lanes; existing
 // active handlers retain their slots and already claimed turns are not preempted.
 const CODEX_INBOX_MAX_CONCURRENT = 20;
+const CODEX_FOLLOWUP_RECOVERY = Symbol("durable-owned-followup-recovery");
 const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
   maxConcurrent: CODEX_INBOX_MAX_CONCURRENT,
+  reservedPrioritySlots: Math.min(1, CODEX_INBOX_MAX_CONCURRENT - 1),
   prioritize: isInteractiveDashboardTask,
+  prioritizeRecovery: message => message[CODEX_FOLLOWUP_RECOVERY] === true,
   key: (message) => String(message.id),
   onError: (cause) => {
     const detachedError = cause as any;
@@ -2562,6 +2567,7 @@ async function ensureCodexAppServerSession(): Promise<
       commhubToken: AUTH_TOKEN || undefined,
       codexHome: NODE_CODEX_HOME,
       shouldStartQueued: (task) => queuedRowStillPendingOnHub(task.taskId),
+      ownedFollowUpAdapter: turnReceiptLedger ? codexOwnedFollowUpAdapter() : undefined,
       onThread: (threadId) => writebackCodexThread(threadId),
       onExit: (info) => {
         warn(`[codex-app-server] app-server exited code=${info.code} signal=${info.signal}; next turn will reopen`);
@@ -2591,6 +2597,25 @@ async function codexFollowUpHubState(entry: OwnedFollowUpReceiptEntry) {
   try {
     return decideFollowUpHubState(entry, parseToolJson(await callCommHub("get_task", { task_id: entry.taskId }, 0)), NODE_ID || "");
   } catch { return "unknown" as const; }
+}
+function codexOwnedFollowUpAdapter(): OwnedFollowUpAdapter {
+  const ledger = turnReceiptLedger!;
+  const read = (taskId: string) => ledger.load().find(row => row.taskId === taskId && row.version === 2) as OwnedFollowUpReceiptEntry;
+  return {
+    prepare: input => {
+      const inboxId = queuedInboxRowByTask.get(input.taskId);
+      if (!inboxId || !input.from) return undefined;
+      ledger.prepareFollowUp({ taskId: input.taskId, inboxId, replyTo: input.from, threadId: input.threadId,
+        ownerTaskId: input.ownerTaskId, ownerTurnId: input.ownerTurnId, startedAt: Date.now(),
+        nonce: randomBytes(16).toString("hex"), inputSha256: followUpInputHash(input.text) });
+      return read(input.taskId);
+    },
+    accept: entry => { ledger.acceptFollowUp(entry.taskId, { ownerTurnId: entry.ownerTurnId, nonce: entry.nonce }); return read(entry.taskId); },
+    prepareAnswer: entry => { ledger.prepareFollowUpAnswer(entry.taskId); return read(entry.taskId); },
+    bindAnswer: (entry, turnId) => { ledger.bindFollowUpAnswer(entry.taskId, { threadId: entry.threadId, turnId, clientUserMessageId: `anet:${entry.taskId}`, identityConfirmed: true }); return read(entry.taskId); },
+    status: codexFollowUpHubState,
+    terminal: entry => { clearPendingReply(entry.replyTo, entry.taskId); ledger.remove(entry.taskId); },
+  };
 }
 async function recoverCodexTurnReceipts(): Promise<void> {
   if (!turnReceiptLedger || codexReceiptRecoveryInFlight) return codexReceiptRecoveryInFlight ?? undefined;
@@ -4221,6 +4246,60 @@ async function closeOpencodeRuntime(reason: string): Promise<void> {
 // exactly like every other runtime — the bridge only wraps "run one turn".
 // A second concurrent task queues FIFO inside the bridge and is drained when
 // the in-flight turn (ours OR a human TUI's) completes.
+async function processWithOwnedFollowUpReplyOnly(entry: OwnedFollowUpReceiptEntry, evidence?: TaskRuntimeEvidenceReporter): Promise<string> {
+  const { codexAppServerThink, codexAppServerReplyOrThrow } = await import("./runtime/codex-app-server/runtime");
+  const session = await ensureCodexAppServerSession();
+  if (session.bridge.getThreadId() !== entry.threadId) throw new Error("接续回执属于原线程，不能切线程或重放行动。");
+  const replyEvidence = evidence ?? createTaskRuntimeEvidenceReporter({ taskId: entry.taskId, debug,
+    reportActivity: (id, context) => callCommHub("mark_tasks_consumed", taskActivityPayload(id, context), 0),
+    report: (level, id, context) => {
+      commhubCompensation?.recordLifecycle(id, level);
+      return callCommHub(level === "submitted" ? "mark_tasks_runtime_submitted" : "mark_tasks_consumed", {
+        task_ids: [id], ...(context ? { task_contexts: [{ task_id: id, thread_id: context.threadId, turn_id: context.turnId }] } : {}),
+      }, 0);
+    },
+  });
+  const outcome = await codexAppServerThink(session, { taskId: entry.taskId, text: followUpAnswerPrompt(entry), from: entry.replyTo,
+    resumeOwnedFollowUp: entry, interactiveDashboardTask: true, log,
+    onSubmitted: replyEvidence.submitted,
+    onConsumed: () => replyEvidence.consumed({ threadId: entry.threadId, turnId: entry.ownerTurnId }),
+    onActivity: event => { if (event.turnId === entry.ownerTurnId) replyEvidence.activity({ taskId: entry.taskId, threadId: entry.threadId, turnId: event.turnId }); },
+  });
+  if (outcome.failed) codexModelAuth.noteError(outcome.replyText);
+  else if (!outcome.skipped && !outcome.queued) codexModelAuth.noteSuccess();
+  codexHealthMonitor?.noteModelAuthMaybeChanged();
+  return codexAppServerReplyOrThrow(outcome);
+}
+
+let codexFollowUpRecoveryPump: Promise<void> | null = null;
+/** Separate reply controller, not the readonly history/receipt recovery pass. */
+async function resumePersistedOwnedFollowUps(): Promise<void> {
+  if (!turnReceiptLedger || codexFollowUpRecoveryPump) return codexFollowUpRecoveryPump ?? undefined;
+  codexFollowUpRecoveryPump = (async () => {
+    const rows = turnReceiptLedger.load().filter((row): row is OwnedFollowUpReceiptEntry => row.version === 2 && row.state === "watching");
+    if (!rows.length) return;
+    const session = await ensureCodexAppServerSession();
+    const recoverable = rows.filter(row => row.threadId === session.bridge.getThreadId() && !session.bridge.hasOwnedFollowUp(row.taskId))
+      .map(entry => ({ id: entry.inboxId, entry, [CODEX_FOLLOWUP_RECOVERY]: true }));
+    codexInboxDispatcher.submit(recoverable, async row => {
+      if (session.bridge.hasOwnedFollowUp(row.entry.taskId)) return;
+      let body: string, failed = false;
+      try { body = await processWithOwnedFollowUpReplyOnly(row.entry); }
+      catch (error: any) { if (error?.code === "codex_task_skipped") return; failed = true; body = error instanceof Error ? error.message : String(error); }
+      await deliverReplyReliably(row.entry.replyTo, `[${ALIAS}] ${body.slice(0, 2000)}`, row.entry.taskId, failed);
+      // Local reply completion suppresses redelivery; it is not Hub runtime
+      // consumption/activity evidence. Transport ACK still uses inbox.id.
+      commhubCompensation?.recordLifecycle(row.entry.taskId, "completed");
+      try {
+        await ackMessage(row.entry.inboxId);
+        commhubCompensation?.recordConsumed({ id: row.entry.inboxId, task_id: row.entry.taskId, type: "task" });
+      } catch (error) { warn(`[codex-followup] reply settled; transport ACK deferred: ${error instanceof Error ? error.message : String(error)}`); }
+    });
+  })().catch(cause => warn(`[codex-followup] reply recovery deferred: ${cause instanceof Error ? cause.message : String(cause)}`))
+    .finally(() => { codexFollowUpRecoveryPump = null; });
+  return codexFollowUpRecoveryPump;
+}
+
 async function processWithCodexAppServer(
   task: string,
   _from: string,
@@ -4238,7 +4317,7 @@ async function processWithCodexAppServer(
       turnReceiptLedger.remove(taskId);
       throw Object.assign(new Error("接续任务已在 Hub 终态，跳过行动与重复回复。"), { code: "codex_task_skipped" });
     }
-    throw new Error("已有独立接续回执；此版本尚未启用接续适配器，不能重跑该消息的行动正文。请由原生命周期管理者使用支持的版本核查原回合与本消息回复。");
+    return processWithOwnedFollowUpReplyOnly(entry, evidence);
   }
   const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
@@ -4255,7 +4334,9 @@ async function processWithCodexAppServer(
     interactiveDashboardTask: steerIfExternalTurn,
     log,
     onActivity: (event) => {
-      evidence?.activity({ taskId: event.taskId, threadId: session.bridge.getThreadId(), turnId: event.turnId });
+      const receipt = taskId ? turnReceiptLedger?.load().find(row => row.taskId === taskId && row.version === 2) : undefined;
+      if (!receipt || (receipt.version === 2 && event.turnId === receipt.ownerTurnId))
+        evidence?.activity({ taskId: event.taskId, threadId: session.bridge.getThreadId(), turnId: event.turnId });
       const now = Date.now();
       if (now - lastActivityHeartbeatAt < 30_000) return;
       lastActivityHeartbeatAt = now;
@@ -4274,7 +4355,10 @@ async function processWithCodexAppServer(
       const inboxId = taskId ? queuedInboxRowByTask.get(taskId) : undefined;
       if (trackReceipt && taskId && inboxId && turnReceiptLedger) {
         try {
-          turnReceiptLedger.watch({
+          const followUp = turnReceiptLedger.load().find(row => row.taskId === taskId && row.version === 2);
+          if (followUp?.version === 2) {
+            if (followUp.threadId !== threadId || followUp.ownerTurnId !== event.turnId) throw new Error("follow-up consumed context mismatch");
+          } else turnReceiptLedger.watch({
             taskId,
             inboxId,
             replyTo: _from,
@@ -7702,9 +7786,11 @@ if (RUNTIME === "codex-app-server" && codexAppServerUrl) {
 // already consumed an inbox row. Recovery is read-only against Codex and only
 // creates the missing outbound receipt; it never starts a model turn.
 if (turnReceiptLedger?.load().length) void recoverCodexTurnReceipts();
+if (turnReceiptLedger?.load().some(row => row.version === 2)) void resumePersistedOwnedFollowUps();
 if (turnReceiptLedger) {
   setInterval(() => {
     if (turnReceiptLedger.load().length) void recoverCodexTurnReceipts();
+    if (turnReceiptLedger.load().some(row => row.version === 2)) void resumePersistedOwnedFollowUps();
   }, 30_000).unref?.();
 }
 

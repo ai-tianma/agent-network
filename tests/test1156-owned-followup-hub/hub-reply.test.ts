@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "bun:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { db } from "../../server/src/db";
@@ -10,6 +11,9 @@ import { CodexAppServerClient } from "../../agent-node/src/runtime/codex-app-ser
 import { CodexAppServerBridge } from "../../agent-node/src/runtime/codex-app-server-bridge";
 import { TurnReceiptLedger, recoverTurnReceipts } from "../../agent-node/src/runtime/codex-app-server/receipt-ledger";
 import { decideFollowUpHubState } from "../../agent-node/src/runtime/codex-app-server/followup-hub-check";
+import { codexAppServerThink, type CodexAppServerRuntimeSession } from "../../agent-node/src/runtime/codex-app-server/runtime";
+import { followUpInputHash } from "../../agent-node/src/runtime/codex-app-server/owned-followup-controller";
+import { isInteractiveDashboardTask } from "../../agent-node/src/inbox-dispatch";
 
 const NET="net_owned_followup_reply", USER="user_owned_followup_reply", NODE="owned_followup_node", OTHER="owned_followup_other";
 const THREAD="owned-followup-thread";
@@ -41,8 +45,8 @@ function handlers(alias?:string) {
   return tools;
 }
 async function call(tool:any,args:any) {return JSON.parse((await tool(args)).content[0].text);}
-async function task(body:string) {
-  const reply=await call(handlers().send_task,{alias:NODE,task:body,priority:"normal"});
+async function task(body:string,meta?:unknown) {
+  const reply=await call(handlers().send_task,{alias:NODE,task:body,priority:"normal",...(meta?{meta}:{})});
   expect(reply.ok).toBe(true); return reply.task_id??reply.message_id;
 }
 function row(taskId:string) {return db.get<any>("SELECT * FROM tasks WHERE task_id=?1",taskId)!;}
@@ -104,4 +108,58 @@ test("real Hub: cancelled or expired follow-up cannot receive a normal or new-tu
     expect(row(follow)).toMatchObject({status,result:"original terminal",turn_id:"owner-turn"});
     expect(db.get<any>("SELECT COUNT(*) AS n FROM task_late_replies WHERE task_id=?1",follow).n).toBe(0);
   }
+});
+
+test("production CLI adapter + real Hub and WS: owned steer once, immutable consumed context, own automatic answer",async()=>{
+  const owner=await task("owned wire owner action"),follow=await task("ACTION ONCE",{source:"dashboard-chat",client_request_id:"dreq_"+"c".repeat(32)});
+  const node=handlers(NODE),root=mkdtempSync(join(tmpdir(),"owned-wire-"));roots.push(root);
+  const ledger=new TurnReceiptLedger(join(root,"receipts.json"));
+  const cli=readFileSync(new URL("../../agent-node/src/cli.ts",import.meta.url),"utf8");
+  const start=cli.indexOf("function codexOwnedFollowUpAdapter()"),end=cli.indexOf("async function recoverCodexTurnReceipts()",start);
+  expect(start).toBeGreaterThan(0);expect(end).toBeGreaterThan(start);
+  const factory=new Function("turnReceiptLedger","queuedInboxRowByTask","followUpInputHash","randomBytes","codexFollowUpHubState","clearPendingReply",
+    new Bun.Transpiler({loader:"ts"}).transformSync(cli.slice(start,end))+";return codexOwnedFollowUpAdapter;")(
+      ledger,new Map([[follow,follow]]),followUpInputHash,randomBytes,
+      async(entry:any)=>decideFollowUpHubState(entry,await call(node.get_task,{task_id:entry.taskId}),`id_${NODE}`),()=>{});
+  const history:any[]=[],starts:any[]=[],steers:any[]=[];let socket:any;
+  const server=Bun.serve({port:0,fetch(req,srv){if(srv.upgrade(req))return;return new Response("upgrade",{status:400});},websocket:{message(ws,raw){
+    socket=ws;const msg=JSON.parse(String(raw));let result:any;
+    if(msg.method==="turn/start") {
+      starts.push(msg.params);const id=starts.length===1?"wire-owner":"wire-answer";
+      const item={type:"userMessage",clientId:msg.params.clientUserMessageId,content:msg.params.input};history.push({id,status:"inProgress",items:[item]});
+      ws.send(JSON.stringify({jsonrpc:"2.0",method:"item/completed",params:{threadId:THREAD,turnId:id,item}}));result={turn:{id}};
+    } else if(msg.method==="turn/steer") {steers.push(msg.params);history[0].items.push({type:"userMessage",content:msg.params.input});result={turnId:msg.params.expectedTurnId};}
+    else if(msg.method==="thread/turns/list")result={data:history,nextCursor:null};
+    else if(msg.method==="thread/read")result={thread:{status:{type:history.some(t=>t.status==="inProgress")?"active":"idle"}}};
+    else throw Error("unexpected owned wire method "+msg.method);
+    ws.send(JSON.stringify({jsonrpc:"2.0",id:msg.id,result}));
+  }}});
+  const client=new CodexAppServerClient({url:`ws://127.0.0.1:${server.port}`});
+  const until=async(check:()=>boolean)=>{for(let n=0;n<200&&!check();n++)await Bun.sleep(5);expect(check()).toBe(true);};
+  const consumed:any[]=[];
+  try {
+    await client.connect();const bridge=new CodexAppServerBridge({client,threadId:THREAD,ownedFollowUpAdapter:factory()});
+    const session={bridge} as CodexAppServerRuntimeSession;
+    const base={timeoutMs:3000,queueTimeoutMs:3000,reconciliationIntervalMs:0,onConsumed:(e:any)=>{consumed.push(e);void consume(node,e.taskId,e.turnId);}};
+    const original=codexAppServerThink(session,{...base,taskId:owner,text:"owner action"});await until(()=>bridge.activeTurn()==="wire-owner");
+    const hubFollow=(await call(node.get_task,{task_id:follow})).task;
+    const trusted=isInteractiveDashboardTask({type:"task",meta_json:hubFollow.meta_json});expect(trusted).toBe(true);
+    const human=codexAppServerThink(session,{...base,taskId:follow,text:"ACTION ONCE",from:USER,interactiveDashboardTask:trusted});
+    await until(()=>ledger.load().some(r=>r.version===2&&r.phase==="accepted"));
+    history[0].status="completed";const ownerFinal={type:"agentMessage",phase:"final_answer",text:"WIRE OWNER ONLY"};history[0].items.push(ownerFinal);
+    socket.send(JSON.stringify({jsonrpc:"2.0",method:"item/completed",params:{threadId:THREAD,turnId:"wire-owner",item:ownerFinal}}));
+    socket.send(JSON.stringify({jsonrpc:"2.0",method:"turn/completed",params:{threadId:THREAD,turn:{id:"wire-owner",status:"completed"}}}));
+    expect((await original).replyText).toBe("WIRE OWNER ONLY");
+    expect((await call(node.send_reply,{in_reply_to:owner,text:"WIRE OWNER ONLY"})).ok).toBe(true);
+    await until(()=>ledger.load().some(r=>r.version===2&&r.phase==="answering"));
+    expect(row(follow).status).not.toBe("replied");expect(starts).toHaveLength(2);expect(steers).toHaveLength(1);
+    expect(steers[0].expectedTurnId).toBe("wire-owner");expect(starts[1].clientUserMessageId).toBe(`anet:${follow}`);expect(starts[1].input[0].text).not.toContain("ACTION ONCE");
+    history[1].status="completed";const ownFinal={type:"agentMessage",phase:"final_answer",text:"WIRE FOLLOW-UP ONLY"};history[1].items.push(ownFinal);
+    socket.send(JSON.stringify({jsonrpc:"2.0",method:"item/completed",params:{threadId:THREAD,turnId:"wire-answer",item:ownFinal}}));
+    socket.send(JSON.stringify({jsonrpc:"2.0",method:"turn/completed",params:{threadId:THREAD,turn:{id:"wire-answer",status:"completed"}}}));
+    expect((await human).replyText).toBe("WIRE FOLLOW-UP ONLY");
+    expect((await call(node.send_reply,{in_reply_to:follow,text:"WIRE FOLLOW-UP ONLY"})).ok).toBe(true);
+    expect(row(follow)).toMatchObject({turn_id:"wire-owner",thread_id:THREAD,result:"WIRE FOLLOW-UP ONLY",status:"replied"});
+    expect(consumed.filter(e=>e.taskId===follow).map(e=>e.turnId)).toEqual(["wire-owner"]);
+  } finally {await client.close();server.stop(true);}
 });
