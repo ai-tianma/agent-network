@@ -28,3 +28,10 @@ provides the server contract and does not claim the client feature complete.
 Docker SQLite/PostgreSQL HTTP validation is recorded in
 `report-test1091-tag-status.txt`; source CI, exact-main publication and real
 client adoption are separate gates.
+
+Source PR2699/main1c2df6bd0bf1ae7c5170ed86dd1dc29c67be4555 passed38 real HTTP
+SQLite/PostgreSQL checks and10required with the exact tested tree. Formal release
+38374268696 succeeded; independent anonymous full tarball bytes/SHA1/SHA256/SRI
+match the gated artifact, preview138/latest30 checked. See the validation report
+and `docs/requirements-tag-status.md` for the extension and client boundaries.
+Managed Hub137 and client UI remain separate from this public contract package.
