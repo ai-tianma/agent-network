@@ -1,3 +1,4 @@
+import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
@@ -4277,35 +4278,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (already gate-locked by enforceNetworkId path of resolveReadScope).
       const isPrivileged = callerRole === "admin" || callerRole === "owner" || (!enforceUserId);
 
-      // Pull candidate daemons. Active-token EXISTS subquery handles BOTH
-      // revoked daemon ntoks (revoked_at set) AND DELETEd token rows
-      // (the standard revokeToken path deletes the row, not flagging
-      // revoked_at — PR2 v1 SHOULD-FIX per 通信龙 audit). EXISTS naturally
-      // dedupes if a daemon ever had multiple tokens (e.g. rotation; nit ⚪).
-      let sql = `
-        SELECT
-          n.node_id, n.alias, n.hostname, n.network_id,
+      // Scope first; batch immutable credential + heartbeat identity for both list entry points.
+      let sql = `SELECT n.node_id, n.alias, n.hostname, n.network_id, n.owner_user_id,
           n.runtimes_supported, n.allowed_secret_keys,
-          n.created_at, n.updated_at,
-          s.last_seen_at AS session_last_seen,
-          s.status AS session_status,
-          s.cpu_cores AS session_cpu_cores,
-          s.mem_total_gb AS session_mem_total_gb,
-          s.ip AS session_ip,
-          n.config_snapshot
-        FROM nodes n
-        LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
-        WHERE EXISTS (
-          SELECT 1 FROM api_tokens t
-          WHERE t.network_id = n.network_id
-            AND t.name = 'node:' || n.alias
-            AND t.revoked_at IS NULL
-        )
-      `;
+          n.created_at, n.updated_at, n.config_snapshot FROM nodes n WHERE 1=1`;
       const sqlParams: any[] = [];
       sql = addReadScope(sql, sqlParams, readScope, "n.network_id");
       sql += ` ORDER BY n.updated_at DESC`;
-      const rows = db.all<Record<string, any>>(sql, ...sqlParams);
+      const rows = hostSupervisorIdentityRows(sql, sqlParams);
 
       // Filter to role=host_supervisor (read from config_snapshot;
       // schema-promoted columns runtimes_supported/allowed_secret_keys
