@@ -137,3 +137,16 @@ curl -s "$HUB/api/nodes" -H "Authorization: Bearer $UTOK" \
 对 GA 意义：**picker 代码路径本身正确**，GA 阻断只在特定 prod 状态下会重现；短线的运维恢复 = 定位 & 清那行 dirty row（`DELETE FROM nodes WHERE alias=… AND config_snapshot IS NULL` 或 `anet daemon down` + 换新 alias）。长线是 §7.1 的升级顺序 + P3 clobber backlog 是否升级为 GA-blocker 的独立评估。
 
 **Repro artifacts**（docker + shell）留在 branch `docs/ga-compat-matrix` 下 `docs/tests/p-ga2-compat-repro/`（Dockerfile.aligned / Dockerfile.mixed / repro.sh），未来再遇到类似疑似 compat 事件复用。
+
+
+## 2026-10-14 owned follow-up / full-depth inbox pair
+
+Prepared source pair: CLI 2.3.0-preview.177 + Node 2.5.0-preview.143 + Hub
+0.9.0-preview.139. Source/core evidence is in
+[report-test1163](../tests/report-test1163-human-inbox.txt); exact main publication
+and real adoption are separate gates, not implied by this prepared version row.
+Node asks `get_inbox(human_first:true)` and verifies `human_inbox.version=1`.
+Older Hub responses remain usable but their first-page limitation is warned.
+The scalar metadata keyset is tested on both SQLite and real PostgreSQL. Auth
+and recipient/network checks are unchanged. Controller V2 answer-intent state
+requires the new compatible Node; do not downgrade pending V2 to a V1 reader.

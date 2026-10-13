@@ -209,7 +209,7 @@ responses, nonce/body mismatch, owner-terminal races, restart answer identity,
 capacity and saturation. These are isolated protocol/model fixtures, not
 original-device adoption or native-model execution acceptance.
 
-Known inlet boundary: old Hub `get_inbox` still selects the first 20 rows by
+Boundary at the #1162 source release (resolved for capable paired versions below): old Hub `get_inbox` still selects the first 20 rows by
 legacy priority/time. A human beyond that page may not reach this dispatcher
 yet. The local reserved slot does not prove full-depth Hub selection; that is
 a separate P0 inlet task. This increment does not claim that every backlog
@@ -269,3 +269,47 @@ recreates this fixture with its pinned Dockerfile and frozen dependency lock.
 It does not restore Hub data, user registration, node credentials, or private
 receipt state; those require existing authorized backups/re-registration.
 Passing this fixture does not establish disaster recovery of a running node.
+
+
+### Full-depth Hub inlet (#1163)
+
+`get_inbox(human_first: true)` opts into `human_inbox.version = 1`.
+After the existing caller/recipient/network authorization, the Hub scans only
+id/type/meta/ordering columns in 256-row keyset pages. It stops at the requested
+number of authenticated Dashboard requests or the end of the pending inbox;
+there is no first-20/100/1000 cutoff. It then fetches at most the original
+`limit` bodies (maximum 100; Node requests 20), human first, preserving
+priority/created/insertion-sequence order within each class. The ordinary body is not copied
+into the scan. Existing callers without the option keep ordinary ordering.
+The same scalar query runs on SQLite and PostgreSQL; no JSON SQL extension or
+cast of malformed historical metadata is required. Work is linear in examined
+metadata when no human is pending; this is not a constant-cost inbox index.
+
+Only task/broadcast rows with server-stamped `auth_origin=user`, exact
+`source=dashboard-chat` and a valid `dreq_` contract qualify. Legacy/unknown,
+malformed, node-stamped or scheduler rows stay ordinary. Node rechecks this
+contract independently; selecting does not ACK, consume, renew a task lease,
+interrupt an active turn, or reserve more than its existing 20 handlers.
+Old Hubs strip the optional request key and return their ordinary first page;
+the Node warns once that full-depth capability is missing. Old-Hub fallback
+is explicitly partial, not evidence that deeper requests became accessible.
+
+Recovery: server source/schema/locks and the [Hub launcher](../../deploy/hub/README.md) and [fleet launchers](../../deploy/fleet/README.md)
+remain authoritative; reverse proxy, port mappings and safe environment/secret
+sources follow the [Hub recovery procedure](../../deploy/hub/README.md) and [node recovery procedure](../../deploy/fleet/README.md). Upgrade the Hub and
+Node/CLI exact main release in their owners' normal maintenance windows, then
+verify the versioned inbox response and real original-node delivery. This
+change does not restart/adopt the current node or change its thread/model/login.
+Rollback uses the previous immutable Hub and paired Node/CLI versions; pending
+V2 answer-intent receipts must not be handed to older V1 readers (see the
+controller recovery section). Inbox/task data, identities and receipts require
+the documented private backups; a clone recovers software, not those records.
+The existing Hub runbook explicitly leaves the vault recovery record name NOT COVERED; this increment does not certify a full production-data recovery drill. No production secrets or full private backlog enter Git.
+
+Same-second rows break ties with the existing SQLite rowid. PostgreSQL adds
+`inbox.rowid BIGSERIAL` through the existing idempotent rowid migration pattern;
+new inserts preserve insertion order. Historical equal-timestamp PostgreSQL
+rows have no recoverable original arrival sequence; the migration assigns a
+stable order without claiming reconstructed timing. Body and metadata scan
+use the same ordering. The extra column is ignored by old Hub versions, so
+software rollback does not drop data or require schema reversal.

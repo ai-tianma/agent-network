@@ -1873,9 +1873,15 @@ function markClaudeLoginDead(): void {
   claudeLoginDead = true;
   void reportStatus("error").catch(() => {});
 }
+let warnedLegacyHumanInbox = false;
 const getInbox = async () => {
   const alias = await liveAlias();
-  return (await callCommHub("get_inbox", { alias, limit: 20 }))?.messages || [];
+  const result = await callCommHub("get_inbox", { alias, limit: 20, human_first: true });
+  if (result?.human_inbox?.version !== 1 && !warnedLegacyHumanInbox) {
+    warnedLegacyHumanInbox = true;
+    warn("Hub lacks full-depth human inbox capability; using its legacy first-page ordering. Upgrade the Hub in its normal maintenance window.");
+  }
+  return result?.messages || [];
 };
 const ackMessage = async (id: string) => {
   const alias = await liveAlias();

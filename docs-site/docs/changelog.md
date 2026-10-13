@@ -1,5 +1,11 @@
 # 更新日志
 
+## 准备发布：深层人类收件与已有回合接续（2026-10-14）
+
+- 配套源码版本：CLI 2.3.0-preview.177 / Node 2.5.0-preview.143 / Hub 0.9.0-preview.139。公开状态以正式发布门和 registry 为准。
+- 人类 Dashboard 消息可越过前 20 条未 ACK 积压进入接续仲裁。Hub 全深度分页扫描类型和元数据，单次正文仍最多 20 条；节点保留总 20 槽位、已领任务和去重。旧 Hub 保持原取件行为，节点提示其全深度能力尚不可用。
+- 纳入已合入的 owned follow-up 控制器：验证当前已归属回合后只注入一次，持久化 nonce/hash；独立回答属于原任务，未知接纳、取消、恢复和容量失败不重新执行动作。源码/协议测试通过不代表现役节点或原机已采用。
+
 ## 未发布：单文件 anet 可执行文件（只构建，不发布）（2026-10-11）
 
 - 新增统一入口 `agent-network/bin/anet-bin.ts`。`bun build --compile` 把它打成一个可执行文件：默认走 CLI，`__hub` 走内嵌的 Hub，`__node` 走内嵌的 agent-node。npm 的 `bin` 仍是 `dist/bin/anet.cjs`。`release.yml` 的 npm 发布没有改。
