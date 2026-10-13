@@ -1428,12 +1428,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_inbox",
-    "Read your inbox. human_first selects authenticated Dashboard requests across the full pending metadata depth.",
+    "Read inbox.",
     {
-      alias: z.string().min(1).max(200).describe("Alias"),
+      alias: z.string().min(1).max(200),
       limit: z.number().min(1).max(100).optional().default(10),
       network_id: z.string().max(200).optional(),
-      human_first: z.boolean().optional().default(false),
+      human_first: z.boolean().optional(),
     },
     async ({ alias, limit, network_id: netId, human_first }) => {
       const effectiveNetId = getNetworkId(netId);
