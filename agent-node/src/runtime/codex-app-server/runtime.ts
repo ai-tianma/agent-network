@@ -578,6 +578,7 @@ export function codexAppServerThink(
               text: opts.text,
               from: opts.from,
               steerIfExternalTurn: opts.steerIfExternalTurn,
+              interactiveDashboardTask: opts.interactiveDashboardTask === true,
             });
             if (settled) return;
             if (submitted.started) armResponseIdleTimer();
@@ -744,6 +745,7 @@ export function codexAppServerThink(
         text: opts.text,
         from: opts.from,
         steerIfExternalTurn: opts.steerIfExternalTurn,
+        interactiveDashboardTask: opts.interactiveDashboardTask === true,
       })
       .then((r) => {
         // Compatibility fallback for bridge implementations predating the

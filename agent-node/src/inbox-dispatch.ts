@@ -76,12 +76,15 @@ export interface DetachedInboxDispatcher<T> {
 /**
  * Keep detached inbox work bounded and deduplicated across later SSE snapshots.
  * The key is claimed before invoking the async handler, so two kicks in the
- * same tick cannot double-submit one Hub row. N+1 work waits in the local FIFO
+ * same tick cannot double-submit one Hub row. N+1 work waits in the local queue
+ * (FIFO unless the caller opts into stable priority for authenticated rows)
  * and is started automatically when any active handler settles.
  */
 export function createDetachedInboxDispatcher<T>(opts: {
   maxConcurrent: number;
   key: (message: T) => string;
+  /** Opt-in trusted admission policy; active handlers retain their slots. */
+  prioritize?: (message: T) => boolean;
   onError: (error: unknown) => void;
   onSettled?: () => void;
 }): DetachedInboxDispatcher<T> {
@@ -90,7 +93,7 @@ export function createDetachedInboxDispatcher<T>(opts: {
   }
   const activeKeys = new Set<string>();
   const queuedKeys = new Set<string>();
-  const queue: Array<{ message: T; handler: (message: T) => Promise<void> }> = [];
+  const queue: Array<{ message: T; handler: (message: T) => Promise<void>; priority: boolean }> = [];
 
   const pump = () => {
     while (activeKeys.size < opts.maxConcurrent && queue.length > 0) {
@@ -135,7 +138,11 @@ export function createDetachedInboxDispatcher<T>(opts: {
           continue;
         }
         queuedKeys.add(key);
-        queue.push({ message, handler });
+        const priority = opts.prioritize?.(message) === true;
+        const firstOrdinary = priority ? queue.findIndex(item => !item.priority) : -1;
+        const item = { message, handler, priority };
+        if (firstOrdinary < 0) queue.push(item);
+        else queue.splice(firstOrdinary, 0, item);
         accepted++;
       }
       pump();
