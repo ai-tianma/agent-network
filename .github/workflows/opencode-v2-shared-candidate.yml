@@ -1,0 +1,29 @@
+name: OpenCode V2 shared candidate
+
+on:
+  push:
+    branches:
+      - feat/opencode-v2-server-reuse
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shared-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated V2 fixture
+        run: docker build -f tests/test543-opencode-v2-copresence/Dockerfile -t anet-v2-shared-candidate .
+      - name: Run existing V2 copresence fixture
+        run: docker run --rm --network none anet-v2-shared-candidate
+      - name: Run shared Server unit and native registry checks
+        run: |
+          docker run --rm --network none anet-v2-shared-candidate \
+            bash -lc 'cd /agent-node-src && ANET_OPENCODE_V2_BIN="$(command -v opencode)" bun test \
+              src/runtime/opencode-shared-server-registry.test.ts \
+              src/runtime/opencode-copresence/shared-v2-mcp.test.ts \
+              src/runtime/opencode-copresence/v2-shared-native.test.ts \
+              src/runtime/opencode-copresence/v2-session.test.ts'
