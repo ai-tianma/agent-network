@@ -1,7 +1,7 @@
 // Fixture only: retain the historical nullable sessions.network_id shape.
 // Fresh production schema stays NOT NULL; no product migration is changed.
 import { createAdapter } from "../../server/src/db-adapter.js";
-if (!Bun.file("/.dockerenv").size && !await Bun.file("/.dockerenv").exists()) throw Error("container only");
+if (!await Bun.file("/.dockerenv").exists()) throw Error("container only");
 if (process.env.NODE_ENV !== "test" || !process.env.COMMHUB_DB?.startsWith("/tmp/supervisor1109.")) throw Error("private fixture only");
 const text = await Bun.file("/work/server/src/db.ts").text();
 const ddl = text.match(/CREATE TABLE IF NOT EXISTS sessions \([\s\S]*?\n  \);/)?.[0];
