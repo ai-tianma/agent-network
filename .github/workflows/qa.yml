@@ -12,6 +12,7 @@ name: anet QA (v0)
 on:
   pull_request:
     paths:
+      - 'tests/test1091-tag-status/**'
       - 'tests/test1109-supervisor-identity/**'
       - 'tests/test1120-copresence-auth/**'
       - 'tests/test1113-node-profile/**'
@@ -273,6 +274,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'tests/test1091-tag-status/**'
       - 'tests/test1109-supervisor-identity/**'
       - 'tests/test1120-copresence-auth/**'
       - 'tests/test1113-node-profile/**'
