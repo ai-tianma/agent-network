@@ -1531,7 +1531,7 @@ export class CodexAppServerBridge extends EventEmitter {
    */
   cancelQueuedTask(taskId: string): boolean {
     const index = this.taskQueue.findIndex((task) => task.taskId === taskId);
-    if (index < 0) return this.ownedFollowUps?.forget(taskId) === true;
+    if (index < 0) return false;
     this.taskQueue.splice(index, 1);
     this.emit("task_queue_cancelled", { taskId, depth: this.taskQueue.length });
     return true;
