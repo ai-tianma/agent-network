@@ -28,3 +28,4 @@ An attempted old-queue invocation used its nonexistent /repo/tests path and ran
 no assertions; the actual cached fixture entry is /fixture/run.sh.
 Original human queue: 138 PASS / 505 assertions (21.41s), four production mutations ASSERTION RED.
 Local assertion runs total under two minutes; builds are separate.
+First PR CI doc-symbol-pins failed because two tools.ts source links moved by 10 lines; corrected targets and labels to actual send_reply/send_ack registrations. The guard and baseline remain unchanged.
