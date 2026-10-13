@@ -1,3 +1,4 @@
+import { selectHumanInboxIds } from "./human-inbox.js";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { markTaskActivity } from "./task-activity.js";
@@ -1427,13 +1428,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_inbox",
-    "Read your inbox.",
+    "Read your inbox. human_first selects authenticated Dashboard requests across the full pending metadata depth.",
     {
       alias: z.string().min(1).max(200).describe("Alias"),
       limit: z.number().min(1).max(100).optional().default(10),
       network_id: z.string().max(200).optional(),
+      human_first: z.boolean().optional().default(false),
     },
-    async ({ alias, limit, network_id: netId }) => {
+    async ({ alias, limit, network_id: netId, human_first }) => {
       const effectiveNetId = getNetworkId(netId);
       const recipient = resolveInboxCaller(alias, { tokenId: callerTokenId, userId: enforceUserId, networkId: effectiveNetId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected });
       if (!recipient.ok) return { content: [{ type: "text" as const, text: JSON.stringify(recipient) }] };
@@ -1445,13 +1447,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       countSql = addReadScope(countSql, countParams, readScope);
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
+      const scanParams: any[] = [alias];
+      const scanWhere = addReadScope("FROM inbox WHERE session_name = ?1 AND acked = 0", scanParams, readScope);
+      const human = human_first ? selectHumanInboxIds(scanWhere, scanParams, limit) : undefined;
       const rowsParams: any[] = [alias];
       let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json,
          CASE WHEN EXISTS(SELECT 1 FROM task_late_replies lr WHERE lr.inbox_id=inbox.id) THEN 1 ELSE 0 END AS late,
          CASE WHEN type = 'task' THEN COALESCE(task_id, id) ELSE task_id END AS task_id
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
-      rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
+      if (human?.ids.length) {
+        const placeholders = human.ids.map((id) => { rowsParams.push(id); return `?${rowsParams.length}`; });
+        rowsSql += ` ORDER BY CASE WHEN id IN (${placeholders.join(",")}) THEN 0 ELSE 1 END,`;
+      } else rowsSql += " ORDER BY";
+      rowsSql += ` CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at, id
          LIMIT ?${rowsParams.length + 1}`;
       rowsParams.push(limit);
       const rows = db.all(rowsSql, ...rowsParams).map((row: any) => {
@@ -1461,7 +1470,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows }) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows, ...(human ? { human_inbox: { version: 1, mode: "metadata-keyset", examined: human.examined } } : {}) }) }],
       };
     }
   );
