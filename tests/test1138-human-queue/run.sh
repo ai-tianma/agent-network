@@ -24,14 +24,11 @@ for seam in dispatcher runtime bridge; do
   cp /tmp/priority1141-cli.ts src/cli.ts
   cp /tmp/priority1141-runtime.ts src/runtime/codex-app-server/runtime.ts
   cp /tmp/priority1141-bridge.ts src/runtime/codex-app-server-bridge.ts
-  SEAM="$seam" bun -e '
-    const s=process.env.SEAM;
-    const p=s==="dispatcher"?"src/cli.ts":s==="runtime"?"src/runtime/codex-app-server/runtime.ts":"src/runtime/codex-app-server-bridge.ts";
-    const a=s==="dispatcher"?"prioritize: isInteractiveDashboardTask,":s==="runtime"?"interactiveDashboardTask: opts.interactiveDashboardTask === true,":"const human = input.interactiveDashboardTask === true;";
-    const b=s==="dispatcher"?"prioritize: () => false,":s==="runtime"?"interactiveDashboardTask: false,":"const human = false;";
-    const text=await Bun.file(p).text(); const expected=s==="runtime"?2:1;
-    if(text.split(a).length!==expected+1) throw Error("production mutation anchor mismatch");
-    await Bun.write(p,text.replaceAll(a,b));'
+  case "$seam" in
+    dispatcher) bun -e 'const p="src/cli.ts"; const a="prioritize: isInteractiveDashboardTask,"; const b="prioritize: () => false,"; const text=await Bun.file(p).text(); if(text.split(a).length!==2) throw Error("unique dispatcher anchor missing"); await Bun.write(p,text.replace(a,b));' ;;
+    runtime) bun -e 'const p="src/runtime/codex-app-server/runtime.ts"; const a="interactiveDashboardTask: opts.interactiveDashboardTask === true,"; const b="interactiveDashboardTask: false,"; const text=await Bun.file(p).text(); if(text.split(a).length!==3) throw Error("two runtime anchors missing"); await Bun.write(p,text.replaceAll(a,b));' ;;
+    bridge) bun -e 'const p="src/runtime/codex-app-server-bridge.ts"; const a="const human = input.interactiveDashboardTask === true;"; const b="const human = false;"; const text=await Bun.file(p).text(); if(text.split(a).length!==2) throw Error("unique bridge anchor missing"); await Bun.write(p,text.replace(a,b));' ;;
+  esac
   case "$seam" in
     dispatcher) pattern='production CLI dispatcher uses' ;;
     runtime) pattern='production runtime carries' ;;
