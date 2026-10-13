@@ -355,4 +355,3 @@ describe("tag_status current snapshot #1091", () => {
     expect([403,404]).toContain(denied.status);
   });
 });
-
