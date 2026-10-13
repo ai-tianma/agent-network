@@ -1,6 +1,6 @@
 # Windows native ongoing TUI health — agent-network2.3.0-preview.179
 
-Software alpha: CLI2.3.0-preview.179 / Node2.5.0-preview.145 / existing Hub0.9.0-preview.139. Both official GitHub archives are exact-main four-gated and fully byte-verified; Node npm is fully verified, CLI npm remains pending visibility. See report-test1175-public.txt for the checkpoint. Stable/latest unchanged. See report-test1175-windows-tui-health.txt for evidence and limits. Original-device and real-model acceptance remain separate.
+Software alpha: CLI2.3.0-preview.179 / Node2.5.0-preview.145 / existing Hub0.9.0-preview.139. Both official GitHub archives are exact-main four-gated and fully byte-verified; Both complete npm archives now match the formal gated and official GitHub archives. The CLI workflow initial registry-timeout FAILURE is retained, followed by successful independent full-package verification. See report-test1175-public.txt for the checkpoint. Stable/latest unchanged. See report-test1175-windows-tui-health.txt for evidence and limits. Original-device and real-model acceptance remain separate.
 
 ## Install
 
