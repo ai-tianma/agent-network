@@ -2,7 +2,7 @@
 
 ## Install
 
-After all exact-main release gates pass, use Node >=22.13 and a new private prefix:
+All four exact-main gates passed. Node142 is verified on npm; CLI176 is available through the official immutable GitHub gated download while its npm registry visibility remains unconfirmed. Use Node >=22.13 and a new private prefix:
 
 ```bash
 set -e
@@ -11,9 +11,11 @@ test ! -e "$PAIR_DIR"
 install -d -m 700 "$PAIR_DIR"
 umask 077
 npm install --prefix "$PAIR_DIR" --ignore-scripts --no-audit --no-fund \
-  @sleep2agi/agent-network@2.3.0-preview.176 \
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.176/sleep2agi-agent-network-2.3.0-preview.176.tgz \
   @sleep2agi/agent-node@2.5.0-preview.142
 ```
+
+Verify the downloaded CLI tarball SHA256 `07042f6723a461e033c755b3cdac16c701793b15ec97dcec453d615f4e894a2c` against the official release before adoption. The GitHub asset is the same main83cd gated archive; this download does not republish npm or move its dist-tags. See `report-test1141-human-priority-public.txt` for the retained first installation failure, successful retry and later npm verification timeout.
 
 ## Upgrade
 
