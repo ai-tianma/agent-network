@@ -635,7 +635,11 @@ function renderSafeRuntimeAuth(source: string | undefined): string | undefined {
     if (entry.type !== "api" || typeof entry.key !== "string" || entry.key.length === 0) continue;
     auth[id] = { type: "api", key: entry.key };
   }
-  return JSON.stringify(auth, null, 2) + "\n";
+  const rendered = JSON.stringify(auth, null, 2) + "\n";
+  if (Buffer.byteLength(rendered) > 1024 * 1024) {
+    throw new Error("opencode refuses co-presence auth: rendered data exceeds size limit");
+  }
+  return rendered;
 }
 
 /** V1 human co-presence login data, following upstream Auth.Info (v1.18.1).
