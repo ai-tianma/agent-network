@@ -123,6 +123,15 @@ interface SteeredTurn {
   sideEffectObserved?: boolean;
 }
 
+interface QueuedCodexTask {
+  taskId: string;
+  text: string;
+  from?: string;
+  steerIfExternalTurn?: boolean;
+  /** Explicit Hub-authenticated Dashboard audience, never inferred from alias or steer permission. */
+  interactiveDashboardTask?: boolean;
+}
+
 export interface WaitingApproval {
   reverseRequestId: number;
   method: string;
@@ -233,11 +242,12 @@ export class CodexAppServerBridge extends EventEmitter {
   /** Reverse-request ids we've observed but not resolved (bridge policy). */
   private waitingApprovals = new Map<number, WaitingApproval>();
   /**
-   * FIFO of tasks waiting for the thread to go idle (通信龙 review finding #2;
+   * Waiting tasks: authenticated Dashboard first, stable FIFO within each lane.
+   * The original single-lane queue (通信龙 review finding #2;
    * RFC §6.3 — Phase 0 gate requires the second concurrent task to queue
    * stably rather than error). Drained on turn completion/error.
    */
-  private taskQueue: Array<{ taskId: string; text: string; from?: string }> = [];
+  private taskQueue: QueuedCodexTask[] = [];
   private draining = false;
   /** Coalesce watchdog reads so concurrent callers never stampede app-server. */
   private reconciliationInFlight: Promise<ActiveTurnReconciliation> | null = null;
@@ -624,25 +634,21 @@ export class CodexAppServerBridge extends EventEmitter {
   /**
    * Queueing entry point (Phase 0 gate: "两个 Agent 同时派 task，只创建一个
    * active turn，另一个稳定排队"). If the thread is free the task starts
-   * immediately; otherwise it joins a FIFO drained on turn completion/error.
+   * immediately; otherwise it joins stable human-first waiting lanes drained
+   * on turn completion/error. Already claimed work retains its ownership.
    *
    * Human-priority note (§6.1): the bridge only ever starts a turn when the
    * shared thread is idle from ITS point of view; if the human TUI wins the
    * idle race, `turn/start` fails with an active-turn error and the task is
-   * requeued at the FRONT (original order preserved) — the app-server is the
+   * requeued at the front of its CLASS (original same-class order preserved) — the app-server is the
    * authority (§6.3).
    */
-  async submitTask(input: {
-    taskId: string;
-    text: string;
-    from?: string;
-    steerIfExternalTurn?: boolean;
-  }): Promise<
+  async submitTask(input: QueuedCodexTask): Promise<
     { started: true; turnId: string; steered?: boolean } | { started: false; queuedAt: number }
   > {
     if (!this.threadId) { throw new CodexBridgeNotReadyError(); }
-    if (this.turnClaimed || this.activeTurnId) {
-      this.taskQueue.push(input);
+    if (this.turnClaimed || this.activeTurnId || this.draining) {
+      this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
@@ -650,12 +656,12 @@ export class CodexAppServerBridge extends EventEmitter {
       if (input.steerIfExternalTurn && this.externalActiveTurnSteerable) {
         return this.steerExternalTurn(input, this.externalActiveTurnId);
       }
-      this.taskQueue.push(input);
+      this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
     if (this.taskQueue.length > 0) {
-      this.taskQueue.push(input);
+      this.enqueueWaitingTask(input);
       this.emit("task_queued", { taskId: input.taskId, depth: this.taskQueue.length });
       return { started: false, queuedAt: this.taskQueue.length };
     }
@@ -664,7 +670,7 @@ export class CodexAppServerBridge extends EventEmitter {
   }
 
   private async steerExternalTurn(
-    input: { taskId: string; text: string; from?: string; steerIfExternalTurn?: boolean },
+    input: QueuedCodexTask,
     expectedTurnId: string,
   ): Promise<{ started: true; turnId: string; steered: true } | { started: false; queuedAt: number }> {
     const state = this.steeredTurns.get(expectedTurnId) ?? {
@@ -732,7 +738,7 @@ export class CodexAppServerBridge extends EventEmitter {
       state.acceptedTaskIds.delete(input.taskId);
       if (state.tasks.size === 0) this.steeredTurns.delete(expectedTurnId);
       if (this.externalActiveTurnId === expectedTurnId) this.externalActiveTurnId = null;
-      this.taskQueue.push(input);
+      this.enqueueWaitingTask(input);
       const queuedAt = this.taskQueue.length;
       this.emit("steer_deferred", {
         taskId: input.taskId,
@@ -744,7 +750,15 @@ export class CodexAppServerBridge extends EventEmitter {
     }
   }
 
-  /** Drain the FIFO after a turn finishes. One task per idle transition. */
+  /** Stable human-first waiting lanes; a deferred task retains its place within its lane. */
+  private enqueueWaitingTask(input: QueuedCodexTask, retry = false): void {
+    const human = input.interactiveDashboardTask === true;
+    const firstOrdinary = this.taskQueue.findIndex(task => task.interactiveDashboardTask !== true);
+    const index = human && retry ? 0 : human || retry ? firstOrdinary : -1;
+    this.taskQueue.splice(index < 0 ? this.taskQueue.length : index, 0, input);
+  }
+
+  /** Drain waiting work after a turn finishes. Already claimed work is never preempted. */
   private async drainQueue(): Promise<void> {
     if (this.draining) return;
     if (this.turnClaimed || this.activeTurnId || this.externalActiveTurnId) return;
@@ -774,8 +788,8 @@ export class CodexAppServerBridge extends EventEmitter {
       await this.startTaskTurn(next);
     } catch (e) {
       // Lost the idle race to the human TUI (or transport error). Requeue at
-      // the FRONT to preserve order; retry on the next idle transition.
-      this.taskQueue.unshift(next);
+      // the front of its class to preserve order; retry on the next idle transition.
+      this.enqueueWaitingTask(next, true);
       this.emit("drain_deferred", {
         taskId: next.taskId,
         error: e instanceof Error ? e.message : String(e),

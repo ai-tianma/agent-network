@@ -2032,9 +2032,12 @@ const informationalInboxDrain = createInboxDrainLane((cause) => {
 // active; later unique rows wait in this dispatcher and enter bridge
 // arbitration as slots settle. The bridge independently guarantees at most
 // one turn/start per thread and FIFO-queues ordinary network tasks.
+// Authenticated Dashboard requests lead waiting work in both lanes; existing
+// active handlers retain their slots and already claimed turns are not preempted.
 const CODEX_INBOX_MAX_CONCURRENT = 20;
 const codexInboxDispatcher = createDetachedInboxDispatcher<any>({
   maxConcurrent: CODEX_INBOX_MAX_CONCURRENT,
+  prioritize: isInteractiveDashboardTask,
   key: (message) => String(message.id),
   onError: (cause) => {
     const detachedError = cause as any;
