@@ -33,9 +33,9 @@ run_case() {
         python3 - <<'MUT'
 from pathlib import Path
 p=Path('src/auth.ts');s=p.read_text()
-a='return db.transaction(() => {';b="  });\n}\n\n/**\n * #261 P0-2"
+a='const nextHash = hashPassword(newPassword);\n  return db.transaction(() => {';b="  });\n}\n\n/**\n * #261 P0-2"
 assert s.count(a)==1 and s.count(b)==1
-s=s.replace(a,'return (() => {').replace(b,"  })();\n}\n\n/**\n * #261 P0-2")
+s=s.replace(a,'const nextHash = hashPassword(newPassword);\n  return (() => {').replace(b,"  })();\n}\n\n/**\n * #261 P0-2")
 p.write_text(s)
 MUT
         pattern="a failed network revoke rolls back";;
