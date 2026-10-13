@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installSharedV2RegistryPlugin, V2_REGISTRY_RPC } from "./v2-readiness";
@@ -15,6 +15,7 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
   const nodeDir = join(root, "node-private");
   const config = join(root, "config");
   const data = join(root, "data");
+  let activeData = data;
   const state = join(root, "state");
   for (const dir of [project, nodeDir, config, data, state]) mkdirSync(dir, { mode: 0o700 });
   const plugin = installSharedV2RegistryPlugin(nodeDir);
@@ -41,9 +42,9 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
       PATH: process.env.PATH ?? "",
       HOME: root,
       XDG_CONFIG_HOME: config,
-      XDG_DATA_HOME: data,
+      XDG_DATA_HOME: activeData,
       XDG_STATE_HOME: state,
-      OPENCODE_DB: join(data, "opencode.db"),
+      OPENCODE_DB: join(activeData, "opencode.db"),
       OPENCODE_SERVER_PASSWORD: password,
     },
     stdio: "ignore",
@@ -106,6 +107,18 @@ nativeTest("a real V2 shared server loads the project-scoped registry without a 
     const resumed = await resumedResponse.json() as any;
     expect(resumed?.data?.id).toBe(sessionId);
     expect(resumed?.data?.location?.directory).toBe(project);
+    await stopServer();
+    const restoredData = join(root, "restored-data");
+    cpSync(data, restoredData, { recursive: true });
+    rmSync(data, { recursive: true, force: true });
+    activeData = restoredData;
+    server = spawnServer();
+    await waitReady();
+    const restoredResponse = await fetch(`${url}/api/session/${sessionId}`, { headers });
+    expect(restoredResponse.status).toBe(200);
+    const restored = await restoredResponse.json() as any;
+    expect(restored?.data?.id).toBe(sessionId);
+    expect(restored?.data?.location?.directory).toBe(project);
   } finally {
     try { await stopServer(); }
     finally { rmSync(root, { recursive: true, force: true }); }
