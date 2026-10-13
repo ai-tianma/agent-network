@@ -1,0 +1,20 @@
+#1091 server tag/status snapshot contract
+
+Candidate: complete caller-visible, unarchived current snapshot in tag_status;
+deduplicated per-tag memberships and separate null/no-label bucket. All four
+states count even when completion timestamps fall outside from/to. project_id
+and none constrain existing statistics and snapshot; omitted query keeps old
+semantics. Existing task visibility SQL remains authoritative, with one light
+full-network read and no client list limit. No client chart/filter UI is claimed.
+
+Docker CI pending: same real HTTP suite on SQLite and PostgreSQL, preserving
+existing completion/range/privacy checks and adding four-state/archive/duplicate
+tag/null/project/visibility/empty/range-independent/beyond500/network isolation.
+No local functional test, production mutation or credential read.
+
+Recovery: service startup/ports/secrets/locked managed profile remain unchanged
+under deploy/hub. Main-published software and its verified artifact reproduce
+the API extension; rollback selects the previous verified package/profile.
+There is no schema or data migration. Original private data and key sources
+remain independent; whole key recovery NOT_COVERED. Managed production137 is
+not switched by this server contract slice; client delivery is separate.
