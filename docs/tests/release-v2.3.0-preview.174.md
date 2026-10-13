@@ -2,6 +2,8 @@
 
 ## Install
 
+The fixed artifact is `@sleep2agi/agent-network@2.3.0-preview.174`.
+
 The original main-built tarball passed all four gates and is available through
 the [official fixed download](https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz).
 npm publish succeeded; its registry verification is still pending. Use a new
