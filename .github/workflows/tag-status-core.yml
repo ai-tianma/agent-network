@@ -5,6 +5,9 @@ on:
       - 'server/src/requirements.ts'
       - 'server/src/requirements-stats*'
       - 'tests/test1091-tag-status/**'
+      - 'docs/tests/report-test1091-tag-status.txt'
+      - 'docs/tests/release-v0.9.0-preview.138.md'
+      - 'docs/requirements-tag-status.md'
       - '.github/workflows/tag-status-core.yml'
 
 permissions:
