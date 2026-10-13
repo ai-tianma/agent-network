@@ -44,6 +44,8 @@ import {
   recoverTurnReceipts,
   TurnReceiptLedger,
 } from "./runtime/codex-app-server/receipt-ledger";
+import { decideFollowUpHubState } from "./runtime/codex-app-server/followup-hub-check";
+import type { OwnedFollowUpReceiptEntry } from "./runtime/codex-app-server/receipt-ledger";
 import { basename, dirname, join, isAbsolute, resolve } from "path";
 import { loadNodeSecrets, runNodeSecretProbeIfRequested } from "./node-secrets.js";
 import { hostname as osHostname, homedir } from "os";
@@ -2585,6 +2587,11 @@ async function ensureCodexAppServerSession(): Promise<
   return session;
 }
 let codexReceiptRecoveryInFlight: Promise<void> | null = null;
+async function codexFollowUpHubState(entry: OwnedFollowUpReceiptEntry) {
+  try {
+    return decideFollowUpHubState(entry, parseToolJson(await callCommHub("get_task", { task_id: entry.taskId }, 0)), NODE_ID || "");
+  } catch { return "unknown" as const; }
+}
 async function recoverCodexTurnReceipts(): Promise<void> {
   if (!turnReceiptLedger || codexReceiptRecoveryInFlight) return codexReceiptRecoveryInFlight ?? undefined;
   codexReceiptRecoveryInFlight = (async () => {
@@ -2601,7 +2608,22 @@ async function recoverCodexTurnReceipts(): Promise<void> {
     // inspect Codex history for ledger rows that remain afterwards.
     await drainPendingReplies();
     const queuedTaskIds = new Set((pendingReplies?.load() ?? []).map((row) => row.taskId).filter(Boolean));
-    const rows = turnReceiptLedger.load().filter((row) => !queuedTaskIds.has(row.taskId));
+    const candidates = turnReceiptLedger.load().filter((row) => !queuedTaskIds.has(row.taskId));
+    const rows: typeof candidates = [];
+    for (const row of candidates) {
+      if (row.version === 2) {
+        const state = await codexFollowUpHubState(row);
+        if (state === "terminal") {
+          clearPendingReply(row.replyTo, row.taskId);
+          turnReceiptLedger.remove(row.taskId);
+          log(`[codex-receipt] follow-up task=${row.taskId.slice(0, 8)} already terminal on Hub; no second reply`);
+          continue;
+        }
+        // Failed/unknown reads do not authorize a model turn or a receipt.
+        if (state === "unknown") continue;
+      }
+      rows.push(row);
+    }
     if (!rows.length) return;
     const session = await ensureCodexAppServerSession();
     const recovery = await recoverTurnReceipts({
@@ -4210,6 +4232,12 @@ async function processWithCodexAppServer(
   // This compatibility slice can recover an identity-proven V2 answer, but
   // it does not yet admit/replay an injected action through the old adapter.
   if (taskId && turnReceiptLedger?.load().some(row => row.taskId === taskId && row.version === 2)) {
+    const entry = turnReceiptLedger.load().find(row => row.taskId === taskId && row.version === 2) as OwnedFollowUpReceiptEntry;
+    if (await codexFollowUpHubState(entry) === "terminal") {
+      clearPendingReply(entry.replyTo, taskId);
+      turnReceiptLedger.remove(taskId);
+      throw Object.assign(new Error("接续任务已在 Hub 终态，跳过行动与重复回复。"), { code: "codex_task_skipped" });
+    }
     throw new Error("已有独立接续回执；此版本尚未启用接续适配器，不能重跑该消息的行动正文。请由原生命周期管理者使用支持的版本核查原回合与本消息回复。");
   }
   const { codexAppServerThink, codexAppServerReplyOrThrow } =
