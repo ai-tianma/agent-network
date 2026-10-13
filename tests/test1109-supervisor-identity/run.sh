@@ -14,6 +14,10 @@ run_case() {
   fi
   echo "CASE $backend $suite"
   case "$suite" in
+    identity|token_red|heartbeat_red)
+      env NODE_ENV=test HOME="$fixture_dir" COMMHUB_DB="$fixture_dir/hub.db" COMMHUB_PG_EXPERIMENTAL=1 bun run /work/tests/test1109-supervisor-identity/seed-legacy.ts ;;
+  esac
+  case "$suite" in
     identity) file=src/host-supervisor-identity-http.test.ts ;;
     legacy) file=src/list-host-supervisors.test.ts ;;
     caller) file=src/node-caller-identity-http.test.ts ;;

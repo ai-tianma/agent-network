@@ -9,6 +9,13 @@ Revoked/deleted/expired/wrong-scope tokens cannot authenticate a list row.
 
 Docker CI: pending. SQLite/PostgreSQL HTTP + MCP cases and existing caller/
 legacy regressions, with separate token-name and heartbeat-alias red witnesses.
+First run38367661564: Docker build succeeded; SQLite identity17pass/2fail
+because the NULL-network legacy fixtures used a fresh NOT NULL sessions table.
+Fixed with a container-only private fixture preseed of the historical nullable
+sessions schema, preserving both behavior assertions and product schema.
+Initial mutation-pin38367661964 failed due to an extracted resolver anchor and
+dynamic new script anchors. Updated the old anchor, kept its assertion-red
+witness, made new anchors literal: static727 anchors green/unchecked4 unchanged.
 No local functional test, real credential mutation, or production restart.
 Release/actual-node display verification: pending; no public completion claim.
 
