@@ -19,6 +19,16 @@ reached. The build now has network access; test execution retains --network none
 Fixture source files are owned by its non-root user for container-only mutation.
 No assertion, isolation policy or source runtime was weakened for this failure.
 
+Follow-up on exact head 21b98c1fb5b138e2e8976e9adf654be73848341b:
+Docker 38359591027 SUCCESS: 28 PASS / 0 FAIL plus the missing-production-wiring
+mutation reached the login restart assertion and was RED as required. This
+includes the production entry's save → fresh server restore → launch-root cleanup
+and the original V1 argv/cwd/env/launcher golden, in addition to 26 boundary tests.
+Native V1 checkpoint 38359590971 SUCCESS for both supported pinned binaries;
+10 required checks passed. The dedicated gate now also triggers on edits to
+the production-entry snapshot test itself. Main/release still require the final
+head checks and the exact CLI/runtime pairing gate, not this historical snapshot.
+
 Scope: V1 human co-presence Auth.Info persistence on normal stop/restart only.
 Session-history recovery, crash/SIGKILL auth updates and original-node live
 login/restart verification remain separate; #1120 must stay open for them.

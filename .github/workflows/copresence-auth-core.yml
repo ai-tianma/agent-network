@@ -4,6 +4,7 @@ on:
     paths:
       - 'agent-node/src/runtime/opencode-acp/**'
       - 'agent-node/src/runtime/opencode-copresence/runtime.ts'
+      - 'agent-node/src/runtime/opencode-v1-spawn-snapshot*'
       - 'tests/test1120-copresence-auth/**'
       - '.github/workflows/copresence-auth-core.yml'
   workflow_dispatch:
