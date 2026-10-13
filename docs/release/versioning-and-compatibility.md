@@ -156,3 +156,8 @@ match the four-gated main artifacts; CLI npm visibility remains a separate
 verification checkpoint. Exact main SHAs and retained workflow failures:
 [public report](../tests/report-test1163-public.txt). Original-device adoption
 remains separate; this row does not certify full QA or production-state restore.
+
+Later checkpoint: CLI177 npm preview/version/SHA1/SHA512 and complete tarball
+now match the official GH and gated archive. All three npm archives verified;
+first visibility timeout workflows remain FAIL in the historical record, and
+native/original-device adoption remains unverified.
