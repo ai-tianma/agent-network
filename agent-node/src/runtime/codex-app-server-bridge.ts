@@ -289,13 +289,13 @@ export class CodexAppServerBridge extends EventEmitter {
    * never start/re-run the model turn. Page until the id is found so a busy
    * thread cannot push an unfinished receipt outside the newest-ten window.
    */
-  async inspectPersistedTurn(threadId: string, turnId: string): Promise<PersistedTurnResult> {
+  async inspectPersistedTurn(threadId: string, turnId: string, expectedClientUserMessageId?: string): Promise<PersistedTurnResult> {
     type StoredTurn = {
       id?: string;
       status?: string;
       error?: { message?: string } | null;
       completedAt?: number | null;
-      items?: Array<{ type?: string; text?: string; phase?: string }>;
+      items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
     };
     let turns: StoredTurn[] = [];
     if (!this.historyPagingUnsupported.has("thread/turns/list")) {
@@ -314,7 +314,7 @@ export class CodexAppServerBridge extends EventEmitter {
           );
           turns.push(...(page?.data ?? []));
           const found = turns.find((candidate) => candidate.id === turnId);
-          if (found) return classifyPersistedTurn(found);
+          if (found) return classifyPersistedTurn(found, expectedClientUserMessageId);
           if (!page?.nextCursor) return { state: "missing" };
           cursor = page.nextCursor;
         }
@@ -332,7 +332,7 @@ export class CodexAppServerBridge extends EventEmitter {
     );
     turns = result?.thread?.turns ?? [];
     const found = turns.find((candidate) => candidate.id === turnId);
-    return found ? classifyPersistedTurn(found) : { state: "missing" };
+    return found ? classifyPersistedTurn(found, expectedClientUserMessageId) : { state: "missing" };
   }
 
   /**
@@ -1454,17 +1454,19 @@ function classifyPersistedTurn(turn: {
   status?: string;
   error?: { message?: string } | null;
   completedAt?: number | null;
-  items?: Array<{ type?: string; text?: string; phase?: string }>;
-}): PersistedTurnResult {
+  items?: Array<{ type?: string; text?: string; phase?: string; clientId?: string }>;
+}, expectedClientUserMessageId?: string): PersistedTurnResult {
+  if (expectedClientUserMessageId && !turn.items?.some(item => item.type === "userMessage" && item.clientId === expectedClientUserMessageId)) return { state: "identity_unconfirmed" };
   if (!isTerminalTurnStatus(turn.status)) return { state: "running" };
   if (turn.status === "completed") {
     const text = [...(turn.items ?? [])].reverse().find((item) =>
       item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string"
     )?.text ?? "";
-    return { state: "completed", text };
+    return { state: "completed", text, ...(expectedClientUserMessageId ? { replyIdentityConfirmed: true as const } : {}) };
   }
   return {
     state: turn.status,
+    ...(expectedClientUserMessageId ? { replyIdentityConfirmed: true as const } : {}),
     ...(typeof turn.error?.message === "string" ? { error: turn.error.message } : {}),
     ...(typeof turn.completedAt === "number" && Number.isFinite(turn.completedAt)
       ? { completedAt: turn.completedAt }

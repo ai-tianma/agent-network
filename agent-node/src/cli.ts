@@ -2606,7 +2606,9 @@ async function recoverCodexTurnReceipts(): Promise<void> {
     const session = await ensureCodexAppServerSession();
     const recovery = await recoverTurnReceipts({
       rows,
-      inspect: (threadId, turnId) => session.bridge.inspectPersistedTurn(threadId, turnId),
+      inspect: (threadId, turnId, clientId) => clientId
+        ? session.bridge.inspectPersistedTurn(threadId, turnId, clientId)
+        : session.bridge.inspectPersistedTurn(threadId, turnId),
     });
     for (const expired of recovery.expiredQueued) {
       clearPendingReply(expired.replyTo, expired.taskId);
@@ -4205,6 +4207,11 @@ async function processWithCodexAppServer(
   evidence?: TaskRuntimeEvidenceReporter,
   trackReceipt = true,
 ): Promise<string> {
+  // This compatibility slice can recover an identity-proven V2 answer, but
+  // it does not yet admit/replay an injected action through the old adapter.
+  if (taskId && turnReceiptLedger?.load().some(row => row.taskId === taskId && row.version === 2)) {
+    throw new Error("已有独立接续回执；此版本尚未启用接续适配器，不能重跑该消息的行动正文。请由原生命周期管理者使用支持的版本核查原回合与本消息回复。");
+  }
   const { codexAppServerThink, codexAppServerReplyOrThrow } =
     await import("./runtime/codex-app-server/runtime");
   const session = await ensureCodexAppServerSession();
