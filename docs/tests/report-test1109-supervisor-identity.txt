@@ -29,9 +29,9 @@ on both backends =6. Mutation-pin CI38368490487 and10required PASS.
 PR2696 merged2026-10-13T08:23:01Z at main36ed82249f661eb593375e72e375e59472bd41c7.
 Actual tested merge e2e742eae6b613c27854cb15449dfec222b72800 has the same complete
 tree e2ddf91a91674447ef4606ef3c00494d96c21454 as source main.
-Formal main-only Hub137 release38368892713 queued; publication/activation remain
-separate and are not asserted by the source CI result.
-Release/actual-node display verification: pending; no public completion claim.
+Formal main-only Hub137 release38368892713 and selected-Hub activation completed
+with separate evidence in report-test1109-hub137-publication.txt.
+Release/selected-Hub display verification completed; see report-test1109-hub137-publication.txt.
 
 Recovery: unchanged Hub service/ports/secrets/data; software uses Git main and
 the existing locked deployment profile. Existing deploy/hub profile documents
