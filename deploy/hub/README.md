@@ -170,6 +170,10 @@ curl -s localhost:9200/health          # version 与 sessions_count
 改密码 HTTP 可显式撤销本人具名网络令牌；默认列出脱敏保留清单，节点令牌和其他用户保留。
 SQLite24/PG24 正常 HTTP 回归及8次定向断言反证、既有会话令牌兼容和10个必需门通过。
 正式 main 发布运行 `38351821700` 尚待完整四门、公开回读与 byte/SRI 核验。
+正式运行38351821700的构建、四门、publish与registry元数据回读均已成功，
+但 npm tarball 独立GET仍404。沿用既有同字节GitHub原包方式：main标签
+`commhub-server-v0.9.0-preview.136` 精确指向上述源码，匿名下载完整字节已与gated包一致。
+lock只切换该包resolved URL到GitHub原包，SRI及transitive条目保持；来源及回读差额明确记录。
 本 profile 目标是独立 `runtime-v119-preview136`，回退 `runtime-v118-preview135`。
 只有公开核验、正常 main profile/lock、一致私有数据库备份与离线 schema 预检齐备后，
 才按本页流程仅激活选定 Hub；不更改原 base/env 来源、端口、Provider 或业务节点线程。
