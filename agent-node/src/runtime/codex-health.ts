@@ -327,9 +327,10 @@ export function createCodexHealthMonitor(opts: CodexHealthMonitorOptions) {
     // app-server the bridge already connected to died before the first probe (the watchdog is already restarting
     // it), which the Hub would otherwise not see until the next flip or the 3-minute heartbeat. A layer that has
     // never been up (start-up, a TUI not opened yet, no tmux on this platform) stays quiet, as before.
-    const firstAndDown = lastSig === null && ((report.app_server?.ok === false && opts.appServerWasUp?.() === true)
-      || (opts.probeNativeTui !== undefined && report.tui?.ok === false));
-    if (firstAndDown || (lastSig !== null && sig !== lastSig)) opts.onChange?.(report);
+    const firstAndDown = lastSig === null && report.app_server?.ok === false && opts.appServerWasUp?.() === true;
+    const firstNativeDown = lastSig === null && opts.probeNativeTui !== undefined && report.tui?.ok === false;
+    if (firstNativeDown) opts.onChange?.(report);
+    else if (firstAndDown || (lastSig !== null && sig !== lastSig)) opts.onChange?.(report);
     lastSig = sig;
     return report;
   };

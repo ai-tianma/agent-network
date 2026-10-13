@@ -18,11 +18,19 @@ Docker corrected core: 54PASS/179 assertions, 1native-Windows skip, 0FAIL,
 Initial mount tried /source without image dependencies: 37PASS, module-import
 error before Hub assertions; corrected by overlaying source into the image's
 dependency-backed /repo. Both outcomes retained in private iteration logs.
-Local application test time remains below the two-minute ceiling.
+After splitting the startup branches, Docker core again passed54/179; a
+designated mutation removing the original AppServer gate failed its startup
+quiet assertion (0PASS/1expectedFAIL/32filtered). The first private witness
+wrapper expected toHaveLength while the real assertion uses toEqual; corrected
+the wrapper only, and the same designated red was verified. No test/baseline was
+weakened. Local test time remains below the two-minute ceiling.
 
 First PR documentation symbol-pin gate failed because four inserted CLI lines
 shifted two architecture links; corrected the links to the actual definitions,
-without changing the checker or its baseline. Final-head CI remains pending.
+without changing the checker or its baseline. The next mutation-pin check exposed the changed AppServer first-tick anchor.
+Restored that existing branch verbatim and kept native first-failure admission
+separate, preserving both guards. Docker mutation-pin ratchet is GREEN
+(4 unchecked <= existing4; no checker/baseline changes). Final-head CI pending.
 
 Windows CI pending: actual PID/birth/TCP connection, a live unrelated sibling,
 different remote, mismatched birth and exit; fake-Codex co-presence must now wait
