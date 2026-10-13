@@ -227,6 +227,14 @@ export function probeTmuxTui(session: string): TuiHealth {
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 
+/** Windows co-presence uses native processes, never a tmux session. Absence
+ * of a native ongoing TUI probe is unknown, not a failed tmux probe or healthy. */
+export function copresenceTmuxSession(platform: string, env: Record<string, string | undefined>, alias: string): string | undefined {
+  return platform !== "win32" && env.ANET_COPRESENCE_BRIDGE === "1"
+    ? (env.ANET_CODEX_TUI_SESSION || alias)
+    : undefined;
+}
+
 export interface CodexHealthMonitorOptions {
   /** 每次探测时取一次:共享拓扑是 config 里的 url,自有拓扑是当前会话的 url;没有就不报 app_server。 */
   appServerUrl: () => string | undefined;
