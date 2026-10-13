@@ -13,8 +13,8 @@ writeFileSync(fakeBun, '#!/bin/sh\nprintf "ENTRY=%s\\nSIDE_THREADS=%s\\n" "$1" "
 writeFileSync(fakeSs, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
 writeFileSync(envFile, 'ANET_HUB_SECRET_VAULT_KEY=isolated-fixture-only\n', { mode: 0o600 });
 const entry = runtime => join(runtime, 'node_modules/@sleep2agi/commhub-server/bin/commhub.ts');
-const current = join(homedir(), '.commhub/runtime-v118-preview135');
-const rollback = join(root, 'runtime-v117-preview134');
+const current = join(homedir(), '.commhub/runtime-v119-preview136');
+const rollback = join(root, 'runtime-v118-preview135');
 for (const runtime of [current, rollback]) {
   mkdirSync(join(runtime, 'node_modules/@sleep2agi/commhub-server/bin'), { recursive: true });
   writeFileSync(entry(runtime), '// isolated fixture; never executed\n');
