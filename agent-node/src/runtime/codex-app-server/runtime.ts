@@ -405,18 +405,23 @@ export function codexAppServerReplyOrThrow(outcome: CodexAppServerThinkResult): 
 
 /** Product default for FIFO admission (a queued task that never starts). */
 export const DEFAULT_CODEX_QUEUE_TIMEOUT_MS = 30 * 60_000;
+/** Authenticated Dashboard chat gets a longer, still finite admission window. */
+export const DEFAULT_INTERACTIVE_CODEX_QUEUE_TIMEOUT_MS = 4 * 60 * 60_000;
 const warnedQueueTimeoutValues = new Set<string>();
 
 /**
  * Queue admission deadline from `ANET_QUEUE_TIMEOUT_MS` (whole milliseconds).
- * Unset/empty -> product default; invalid values are ignored with one warning
+ * Unset/empty -> audience default; invalid values are ignored with one warning
  * per distinct value (see timeout-env.ts).
  */
 export function resolveCodexQueueTimeoutMs(
   raw: string | undefined,
   warn: (m: string) => void = () => {},
+  interactiveDashboardTask = false,
 ): number {
-  return resolveTimeoutEnvMs("ANET_QUEUE_TIMEOUT_MS", raw, DEFAULT_CODEX_QUEUE_TIMEOUT_MS, warnedQueueTimeoutValues, warn);
+  const defaultMs = interactiveDashboardTask === true
+    ? DEFAULT_INTERACTIVE_CODEX_QUEUE_TIMEOUT_MS : DEFAULT_CODEX_QUEUE_TIMEOUT_MS;
+  return resolveTimeoutEnvMs("ANET_QUEUE_TIMEOUT_MS", raw, defaultMs, warnedQueueTimeoutValues, warn);
 }
 
 export function formatQueueTimeoutLabel(ms: number): string {
@@ -435,8 +440,10 @@ export function codexAppServerThink(
     text: string;
     from?: string;
     timeoutMs?: number;
-    /** FIFO admission deadline, separate from model execution. Default: ANET_QUEUE_TIMEOUT_MS, else 30m. */
+    /** FIFO admission deadline, separate from model execution. Explicit option/env wins over audience defaults. */
     queueTimeoutMs?: number;
+    /** Set only after isInteractiveDashboardTask verifies Hub-stamped origin; not inferred from alias or steering. */
+    interactiveDashboardTask?: boolean;
     /** Test seam; production defaults to a 5s authoritative thread/read. */
     reconciliationIntervalMs?: number;
     log?: (m: string) => void;
@@ -460,7 +467,7 @@ export function codexAppServerThink(
   const timeoutMs = opts.timeoutMs ?? 10 * 60_000;
   const log = opts.log ?? (() => {});
   const queueTimeoutMs = opts.queueTimeoutMs
-    ?? resolveCodexQueueTimeoutMs(process.env.ANET_QUEUE_TIMEOUT_MS, log);
+    ?? resolveCodexQueueTimeoutMs(process.env.ANET_QUEUE_TIMEOUT_MS, log, opts.interactiveDashboardTask === true);
   const queueTimeoutLabel = formatQueueTimeoutLabel(queueTimeoutMs);
   const reconciliationIntervalMs = opts.reconciliationIntervalMs ?? 5_000;
   const { bridge } = session;

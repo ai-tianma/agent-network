@@ -4212,6 +4212,9 @@ async function processWithCodexAppServer(
     text: task,
     from: _from,
     steerIfExternalTurn,
+    // This flag comes from isInteractiveDashboardTask at inbox admission.
+    // Keep queue audience explicit: generic bridge steering is not proof of a human request.
+    interactiveDashboardTask: steerIfExternalTurn,
     log,
     onActivity: (event) => {
       evidence?.activity({ taskId: event.taskId, threadId: session.bridge.getThreadId(), turnId: event.turnId });
