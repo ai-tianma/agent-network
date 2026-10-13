@@ -18,6 +18,7 @@ export function readLiveProcess(pid: number): LiveProcess | undefined {
 export interface LaunchHealth {
   version: 1; generation: string; writtenAt: number;
   bridge: LiveProcess; serve: LiveProcess;
+  serveOwnership?: "shared";
 }
 function readRecord(path: string): any {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -31,10 +32,19 @@ function readRecord(path: string): any {
 
 /** No tokens/ports in this record. Stale records alone can never pass. */
 export function publishLaunchHealth(dir: string, generation: string, servePid: number): () => void {
+  return publishOpenCodeLaunchHealth(dir, generation, servePid, false);
+}
+
+export function publishSharedLaunchHealth(dir: string, generation: string, servePid: number): () => void {
+  return publishOpenCodeLaunchHealth(dir, generation, servePid, true);
+}
+
+function publishOpenCodeLaunchHealth(dir: string, generation: string, servePid: number, shared: boolean): () => void {
   if (process.platform !== "linux") return () => {};
   const bridge = readLiveProcess(process.pid), serve = readLiveProcess(servePid);
-  if (!bridge || !serve || serve.parent !== bridge.pid) throw new Error("OpenCode launch process identity unavailable");
-  const record: LaunchHealth = { version: 1, generation, writtenAt: Date.now(), bridge, serve };
+  if (!bridge || !serve || (!shared && serve.parent !== bridge.pid)) throw new Error("OpenCode launch process identity unavailable");
+  const record: LaunchHealth = { version: 1, generation, writtenAt: Date.now(), bridge, serve,
+    ...(shared ? { serveOwnership: "shared" as const } : {}) };
   const path = join(dir, LAUNCH_HEALTH_FILE), tmp = `${path}.${randomUUID()}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(record), { flag: "wx", mode: 0o600 });
@@ -73,7 +83,8 @@ export function validateLaunchHealth(
       const live = probe.process(expected.pid);
       if (!live || !/^\d+$/.test(expected.ticks) || live.ticks !== expected.ticks) throw new Error("dead or reused process identity");
     }
-    if (probe.process(record.serve.pid)?.parent !== record.bridge.pid) throw new Error("serve parent mismatch");
+    if (record.serveOwnership !== undefined && record.serveOwnership !== "shared") throw new Error("unknown serve ownership");
+    if (record.serveOwnership !== "shared" && probe.process(record.serve.pid)?.parent !== record.bridge.pid) throw new Error("serve parent mismatch");
     const bridgeArgs = probe.argv(record.bridge.pid);
     if (!bridgeArgs.some((v, i) => v === "--config" && bridgeArgs[i + 1] === configPath)) throw new Error("bridge config mismatch");
     const tuiArgs = probe.argv(attach.pid);

@@ -56,7 +56,7 @@ export type Runtime = typeof RUNTIMES[number];
 //    FLAG_KEYS)和老 daemon(buildAnetArgsDaemon)都**拒绝**,新 app 撞到老组件得到的是一条报错。
 export const FLAG_KEYS = [
   "permissionMode", "dangerouslySkipPermissions", "maxTurns", "budget", "timeout",
-  "copresence", "opencodeGeneration", "opencodeUnsafeTools",
+  "copresence", "opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer",
   "approvalPolicy", "sandboxMode", "skipGitRepoCheck", "copresenceFullAccess", "modelReasoningEffort",
   "daemonProvider",
 ] as const;
@@ -151,6 +151,7 @@ export function validateFlagValue(k: string, v: unknown): void {
       if (v !== "v1" && v !== "v2") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be v1 or v2" });
       return;
     case "opencodeUnsafeTools":
+    case "opencodeNewServer":
       if (typeof v !== "boolean") throw new ValidationError("flag_value_invalid", { field: k, reason: "must be boolean" });
       return;
     case "permissionMode":
@@ -198,7 +199,7 @@ export function validateFlagsForRuntime(runtime: string, flags: Record<string, u
   }
   // Strict flags envelope: old Hub/daemon reject these keys rather than dropping
   // unknown node_spec fields. Opt-in must be explicit on this create request.
-  for (const field of ["opencodeGeneration", "opencodeUnsafeTools"]) {
+  for (const field of ["opencodeGeneration", "opencodeUnsafeTools", "opencodeNewServer"]) {
     if (!Object.prototype.hasOwnProperty.call(flags, field)) continue;
     validateFlagValue(field, flags[field]);
     if (runtime !== "opencode-cli") throw new ValidationError("flag_not_applicable_to_runtime", { field, runtime, applicable: ["opencode-cli"] });
@@ -208,6 +209,9 @@ export function validateFlagsForRuntime(runtime: string, flags: Record<string, u
   }
   if (flags.opencodeGeneration === "v2" && flags.opencodeUnsafeTools !== true) {
     throw new ValidationError("opencode_v2_requires_unsafe_opt_in", { reason: "V2 preview enables every local tool; trusted tasks only. Explicit opencodeUnsafeTools=true required." });
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "opencodeNewServer") && flags.opencodeGeneration !== "v2") {
+    throw new ValidationError("opencode_new_server_requires_v2", { reason: "opencodeNewServer requires explicit opencodeGeneration=v2" });
   }
   if (Object.prototype.hasOwnProperty.call(flags, "copresence") && !(COPRESENCE_FLAG_RUNTIMES as readonly string[]).includes(runtime)) {
     throw new ValidationError("flag_not_applicable_to_runtime", {
@@ -408,6 +412,7 @@ export function buildAnetArgs(spec: NodeSpec): string[] {
       // `anet node create --copresence` 是布尔开关,不吃值。
       if (k === "copresence") { if (v === true) args.push("--copresence"); continue; }
       if (k === "opencodeUnsafeTools") { if (v === true) args.push("--opencode-unsafe-tools"); continue; }
+      if (k === "opencodeNewServer") { if (v === true) args.push("--opencode-new-server"); continue; }
       if (CODEX_CONFIG_ONLY_FLAG_KEYS.has(k) || k === 'daemonProvider') continue;
       args.push(`--${kebab(k)}`, String(v));
     }

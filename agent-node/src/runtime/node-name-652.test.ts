@@ -161,7 +161,7 @@ function writeFakeAnet(root: string): string {
   return realpathSync(abs);
 }
 
-interface Spawned { bin: string; args: string[]; cwd: string }
+interface Spawned { bin: string; args: string[]; cwd: string; path?: string }
 
 async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>, providerScope?: CreateNodeDeps['providerScope']) {
   const acks: Record<string, any>[] = [];
@@ -182,7 +182,7 @@ async function runCreate(spec: Record<string, unknown>, requestId: string, envBl
     serializeEnvLocal: serializeEnvLocalDaemon,
     capabilityCheckMs: 100,
     spawnChild: (bin, args, opts) => {
-      spawned.push({ bin, args, cwd: opts.cwd });
+      spawned.push({ bin, args, cwd: opts.cwd, path: opts.env.PATH });
       const child = spawn("sleep", ["30"], { stdio: "ignore", detached: true });
       if (child.pid) killPids.push(child.pid);
       return child;
@@ -249,6 +249,35 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(readOpencodeRuntimeBinding(join(workDir, ".anet", "nodes", "v2-child"), home))
       .toEqual({ schemaVersion: 1, runtime: "opencode-cli", projectRoot: workDir, nodeId: "v2-child" });
     expect(flags.opencodeGeneration).toBe("v2");
+  });
+
+  test("shared V2 create selects the host-registered client without changing the daemon PATH", async () => {
+    plantOpencode("opencode v1.18.34");
+    plantMachineModel({ model: "stub/model" });
+    const clientBinDir = join(home, "v2-bin");
+    mkdirSync(clientBinDir, { mode: 0o700 });
+    writeFileSync(join(clientBinDir, "opencode"), "#!/bin/sh\necho 'opencode v2.0.22'\n", { mode: 0o755 });
+    const passwordFile = join(home, "shared-password");
+    writeFileSync(passwordFile, "test-only", { mode: 0o600 });
+    mkdirSync(join(home, ".anet"), { mode: 0o700 });
+    writeFileSync(join(home, ".anet", "opencode-shared-server.json"), JSON.stringify({
+      url: "http://127.0.0.1:4097", passwordFile, clientBinDir,
+    }), { mode: 0o600 });
+    const { acks, spawned } = await runCreate({ name: "shared-v2", runtime: "opencode-cli",
+      model: "stub/model", flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } }, "cr_sharedv2client");
+    expect(acks[0].status).toBe("runtime_capability_check_failed");
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    expect(computeChildPath().split(":")[0]).not.toBe(clientBinDir);
+    const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "shared-v2", "config.json"), "utf8"));
+    expect(cfg.opencodeSharedServerUrl).toBe("http://127.0.0.1:4097");
+    expect(cfg.clientBinDir).toBeUndefined();
+    const owned = await runCreate({ name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } }, "cr_ownedv2client");
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned[0].path?.split(":")[0]).toBe(clientBinDir);
+    const ownedCfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "owned-v2", "config.json"), "utf8"));
+    expect(ownedCfg.opencodeSharedServerUrl).toBeUndefined();
   });
 
   test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {

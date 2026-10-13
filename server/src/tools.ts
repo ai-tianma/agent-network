@@ -4381,6 +4381,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         // These options belong under the strict flags envelope.
         opencodeGeneration: z.never().optional(),
         opencodeUnsafeTools: z.never().optional(),
+        opencodeNewServer: z.never().optional(),
         channels: z.array(z.unknown()).optional(),
         // app「新建节点」确认页的工作目录(绝对路径或 ~/…,daemon 侧展开并校验)。
         // 缺席 = 老行为:落 daemon 的 cwd。

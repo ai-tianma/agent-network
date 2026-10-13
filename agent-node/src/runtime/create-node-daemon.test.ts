@@ -1304,6 +1304,16 @@ describe("#1027 opencode-cli generation handling", () => {
       flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true },
     })).toEqual({ flags: { opencodeUnsafeTools: true }, opencodeGeneration: "v2", opencodeMode: "copresence" });
   });
+  test("explicit V2 new-Server opt-out is creation-only", () => {
+    const spec = { name: "v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } };
+    expect(buildAnetArgsDaemon(spec)).toContain("--opencode-new-server");
+    expect(childConfigFieldsFromSpec(spec)).toEqual({
+      flags: { opencodeUnsafeTools: true }, opencodeGeneration: "v2", opencodeMode: "copresence",
+    });
+    expect(() => buildAnetArgsDaemon({ name: "v1", runtime: "opencode-cli",
+      flags: { opencodeNewServer: true } })).toThrow(/opencode_new_server_requires_v2/);
+  });
 });
 
 // #603 — Apple Silicon Homebrew installs bun/bunx, tmux and codex into
