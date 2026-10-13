@@ -203,13 +203,36 @@ async function postDashboardTask(priority, suffix) {
 }
 
 env.ANET_TEST751_LONG_TURN = "1";
+// Exercise health reporting during this turn, rather than winning the race
+// against the first monitor snapshot on a fast runner.
+env.ANET_CODEX_HEALTH_INTERVAL_MS = "1000";
+env.ANET_STATUS_HEARTBEAT_MS = "1000";
 let driven = false;
 let drivePromise;
 let turnStartCountBeforeDashboard = -1;
 const longTurnOutput = await terminal(["node", "start", "windows-picker", "--no-inherit-codex-home"], (_child, output) => {
-  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")) return;
+  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")
+    || !output.includes("client-health role=tui codex_home=exact remote=exact thread=exact connection=pid-attributed")) return;
   driven = true;
   drivePromise = (async () => {
+    let observedHealth;
+    await waitUntil("Hub app-server health after native TUI PID attribution", async () => {
+      const res = await fetch(`http://127.0.0.1:19351/api/status?network_id=${encodeURIComponent(networkId)}&alias=windows-picker`, {
+        headers: { Authorization: `Bearer ${userToken}` },
+      });
+      if (!res.ok) throw new Error(`Hub status failed ${res.status}`);
+      const payload = await res.json();
+      const row = payload.sessions?.find((s) => s.alias === "windows-picker" && s.network_id === networkId);
+      observedHealth = row?.health;
+      if (!observedHealth) return false;
+      // A tmux failure on Windows is a product bug, not something to retry
+      // past. Native startup attribution above does not certify ongoing TUI health.
+      if (observedHealth.tui !== undefined) throw new Error(`unexpected Windows tmux health: ${JSON.stringify(observedHealth.tui)}`);
+      return observedHealth.bridge === "ok" && observedHealth.app_server?.ok === true
+        && !["revoked", "expired"].includes(observedHealth.model_auth)
+        && Number.isFinite(row.health_observed_ms_ago) && row.health_observed_ms_ago < 5000;
+    });
+    console.log(`PASS Hub current health before Dashboard: app_server=ok; native TUI PID attributed; ongoing tui=unknown; model_auth=${observedHealth.model_auth}`);
     const beforeWire = readFileSync(rpcLog, "utf8");
     turnStartCountBeforeDashboard = (beforeWire.match(/^rpc:turn\/start(?::|$)/gm) || []).length;
     const normalTask = await postDashboardTask("normal", "a");

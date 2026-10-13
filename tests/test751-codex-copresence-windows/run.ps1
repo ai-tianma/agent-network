@@ -26,7 +26,10 @@ try {
   if ($i -ge 60) { throw "CommHub did not become healthy" }
   Set-Location (Join-Path $PSScriptRoot "..\..")
   $env:ANET_TEST751_BUN = (Get-Command bun).Source
+  bun test ./agent-node/src/runtime/codex-health.test.ts 2>&1 | Tee-Object -FilePath $report -Append
+  if ($LASTEXITCODE -ne 0) { throw "Codex health regression failed" }
   node ./tests/test751-codex-copresence-windows/windows-e2e.mjs 2>&1 | Tee-Object -FilePath $report -Append
+  if ($LASTEXITCODE -ne 0) { throw "Windows native E2E failed" }
 } finally {
   Stop-Process -Id $hub.Id -Force -ErrorAction SilentlyContinue
 }

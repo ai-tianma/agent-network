@@ -1338,7 +1338,7 @@ import agentNodePackage from "../package.json";
 import { applyNodeCodexHome, resolveNodeCodexHome } from "./codex-home-enforce";
 import { applyReasoningEffortToCodexHome, isReasoningEffortValue } from "./runtime/codex-reasoning-effort.js";
 import { installTeamSkills } from "./runtime/node-skills";
-import { classifyModelAuthError, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
+import { classifyModelAuthError, copresenceTmuxSession, createCodexHealthMonitor, describeModelAuthBlock, gateStatusOnModelAuth, healthIntervalFromEnv, ModelAuthTracker, probeAppServerWs, type NodeHealthReport } from "./runtime/codex-health";
 import { createAppServerWatchdog, hungKillGraceFromEnv, watchdogLimitsFromEnv } from "./runtime/codex-appserver-watchdog";
 import { appsrvSessionFor, captureAppServerLaunch, hungKillVeto, linuxProcView, listTmuxPanes, markerStillOurs, realHungKillDeps, realRelaunchDeps, relaunchAppServer, relaunchBlocker, snapshotProcessStillAlive, terminateHungAppServer, tmuxSessionId, type AppServerLaunchSnapshot } from "./runtime/codex-appserver-relaunch";
 const AGENT_NODE_VERSION: string = agentNodePackage.version;
@@ -7805,9 +7805,7 @@ if (turnReceiptLedger) {
 // #448 —— 分层健康探针:每 30s 一次 ws 握手 + (共存节点)TUI pane 检查。任一层翻转时立即补报一次
 // 当前状态,不等 3 分钟心跳。纯报告:不改调度,不拒任务。
 if (RUNTIME === "codex-app-server") {
-  const tuiSession = process.env.ANET_COPRESENCE_BRIDGE === "1"
-    ? (process.env.ANET_CODEX_TUI_SESSION || ALIAS)
-    : undefined;
+  const tuiSession = copresenceTmuxSession(process.platform, process.env, ALIAS);
   // #461 —— app-server 看门狗:探针连续失败 / 已知退出 → 按原会话重启(共存:按启动快照在原 tmux 会话里
   // 重新拉起 + 桥重接原 thread;自有:重新 spawn + resume 原 thread),窗口内次数有上限,放弃后保持降级。
   const copresenceAppServer = process.env.ANET_COPRESENCE_BRIDGE === "1" && !!codexAppServerUrl;
