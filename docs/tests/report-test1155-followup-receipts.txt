@@ -33,7 +33,7 @@ fields even if a JavaScript caller supplies them. The final replay witness
 extracts stable surrounding source boundaries, so disabling the actual guard
 fails its execution assertion instead of just losing its extraction anchor.
 
-Final local fixture: PASS, exit 0, 36 tests / 196 assertions / 179ms.
+Pre-PR final local fixture: PASS, exit 0, 36 tests / 196 assertions / 179ms.
 Includes V1 persistence/recovery/wiring, prior owned waiting contract, V2
 compatibility/recovery, and a real WebSocket client/bridge history-inspection
 path. No real model invocation or native adoption is claimed.
@@ -51,6 +51,19 @@ Reproduce from repository root:
   docker build --build-arg SOURCE_COMMIT=$(git rev-parse HEAD) \
     -f tests/test1155-followup-receipts/Dockerfile -t followup-receipts .
   docker run --rm --network none followup-receipts
+
+First PR CI: followup-receipts, typecheck, QA-trigger and mutation pins passed.
+The old human-queue fixture failed 137/138: its extracted production CLI
+function did not supply the newly referenced turnReceiptLedger global. The
+correction injects a null ledger for its existing V1 audience tests, retaining
+their original assertions and all production guards. The FAIL is preserved.
+Review also makes a V2 completed turn with empty final text remain unresolved,
+even with identity proof; V1 behavior stays unchanged.
+
+Corrected local Docker: 36 PASS / 198 assertions / 188ms; all five production
+mutations ASSERTION RED. Old authenticated human queue Docker: 138 PASS / 505
+assertions / 21.41s, plus its four original production mutations ASSERTION RED.
+Both bounded build/runs exited 0; no assertion or production guard was weakened.
 
 Delivery requires corrected-source CI/type/legacy receipt gate and exact-main
 merge. This slice alone does not publish Node/CLI versions or complete #1151 /

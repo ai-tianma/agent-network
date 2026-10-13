@@ -54,7 +54,7 @@ test("own answer recovery requires persisted identity proof; absence/unknown is 
   const verified=await recoverTurnReceipts({rows,now:2000,inspect:async(...args)=>{calls.push(args);return {state:"completed",text:"FOLLOW-UP ANSWER",replyIdentityConfirmed:true};}});
   expect(calls).toEqual([["thread","answer-turn","anet:follow"]]);
   expect(verified.receipts[0]).toMatchObject({failed:false,text:"FOLLOW-UP ANSWER",entry:{taskId:"follow",ownerTaskId:"owner"}});
-  for (const answer of [{state:"completed",text:"unverified"},{state:"failed",error:"other task"},{state:"identity_unconfirmed"},{state:"missing"}] as const) {
+  for (const answer of [{state:"completed",text:"unverified"},{state:"completed",text:"  ",replyIdentityConfirmed:true},{state:"failed",error:"other task"},{state:"identity_unconfirmed"},{state:"missing"}] as const) {
     const r=await recoverTurnReceipts({rows,now:2000,inspect:async()=>answer}); expect(r.receipts).toEqual([]); expect(r.watching).toEqual(rows);
   }
 });

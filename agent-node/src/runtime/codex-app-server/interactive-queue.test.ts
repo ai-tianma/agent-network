@@ -99,7 +99,7 @@ test("#730 production CLI passes the authenticated Dashboard audience", async ()
   const compiled = new Bun.Transpiler({ loader: "ts" }).transformSync(original.replace(importExpr, "await Promise.resolve(injectedRuntime)"));
   const captured: any[] = [];
   const runtime = { codexAppServerThink: async (_session: unknown, opts: unknown) => { captured.push(opts); return { replyText: "fixture", failed: false }; }, codexAppServerReplyOrThrow: (outcome: any) => outcome.replyText };
-  const invoke = new Function("injectedRuntime", "ensureCodexAppServerSession", "codexModelAuth", "codexHealthMonitor", "log", "classifyModelAuthError", "reportCapacityRetry", compiled + "; return processWithCodexAppServer;")(runtime, async () => ({}), { noteSuccess() {} }, null, () => {}, () => null, () => {});
+  const invoke = new Function("injectedRuntime", "ensureCodexAppServerSession", "codexModelAuth", "codexHealthMonitor", "log", "classifyModelAuthError", "reportCapacityRetry", "turnReceiptLedger", compiled + "; return processWithCodexAppServer;")(runtime, async () => ({}), { noteSuccess() {} }, null, () => {}, () => null, () => {}, null);
   for (const message of [human, { ...human, meta: { ...human.meta, auth_origin: "node" } }]) {
     await invoke("fixture", "admin", "fixture", isInteractiveDashboardTask(message));
   }

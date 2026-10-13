@@ -254,7 +254,8 @@ export async function recoverTurnReceipts(args: {
     try {
       const result = await args.inspect(entry.threadId, entry.turnId, entry.version === 2 ? entry.answerClientUserMessageId : undefined);
       if (result.state === "identity_unconfirmed" || (entry.version === 2 &&
-          (result.state === "missing" || (result.state !== "running" && result.replyIdentityConfirmed !== true)))) {
+          (result.state === "missing" || (result.state !== "running" && result.replyIdentityConfirmed !== true) ||
+            (result.state === "completed" && result.text.trim().length === 0)))) {
         watching.push(entry);
         continue;
       }
