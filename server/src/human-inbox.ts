@@ -16,19 +16,19 @@ export function isAuthenticatedHumanInboxRow(row: { type: string; meta_json: unk
  * support this scalar keyset; no JSON SQL extension, OFFSET, or arbitrary depth cutoff. */
 export function selectHumanInboxIds(whereSql: string, params: unknown[], limit: number) {
   const ids: string[] = [];
-  let cursor: { priority_rank: number; created_at: string; id: string } | undefined;
+  let cursor: { priority_rank: number; created_at: string; fifo_id: number } | undefined;
   let examined = 0;
   const rank = "CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END";
   while (ids.length < limit) {
     const pageParams = [...params];
-    let sql = `SELECT id, type, meta_json, created_at, ${rank} AS priority_rank ${whereSql}`;
+    let sql = `SELECT id, type, meta_json, created_at, rowid AS fifo_id, ${rank} AS priority_rank ${whereSql}`;
     if (cursor) {
       const n = pageParams.length + 1;
-      sql += ` AND (${rank}, created_at, id) > (?${n}, ?${n + 1}, ?${n + 2})`;
-      pageParams.push(cursor.priority_rank, cursor.created_at, cursor.id);
+      sql += ` AND (${rank}, created_at, rowid) > (?${n}, ?${n + 1}, ?${n + 2})`;
+      pageParams.push(cursor.priority_rank, cursor.created_at, cursor.fifo_id);
     }
-    sql += ` ORDER BY ${rank}, created_at, id LIMIT 256`;
-    const page = db.all<{ id: string; type: string; meta_json: unknown; priority_rank: number; created_at: string }>(sql, ...pageParams);
+    sql += ` ORDER BY ${rank}, created_at, rowid LIMIT 256`;
+    const page = db.all<{ id: string; type: string; meta_json: unknown; priority_rank: number; created_at: string; fifo_id: number }>(sql, ...pageParams);
     if (!page.length) break;
     for (const row of page) {
       examined++;

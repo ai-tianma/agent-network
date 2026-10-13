@@ -118,3 +118,14 @@ test("deep human enters reserved slot once without displacing 19 claimed ordinar
   expect(dispatcher.submit(next,handler).accepted).toBe(0);expect(started.filter(x=>x===human)).toHaveLength(1);
   for(const release of releases)release();await Bun.sleep(0);for(const release of releases)release();await Bun.sleep(0);
 });
+
+test("same-second inverse IDs retain insertion FIFO, including more than a full human page",async()=>{
+  const node=handlers(NODE), expected:string[]=[];
+  for(let i=30;i>0;i--) {
+    const id="reverse_"+i.toString().padStart(3,"0");expected.push(id);
+    db.run("INSERT INTO inbox(id,session_name,type,priority,content,network_id,meta_json,created_at) VALUES (?1,?2,'task','normal',?1,?3,?4,'2001-01-01 00:00:00')",[id,NODE,NET,JSON.stringify({auth_origin:"user",...meta(9000+i)})]);
+  }
+  const first=await call(node.get_inbox,{alias:NODE,limit:20,human_first:true});
+  expect(first.messages.map((m:any)=>m.id)).toEqual(expected.slice(0,20));
+  const legacy=await call(node.get_inbox,{alias:NODE,limit:20});expect(legacy.messages.map((m:any)=>m.id)).toEqual(expected.slice(0,20));
+});

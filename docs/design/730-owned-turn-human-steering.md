@@ -279,7 +279,7 @@ id/type/meta/ordering columns in 256-row keyset pages. It stops at the requested
 number of authenticated Dashboard requests or the end of the pending inbox;
 there is no first-20/100/1000 cutoff. It then fetches at most the original
 `limit` bodies (maximum 100; Node requests 20), human first, preserving
-priority/created/id order within each class. The ordinary body is not copied
+priority/created/insertion-sequence order within each class. The ordinary body is not copied
 into the scan. Existing callers without the option keep ordinary ordering.
 The same scalar query runs on SQLite and PostgreSQL; no JSON SQL extension or
 cast of malformed historical metadata is required. Work is linear in examined
@@ -305,3 +305,11 @@ V2 answer-intent receipts must not be handed to older V1 readers (see the
 controller recovery section). Inbox/task data, identities and receipts require
 the documented private backups; a clone recovers software, not those records.
 The existing Hub runbook explicitly leaves the vault recovery record name NOT COVERED; this increment does not certify a full production-data recovery drill. No production secrets or full private backlog enter Git.
+
+Same-second rows break ties with the existing SQLite rowid. PostgreSQL adds
+`inbox.rowid BIGSERIAL` through the existing idempotent rowid migration pattern;
+new inserts preserve insertion order. Historical equal-timestamp PostgreSQL
+rows have no recoverable original arrival sequence; the migration assigns a
+stable order without claiming reconstructed timing. Body and metadata scan
+use the same ordering. The extra column is ignored by old Hub versions, so
+software rollback does not drop data or require schema reversal.

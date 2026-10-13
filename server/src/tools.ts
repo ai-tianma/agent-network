@@ -1460,7 +1460,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         const placeholders = human.ids.map((id) => { rowsParams.push(id); return `?${rowsParams.length}`; });
         rowsSql += ` ORDER BY CASE WHEN id IN (${placeholders.join(",")}) THEN 0 ELSE 1 END,`;
       } else rowsSql += " ORDER BY";
-      rowsSql += ` CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at, id
+      rowsSql += ` CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at, rowid
          LIMIT ?${rowsParams.length + 1}`;
       rowsParams.push(limit);
       const rows = db.all(rowsSql, ...rowsParams).map((row: any) => {

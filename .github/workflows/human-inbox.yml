@@ -1,10 +1,10 @@
 name: Full-depth authenticated human inbox
 on:
   pull_request:
-    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/human-inbox.ts', 'server/src/task-activity.ts', 'tests/test1163-human-inbox/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1163*', '.github/workflows/human-inbox.yml']
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/db.ts', 'server/src/human-inbox.ts', 'server/src/task-activity.ts', 'tests/test1163-human-inbox/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1163*', '.github/workflows/human-inbox.yml']
   push:
     branches: [main]
-    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/human-inbox.ts', 'server/src/task-activity.ts', 'tests/test1163-human-inbox/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1163*', '.github/workflows/human-inbox.yml']
+    paths: ['agent-node/src/cli.ts', 'agent-node/src/runtime/codex-app-server/**', 'agent-node/src/runtime/codex-app-server-bridge*', 'server/src/tools.ts', 'server/src/db.ts', 'server/src/human-inbox.ts', 'server/src/task-activity.ts', 'tests/test1163-human-inbox/**', 'docs/design/730-owned-turn-human-steering.md', 'docs/tests/report-test1163*', '.github/workflows/human-inbox.yml']
 permissions:
   contents: read
 jobs:
