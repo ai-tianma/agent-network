@@ -236,6 +236,11 @@ describe("V2 core against a protocol-shaped fake serve", () => {
       second = await openShared(secondDir);
       const firstId = first.sessionId;
       expect(first.sessionId).not.toBe(second.sessionId);
+      await expect(openShared(firstDir, "ses_MissingHistory")).rejects.toThrow(/refusing to create a new session/);
+      const sessionsAfterMissing = await (await fetch(`${url}/test/state`, {
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` },
+      })).json() as Record<string, unknown>;
+      expect(Object.keys(sessionsAfterMissing)).toHaveLength(2);
       const launcher = readFileSync(first.attachScriptPath, "utf8");
       expect(launcher).not.toContain(password);
       expect(launcher).toContain(passwordFile);

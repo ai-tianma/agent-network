@@ -356,7 +356,10 @@ export async function openVettedOpenCodeV2Copresence(
       try {
         created = await fetchOpenCodeJson(url, password, `/api/session/${opts.resumeSessionId}`);
       } catch (error: any) {
-        if (!/returned HTTP 404$/.test(error?.message ?? "")) throw error;
+        if (/returned HTTP 404$/.test(error?.message ?? "")) {
+          throw new Error("OpenCode v2 session to resume was not found on the shared server; refusing to create a new session", { cause: error });
+        }
+        throw error;
       }
     }
     if (!created) {
