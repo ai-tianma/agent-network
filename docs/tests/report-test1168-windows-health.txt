@@ -61,7 +61,8 @@ Formal Node144 run38458335261 and CLI178 run38458339458 dispatched against
 exact merged main d52418e6, checked still main ancestor. Both sets of four formal
 gates PASSED; full npm package verification is tracked in report-test1168-public.txt. Both
 same four-gated archives are public at the official GitHub prerelease; Node144
-npm is fully verified, while CLI178 npm propagation remains pending.
+and CLI178 npm are fully verified; the CLI workflow initial registry-timeout
+FAIL remains recorded, followed by a successful complete registry re-download.
 Hub139 is reused and not republished. Original-device adoption remains unknown.
 Local tests capped at2minutes; broad/native coverage runs on GitHub Actions.
 

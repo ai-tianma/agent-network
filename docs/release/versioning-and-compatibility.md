@@ -48,7 +48,7 @@ dashboard 跟 commhub 的 REST 契约（C3）要版本约束——纳入本文�
 
 ## 5. Bump-together 规则
 
-2026-10-14 #1168 健康修复软件alpha：CLI2.3.0-preview.178 / Node2.5.0-preview.144 / 已公开Hub0.9.0-preview.139。仅Windows共存的tmux探针选择与精确runtime配套更新，无Hub协议/结构变更；原深层入口及V2回执兼容范围沿用177/143/139。两包exact-main四门PASS且官方GH完整archive均已验证，Node npm已完整匹配，CLI npm传播后验待确认；现役采用及真实模型验收另记。Windows持续原生TUI健康仍unknown，不等同healthy；App Server和登录降级仍拒收任务。旧177/143可回滚软件，但需保留兼容的V2私有回执，且恢复旧误判缺口。
+2026-10-14 #1168 健康修复软件alpha：CLI2.3.0-preview.178 / Node2.5.0-preview.144 / 已公开Hub0.9.0-preview.139。仅Windows共存的tmux探针选择与精确runtime配套更新，无Hub协议/结构变更；原深层入口及V2回执兼容范围沿用177/143/139。两包exact-main四门PASS且官方GH完整archive均已验证，两包完整npm均匹配，CLI首传播timeout失败保留并完成后验；现役采用及真实模型验收另记。Windows持续原生TUI健康仍unknown，不等同healthy；App Server和登录降级仍拒收任务。旧177/143可回滚软件，但需保留兼容的V2私有回执，且恢复旧误判缺口。
 
 - 改 **C1**（runtime/config）→ agent-network + agent-node 同一次一起发 preview，矩阵加新行。
 - 改 **C2**（hub 协议）→ 先升 hub（向后兼容旧 node）再升 node；`protocolVersion` 记进矩阵注。

@@ -1,5 +1,5 @@
 #1168 — public Windows co-presence health software
-Checkpoint: 2026-10-14 04:07+08. Software publication is not live adoption.
+Final registry verification: 2026-10-13T20:18:05.355496+00:00. Software publication is not live adoption.
 
 Source PR2715 head4e2cfcfc09909f26d2a73c6c00da41ff6002528b;
 Windows-tested CI merge6aa47248804bb48e7924609fb220ef3a2457aacc;
@@ -24,7 +24,9 @@ preview144/latest58. Registry gitHead omitted; do not invent a registry SHA.
 Main provenance comes from explicit workflow source, ancestry and complete bytes.
 
 CLI2.3.0-preview.178 formal38458339458: all four gates and publish step SUCCESS;
-postverification still IN_PROGRESS. Registry version/full npm archive pending.
+postverification timed out after15minutes (workflowFAIL; npm stepSUCCESS).
+Later full npm archive verified, preview178/latest76, same exact gated/GH bytes;
+registry gitHead omitted. This does not relabel the original workflow SUCCESS.
 Official GH matches gated main:2127298bytes
 SHA256779fe7d35cdf17735bf007643107abdd7512cda9d32fe31410c4c4af976dd072.
 Do not republish this immutable version to solve registry propagation.
@@ -54,3 +56,8 @@ original owner's maintenance window. Rollback177/143 needs compatible V2 private
 receipts and restores the false-tmux gap. Git restores software/locks/schema only;
 login/tasks/receipts need authorized private backups. Hub vault NOT COVERED.
 No live restart, fork, config/provider/model change or credential copy occurred.
+
+Retained docs-PR broad server unit failure: same three cases already recorded
+for PR2711: legacy null-network heartbeat, observer dispatch health response,
+and requirements fixed-date fixture. Executable/source/workflow directories
+byte-identical to d524; no baselines weakened or tests rewritten.
