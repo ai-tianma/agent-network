@@ -6,6 +6,10 @@ The activity-lease implementation is already on main at
 `064ed34c9eba20f852a32dbe42b98389c3c2ce63` (documentation correction, same
 runtime pair). Hub 135 or later is required; the selected Hub now runs 136.
 Package integrity is pinned in `package-lock.json` and checked by `verify.mjs`.
+This retained 173/139 profile is separate from the V1 login-persistence
+[174/140 release candidate](../../../docs/tests/release-v2.3.0-preview.174.md).
+Do not substitute runtime140 into this profile or interpret its installation
+probe as verification of OpenCode login persistence.
 Both official npm tarballs are available. The CLI's earlier formal job timed
 out waiting for npm visibility; later byte verification does not rewrite that
 job's failure. See [publication facts](../../../docs/tests/report-test717-hub136-publication.txt).
