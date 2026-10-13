@@ -2,8 +2,10 @@
 
 ## Install
 
-Once normal exact-main gates and full public-byte verification pass, use a new
-private directory with the matching pair and Node >=22.13:
+The original main-built tarball passed all four gates and is available through
+the [official fixed download](https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz).
+npm publish succeeded; its registry verification is still pending. Use a new
+private directory with this same gated tarball, the public Node140, and Node >=22.13:
 
 ```bash
 set -e
@@ -12,7 +14,8 @@ test ! -e "$PAIR_DIR"
 install -d -m 700 "$PAIR_DIR"
 umask 077
 npm install --prefix "$PAIR_DIR" --ignore-scripts --no-audit --no-fund \
-  @sleep2agi/agent-network@2.3.0-preview.174 @sleep2agi/agent-node@2.5.0-preview.140
+  'https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz' \
+  @sleep2agi/agent-node@2.5.0-preview.140
 ```
 
 ## Upgrade

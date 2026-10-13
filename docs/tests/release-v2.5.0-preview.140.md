@@ -2,8 +2,9 @@
 
 ## Install
 
-After this exact-main candidate is publicly verified, install the exact pair in
-a new private directory with Node >=22.13:
+The exact-main Node140 package is public and byte/SRI verified. CLI174's same
+gated tarball has an official fixed download while npm registry verification is
+pending. Install this exact pair in a new private directory with Node >=22.13:
 
 ```bash
 set -e
@@ -12,7 +13,8 @@ test ! -e "$PAIR_DIR"
 install -d -m 700 "$PAIR_DIR"
 umask 077
 npm install --prefix "$PAIR_DIR" --ignore-scripts --no-audit --no-fund \
-  @sleep2agi/agent-node@2.5.0-preview.140 @sleep2agi/agent-network@2.3.0-preview.174
+  @sleep2agi/agent-node@2.5.0-preview.140 \
+  'https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz'
 ```
 
 ## Upgrade
@@ -41,5 +43,6 @@ Session-history recovery and actual original-node login/restart feedback remain
 separate acceptance gates. Use the [co-presence runbook](../runbooks/opencode-tui-copresence.md)
 for private state backup, software rollback and pending live verification.
 
-Candidate only until normal exact-main formal gates and public full-byte
-verification pass. No stable tag change is requested.
+Source/gates/public-byte details are recorded in
+[publication facts](report-test1120-publication.txt). Original-user feedback
+remains pending. No stable tag change is requested.

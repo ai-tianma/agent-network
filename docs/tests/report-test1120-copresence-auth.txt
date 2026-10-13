@@ -30,7 +30,16 @@ the production-entry snapshot test itself. Main/release still require the final
 head checks and the exact CLI/runtime pairing gate, not this historical snapshot.
 
 Scope: V1 human co-presence Auth.Info persistence on normal stop/restart only.
+Final source head 1a0120950a2e3c0779b6c6eb2ef40cf64883acfd:
+auth Docker 38360079942 SUCCESS (28 normal, 1 production-wiring assertion RED);
+native 38360079851 SUCCESS (both supported V1 pins), pair 38360080013 SUCCESS,
+typecheck 38360080010 SUCCESS and all 10 required checks PASS. Auth CI's actual
+tested merge 060d4c6089093fe1ad457d83b82b1e41bb735ab4 is full-tree identical to
+source main299cd2273033c33026de397c206843440b7ba96c (PR2693, 15:04:32+08).
+Formal notes correction PR2694/mainb4cd36f7a31385af0765533b1a8edf397841d19a
+changes no package source tree. See report-test1120-publication.txt for public
+bytes and independent original-user feedback limits.
 Session-history recovery, crash/SIGKILL auth updates and original-node live
 login/restart verification remain separate; #1120 must stay open for them.
-CLI174/Node140 remain release candidates until exact main, formal gates and
-full public-byte verification pass. This report does not certify publication.
+Publication status is recorded separately; this test report does not certify
+original-node account feedback or full credential/state disaster recovery.
