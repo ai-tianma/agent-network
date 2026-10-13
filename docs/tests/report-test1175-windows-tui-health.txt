@@ -20,6 +20,10 @@ error before Hub assertions; corrected by overlaying source into the image's
 dependency-backed /repo. Both outcomes retained in private iteration logs.
 Local application test time remains below the two-minute ceiling.
 
+First PR documentation symbol-pin gate failed because four inserted CLI lines
+shifted two architecture links; corrected the links to the actual definitions,
+without changing the checker or its baseline. Final-head CI remains pending.
+
 Windows CI pending: actual PID/birth/TCP connection, a live unrelated sibling,
 different remote, mismatched birth and exit; fake-Codex co-presence must now wait
 for current Hub native TUI running evidence before normal/high Dashboard tasks.
