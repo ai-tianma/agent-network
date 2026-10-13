@@ -32,7 +32,16 @@ Restored that existing branch verbatim and kept native first-failure admission
 separate, preserving both guards. Docker mutation-pin ratchet is GREEN
 (4 unchecked <= existing4; no checker/baseline changes). Final-head CI pending.
 
-Windows CI pending: actual PID/birth/TCP connection, a live unrelated sibling,
+First native Windows run38465804032 / job115532921770: 38PASS/116 assertions
+including live owned/foreign connection, wrong remote, birth mismatch and exit,
+6.10seconds. Interactive startup/restart passed, but the real Hub native health
+wait timed out. Launcher had written resolved.id (directory alias windows-picker)
+while the bridge correctly requires config.node_id (immutable n_* identity).
+Corrected the writer to rawCfg.node_id and added direct receipt node/marker/remote
+binding checks plus bounded health-only failure evidence to the native fixture.
+The failed run is retained; no retries/force admission weaken this gate.
+
+Windows final-head CI pending: actual PID/birth/TCP connection, a live unrelated sibling,
 different remote, mismatched birth and exit; fake-Codex co-presence must now wait
 for current Hub native TUI running evidence before normal/high Dashboard tasks.
 No credentialed Windows real-Codex gate is invoked. CI success is not original

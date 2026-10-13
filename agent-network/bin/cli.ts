@@ -1385,7 +1385,7 @@ async function startWindowsCodexCopresence(
     //    windows-codex-copresence.test.ts 用 indexOf 钉它的出现顺序。追加在其后是安全的。
     console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed probes=${tuiProbes} probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`);
     atomicWritePrivateJson(join(nodesDir(), resolved.id, "windows-tui-health.json"), {
-      version: 1, nodeId: resolved.id, marker, remote: wsUrl,
+      version: 1, nodeId: rawCfg.node_id, marker, remote: wsUrl,
       pid: tui.pid, creationDate: tuiCreationDate,
     });
     recoveryAdmission.release();
