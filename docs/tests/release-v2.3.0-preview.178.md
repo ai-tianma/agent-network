@@ -1,10 +1,10 @@
 # Windows co-presence health correction — CLI2.3.0-preview.178
 
-Candidate paired runtime: Node2.5.0-preview.144, existing Hub0.9.0-preview.139. Not published until exact merged main formal gates pass; stable/latest unchanged. Full behavior/recovery limits: release-v2.5.0-preview.144.md and report-test1168-windows-health.txt.
+Published software alpha: paired Node2.5.0-preview.144, existing Hub0.9.0-preview.139. Both exact-main four-gated archives are verified on official GitHub; Both complete npm archives now match gated main and official GitHub; the initial CLI registry-timeout FAIL is retained. Stable/latest unchanged. Full behavior/recovery limits and hashes: release-v2.5.0-preview.144.md, report-test1168-windows-health.txt and report-test1168-public.txt. Original-device adoption remains unverified.
 
 ## Install
 
-After complete npm artifacts are verified, use a fresh private prefix, Node>=22.13 and Bun1.3.14 for Hub:
+Use the verified official archive for @sleep2agi/agent-network@2.3.0-preview.178 and verified npm Node144, in a fresh private prefix, with Node>=22.13 and Bun1.3.14 for Hub:
 
 ```bash
 set -e
@@ -13,7 +13,7 @@ test ! -e "$ANET_PAIR_DIR"
 install -d -m 700 "$ANET_PAIR_DIR"
 umask 077
 npm install --prefix "$ANET_PAIR_DIR" --ignore-scripts --no-audit --no-fund \
-  @sleep2agi/agent-network@2.3.0-preview.178 \
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.178/sleep2agi-agent-network-2.3.0-preview.178.tgz \
   @sleep2agi/agent-node@2.5.0-preview.144 \
   @sleep2agi/commhub-server@0.9.0-preview.139
 ```
