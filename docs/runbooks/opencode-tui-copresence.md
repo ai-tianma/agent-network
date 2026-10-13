@@ -10,6 +10,8 @@
 
 共享 Server 的数据库应放在持久磁盘。OpenCode V2 默认使用 `~/.local/share/opencode/opencode.db`，`OPENCODE_DB` 可覆盖位置；先核实际进程环境、数据库路径、文件系统和备份，再停旧实例迁移。不得在活动写入期间直接复制数据库，不得把临时目录当作持久目录。原节点可以保留各自工作区并换用新 session，但这不自动迁移旧对话历史；要保留历史须单独验证数据库迁移和会话归属。共享 Server 关闭或重启不应被单个节点的 stop/close 连带终止。
 
+候选的停服备份、恢复、逐节点验收和数据回滚边界见 [共享 Server 恢复合同](opencode-v2-shared-server-recovery.md)；它尚未替代主机实际启动器和演练记录。
+
 权限不是由不同 session 自动隔离。Server 的全局配置影响全部接入者，项目 `opencode.json` 按工作区加载，session 只保存该会话状态及待批权限请求。高权限 opt-in 仍需对每个 V2 节点显式授权；不要为一个节点的 YOLO 需求扩大共享 Server 的全局权限。不同工作区不等于不同操作系统安全身份；需要强隔离时使用独立运行用户或独立 Server。
 
 启动验收依次核：受认证 `/api/info` 的版本和 PID、Server 独立持久进程、项目配置和工作区匹配、该工作区 `/api/mcp` 的 `commhub=connected`、只读插件 RPC 确认 `commhub_send_task`/`commhub_get_task` 已注册、Bridge 与 TUI 的真实 PID/配置路径/完整 session、Hub 固定 `from_name/from_node_id` 出站和接收 ACK。只看到 `connected` 或 Hub 在线不算工具就绪。旧 session 复用时先核工作区，再读 session 实际模型；首次接管保留 TUI 已选模型，不因节点配置与其不同而改写。运行态记录上次启动时的配置模型；此后明确修改节点配置模型，才在原 session 内切换并回读，失败则停止启动。Hub 配置模型标签不能代替实际 session 模型读数。每个节点的回滚只恢复它自己的 Bridge/TUI、项目配置备份与旧启动路径；共享 Server/数据库的回滚必须作为单独变更，不能因单节点失败而重启全体。
