@@ -110,8 +110,8 @@ runtime. This stops a partially supported adapter from replaying accepted work.
 The error is scoped to that request; it does not interrupt the original turn.
 
 This slice does **not** call `prepareFollowUp` from production admission or add
-owned `turn/steer`. It does not yet reconcile explicit Hub replies or schedule
-answer-only continuations. Those must be wired together in #1151. Hub runtime
+owned `turn/steer`. The subsequent #1156 Hub reconciliation slice below adds
+explicit-reply checks, while answer-only admission still needs #1151. Hub runtime
 evidence currently rejects a conflicting thread/turn binding; integration must
 respect that immutable context and cannot invent activity for the old turn.
 The legacy external-human steering policy is unchanged.
@@ -128,6 +128,50 @@ owner window before rollback. Never clear the ledger as a downgrade shortcut.
 Git recreates code/schema/fixture, not those private receipts, Hub data or login
 state; recovery needs authorized data backups or independent re-registration.
 No complete node disaster-recovery claim follows from the fixture alone.
+
+### Implemented Hub reconciliation and two-turn proof (#1156)
+
+The production adapter checks an existing V2 row against its own `get_task`
+result before retry admission. An explicit replied/failed/cancelled/expired
+task skips both action execution and another reply, using the existing skipped
+outcome and clearing the local receipt/outbound copy. Recovery performs the
+same check before inspecting V2 history. Task id, immutable receiver node,
+original thread/owner-turn and consumption evidence must all match. Unknown
+status, identity, missing context or a failed Hub read retains the row and
+authorizes neither a recovered reply nor action replay. An inbox ACK alone is
+not a reply; an accepted row never inherits the owner's terminal text. V1
+recovery and ordinary queued-task policies remain unchanged.
+
+`test1156-owned-followup-hub` runs production Hub handlers/SQLite with the real
+WS client, bridge, V2 ledger and exact answer inspector. It proves that the
+follow-up may finish via the existing node-authenticated, task-scoped normal
+reply path while its first consumed context remains the original owner turn.
+Attempting to reconsume or attribute answer-turn activity to that task is
+rejected. The independent local answer turn uses its own client identity;
+neither a second Hub binding nor a false old-turn heartbeat is sent. Other
+nodes, duplicate replies and a new-turn late reply after cancellation/expiry
+are rejected. Terminal tasks are not reopened. This protocol proof uses an
+isolated synthetic app-server; it is not a native model or production-node
+adoption result.
+
+This increment does not yet admit owned steering or launch answer-only turns
+from production. The fixture starts the independent answer turn explicitly;
+the adapter retains its no-action-replay refusal for live/unknown V2 rows until
+the full controller is integrated. Accepted-input capacity retry, unknown
+transport acceptance, nonce/history reconciliation, reserved human admission
+and owner-terminal races remain gates for that controller. No follow-up's
+reply text is copied from an unrelated owner outcome.
+
+Recovery inputs remain the same ledger, pending replies and existing Hub/node
+authority; no new service, startup script, proxy/port, environment variable,
+credential source or private datastore is introduced. Existing launch and
+upgrade commands are in the agent-node guide below. To verify adoption after
+an authorized upgrade, read the installed exact version and run a scoped
+known-task check; this Docker fixture alone does not prove an active node has
+upgraded. Rollback still requires resolving V2 rows with a compatible runtime
+before using an older codec, preserving authorized backups of receipt/outbound
+and Hub data. Git reconstructs software and this fixture; it does not restore
+private data or login state. No current node is restarted by this increment.
 
 The first slice adds the contract and Docker tests across the real classifier,
 bridge and runtime. They verify the current fallback: no owned injection,
@@ -153,9 +197,10 @@ windows do not supply a promised completion time.
 
 ## Deployment and recovery boundary
 
-This slice changes docs/tests/CI only: no process startup, proxy/port mapping,
-environment variable, credential source, production version, schema, or backup
-state changes. Existing entrypoints and upgrade/rollback procedures remain in
+The receipt and Hub reconciliation increments change runtime source as well as
+docs/tests/CI. They change no process startup, proxy/port mapping, environment
+variable, credential source, production package version, Hub schema or backup
+location. Existing entrypoints and upgrade/rollback procedures remain in
 the [agent-node guide](../../docs-site/docs/guide/agent-node.md). A clean checkout
 recreates this fixture with its pinned Dockerfile and frozen dependency lock.
 It does not restore Hub data, user registration, node credentials, or private

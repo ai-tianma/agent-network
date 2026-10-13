@@ -77,15 +77,22 @@ test("unknown future format blocks load and every mutation while preserving orig
   }
 });
 
-test("production legacy adapter refuses a persisted V2 action before runtime import", () => {
+test("production legacy adapter refuses a persisted V2 action before runtime import", async () => {
   const cli=readFileSync(new URL("../../cli.ts",import.meta.url),"utf8");
   const begin=cli.indexOf("async function processWithCodexAppServer(");
   const end=cli.indexOf("  const { codexAppServerThink, codexAppServerReplyOrThrow }",begin);
   const gate=cli.slice(cli.indexOf("  // This compatibility slice",begin),end);
   expect(begin).toBeGreaterThan(0); expect(end).toBeGreaterThan(begin); expect(gate.length).toBeGreaterThan(0);
-  const execute=new Function("taskId","turnReceiptLedger",new Bun.Transpiler({loader:"ts"}).transformSync(gate)+"; return 'allowed';");
-  const {ledger}=accepted(); expect(()=>execute("follow",ledger)).toThrow(); expect(execute("other",ledger)).toBe("allowed");
-  expect(execute("normal",{load:()=>[{taskId:"normal",version:1}]})).toBe("allowed");
+  const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+  const execute=new AsyncFunction("taskId","turnReceiptLedger","codexFollowUpHubState","clearPendingReply",new Bun.Transpiler({loader:"ts"}).transformSync(gate)+"; return 'allowed';");
+  const {ledger}=accepted(); await expect(execute("follow",ledger,async()=>"unknown",()=>{})).rejects.toThrow();
+  expect(await execute("other",ledger)).toBe("allowed");
+  expect(await execute("normal",{load:()=>[{taskId:"normal",version:1}]})).toBe("allowed");
+  await expect(execute("follow",ledger,async()=>"pending",()=>{})).rejects.toThrow();
+  expect(ledger.load()).toHaveLength(1);
+  const cleared:any[]=[];
+  const skipped=await execute("follow",ledger,async()=>"terminal",(...args:any[])=>cleared.push(args)).catch((error:any)=>error);
+  expect(skipped.code).toBe("codex_task_skipped");expect(cleared).toEqual([["admin","follow"]]);expect(ledger.load()).toEqual([]);
 });
 
 test("malformed V2 cannot downcast to V1 or authorize owner text recovery", () => {
