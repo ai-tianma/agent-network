@@ -21,7 +21,7 @@ exact137 manifest/lock/SRI, previous136 prefix kept; Docker profile38369437748,
 identity38369437789 and10required passed. Private inactive install350 files
 matched the original public package. No global CLI/Node package change.
 
-Private consistent VACUUM backup /home/vansin/.commhub/backups/supervisor1109-p137-tpzywmz3/hub-before.db
+Private consistent VACUUM backup $HOME/.commhub/backups/supervisor1109-p137-tpzywmz3/hub-before.db
 748273664 bytes, directory700/file600, integrity_check ok.
 First offline invocation did not run because the old cached image was missing.
 Rebuilt from Git tests/test906-hub-upgrade-preflight/Dockerfile and immutable
@@ -33,7 +33,7 @@ require their independent private sources. Full credential recovery NOT_COVERED.
 
 Only commhub-hub activated 2026-10-13T08:34:49.222471+00:00:
 PID712535 -> 828760; restart94 -> 95; secured137;
-entry /home/vansin/.commhub/runtime-v120-preview137/node_modules/@sleep2agi/commhub-server/bin/commhub.ts.
+entry $HOME/.commhub/runtime-v120-preview137/node_modules/@sleep2agi/commhub-server/bin/commhub.ts.
 Installed profile equals deployment main; base hash and hub.env metadata stayed
 unchanged; no --update-env. Software rollback is previous runtime-v119-preview136
 and its original main1a5b1a69e07902eef489342ca573fd7851889a55 profile/lock.
