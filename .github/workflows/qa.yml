@@ -12,6 +12,7 @@ name: anet QA (v0)
 on:
   pull_request:
     paths:
+      - 'tests/test1113-node-profile/**'
       - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
@@ -270,6 +271,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'tests/test1113-node-profile/**'
       - 'tests/test961-download-platforms/**'
       - 'server/**'
       - 'docs/stale-issue-review.md'
