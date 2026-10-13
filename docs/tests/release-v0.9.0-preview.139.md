@@ -1,10 +1,10 @@
 # CommHub Server — full-depth authenticated human inbox v0.9.0-preview.139
 
-Prepared exact-main pair: CLI 2.3.0-preview.177, Node 2.5.0-preview.143, Hub 0.9.0-preview.139. This source note does not assert npm publication or live adoption; verify the formal release gates and exact registry versions first.
+Released software pair: CLI 2.3.0-preview.177, Node 2.5.0-preview.143, Hub 0.9.0-preview.139. Hub139/Node143 npm full archives and the official CLI177 GitHub archive match the four-gated main builds. CLI npm propagation was pending at this checkpoint; use the official archive. Native adoption remains unverified. See `report-test1163-public.txt` for exact SHA/bytes and retained pipeline failures.
 
 ## Install
 
-After the versions are verified on npm, use Node >=22.13 and Bun 1.3.14 for the Hub. Install into a new private prefix rather than replacing a running node:
+Use the verified npm Node/Hub and identical official CLI archive. use Node >=22.13 and Bun 1.3.14 for the Hub. Install into a new private prefix rather than replacing a running node:
 
 ```bash
 set -e
@@ -13,7 +13,7 @@ test ! -e "$ANET_PAIR_DIR"
 install -d -m 700 "$ANET_PAIR_DIR"
 umask 077
 npm install --prefix "$ANET_PAIR_DIR" --ignore-scripts --no-audit --no-fund \
-  @sleep2agi/agent-network@2.3.0-preview.177 \
+  https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.177/sleep2agi-agent-network-2.3.0-preview.177.tgz \
   @sleep2agi/agent-node@2.5.0-preview.143 \
   @sleep2agi/commhub-server@0.9.0-preview.139
 ```

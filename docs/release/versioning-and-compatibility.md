@@ -141,7 +141,7 @@ curl -s "$HUB/api/nodes" -H "Authorization: Bearer $UTOK" \
 
 ## 2026-10-14 owned follow-up / full-depth inbox pair
 
-Prepared source pair: CLI 2.3.0-preview.177 + Node 2.5.0-preview.143 + Hub
+Released software pair: CLI 2.3.0-preview.177 + Node 2.5.0-preview.143 + Hub
 0.9.0-preview.139. Source/core evidence is in
 [report-test1163](../tests/report-test1163-human-inbox.txt); exact main publication
 and real adoption are separate gates, not implied by this prepared version row.
@@ -150,3 +150,9 @@ Older Hub responses remain usable but their first-page limitation is warned.
 The scalar metadata keyset is tested on both SQLite and real PostgreSQL. Auth
 and recipient/network checks are unchanged. Controller V2 answer-intent state
 requires the new compatible Node; do not downgrade pending V2 to a V1 reader.
+
+Public checkpoint: Node143/Hub139 npm and official CLI177 GitHub full archives
+match the four-gated main artifacts; CLI npm visibility remains a separate
+verification checkpoint. Exact main SHAs and retained workflow failures:
+[public report](../tests/report-test1163-public.txt). Original-device adoption
+remains separate; this row does not certify full QA or production-state restore.
