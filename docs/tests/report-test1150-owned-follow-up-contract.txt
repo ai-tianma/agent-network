@@ -53,6 +53,15 @@ The fixture now supplies the required active/idle response. The expected
 orphaned-network classification and production recovery code were not changed.
 The initial failure is retained; it is not counted as a successful run.
 
+First PR CI on eff02879c: owned-follow-up, human-queue and agent-node-typecheck
+passed. Two repository quality gates failed: qa-trigger-coverage required the
+new CI-executed fixture in qa.yml's PR/push path filters; mutation pin integrity
+could not statically resolve the two inline multi-variable const declarations.
+The correction adds the fixture symmetrically to those filters and splits the
+declarations into literal const statements the existing scanner supports.
+No QA assertion, required check or unchecked-mutation baseline is weakened.
+Both first CI failures remain historical failures, requiring corrected CI.
+
 Contract reference: docs/design/730-owned-turn-human-steering.md, with the
 official https://developers.openai.com/codex/app-server/ turn/steer constraints.
 Guides in Chinese and English link the contract and explicitly separate it
