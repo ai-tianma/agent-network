@@ -64,6 +64,15 @@ export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOption
     }
     if (config.permission?.external_directory !== "deny") refuse("external directory policy mismatch");
   }
+  async function idle() {
+    const state = await scoped("/session/status");
+    if (!state || typeof state !== "object" || Array.isArray(state)) refuse("session status unreadable");
+    // Pinned V1's active-status map omits idle sessions. Existence/directory was
+    // separately verified above; an explicit malformed entry is never idle.
+    const status = Object.hasOwn(state, binding.sessionId) ? state[binding.sessionId] : { type: "idle" };
+    if (status?.type !== "idle") refuse("session busy/retrying/unknown; no admission mutation");
+  }
+  await idle();
   await policy();
   const before = await scoped("/mcp");
   if (!before || typeof before !== "object" || Array.isArray(before)) refuse("unreadable native MCP state");

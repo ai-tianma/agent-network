@@ -8,7 +8,6 @@ RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" --no-audit --no-fund && tes
 COPY agent-node/src /repo/agent-node/src
 COPY deploy/node/opencode-v1-host /repo/deploy/node/opencode-v1-host
 COPY tests/test1214-v1-borrowed-admission /fixture
-COPY tests/test1194-v1-shared-feasibility/model.py /fixture/model.py
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT OPENCODE_VERSION_UNDER_TEST=$OPENCODE_VERSION
 USER bun

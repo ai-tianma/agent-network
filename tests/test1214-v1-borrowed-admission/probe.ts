@@ -69,6 +69,11 @@ try{
   await assert.rejects(openV1BorrowedAdmission({...options(2),model:{providerID:"fixture",modelID:"beta"}}),/model\/provider/);
   for(let i=0;i<5;i++){assert.deepEqual(readFileSync(join(projects[i],"opencode.json")),original[i]);assert.deepEqual(readdirSync(states[i]),[]);}
   pass("explicit mode/cohort/full binding/foreign native 200/missing 404/model mismatch refuse without config or session fallback");
+  const held=request(`/session/${infos[0].id}/message`,projects[0],"POST",{model:{providerID:"fixture",modelID:"alpha"},parts:[{type:"text",text:"Reply with exactly HOLD_ADMISSION_1214"}]});
+  let busy=false;
+  for(let i=0;i<100;i++){if((await request("/session/status",projects[0]))[infos[0].id]?.type==="busy"){busy=true;break;}await Bun.sleep(20);}
+  assert.equal(busy,true);await assert.rejects(openV1BorrowedAdmission(options(0)),/session busy/);assert.deepEqual(readFileSync(join(projects[0],"opencode.json")),original[0]);assert.deepEqual(readdirSync(states[0]),[]);await held;
+  pass("actual native busy session refuses before proxy/config registration; existing synthetic turn completes");
   for(let i=0;i<2;i++){
     const h=await openV1BorrowedAdmission(options(i));handles.push(h);assert.equal(h.isAdmitted,true);assert.equal((await h.verifyReady()).state,"mcp-connected");
     assert.match(h.mcpName,/^commhub_[a-f0-9]{32}$/);
