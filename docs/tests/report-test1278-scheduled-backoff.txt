@@ -62,6 +62,18 @@ release was performed. Recovery/software-vs-data answers:
 docs/design/scheduled-backoff.md and docs/design/scheduled-work-outcome.md.
 Git reconstructs software/fixtures, not production DB/auth/history/backups.
 
+Post-cutoff mature receipt (after source merge, before facts PR):
+Full Docker E2E run38621076401 / e2e job116048438748 and rename-ghost
+job116048439155 both SUCCESS. Complete artifact11921674573, ZIP SHA256
+c4eaae37dba06b380c7b3cf006f585984f5b472a6e6b08d97c4bd4eb65ff45af,
+8 logs read in full. Seven suite results139+25+28+16+22+12+47=289 PASS / 0 FAIL;
+test-all.log repeats the aggregate, not an eighth independent denominator.
+Broad L0/L1 job116049376242 still running at this post-cutoff; prior known
+#1268 reds remain tracked, not proof of zero impact on this source change.
+Windows native smoke job116049170447 SUCCESS, no claim that old #1262 stop
+root cause was fixed. Actual source rollup160SUCCESS /26pending /0FAIL at read,
+not a whole-repository all-green statement.
+
 ----- COMPLETE ORIGINAL INDEPENDENT CI REPORT (25264 bytes) -----
 TEST-ONLY source=aeace07910d4a29238bee4b8e77271b976eb6312 scope=opt-in SQLite interval-backoff
 Bundled 366 modules in 66ms
