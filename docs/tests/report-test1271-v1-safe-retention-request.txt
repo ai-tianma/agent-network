@@ -75,6 +75,16 @@ backdate later results. The scoped native Docker E2E above already passed.
 Known older report-only L0+L1 failures remain separate #1268. No all-QA-green
 claim; neither server nor those old suites was modified by this source slice.
 
+LATER SOURCE-HEAD NODE UNIT RESULT (NOT BACKDATED TO MERGE)
+QA run 38605822451 / job 115996695532 agent-node unit (Docker, non-root)
+subsequently completed SUCCESS. Full job log downloaded via GitHub job-logs
+API (571326 bytes); actual terminal results read:
+2917 pass / 2 skip / 0 fail, 2919 tests across 231 files, 228.24s.
+Auxiliary tests: 66 pass / 0 fail across 3 files; runner groups 5 passed /
+0 failed. The two explicit skips are not counted as pass. The new request
+API is separately qualified by the six native fixture groups above.
+Full E2E and the broad QA run remain pending at this later observation.
+
 PRODUCT / RECOVERY LIMITS
 API-only observation/recheck; no automatic production caller, durable marker,
 retention or source cleanup participation, credential-cleanup qualification,
