@@ -28,6 +28,11 @@ SQLite/PostgreSQL supervisor core run38509084192 / job115673208962 SUCCESS;
 both RESULT markers and token/heartbeat mutation assertion RED verified.
 Production code/package locks unchanged. Full server-unit/desktop-push/broad QA
 remained queued/pending at this source merge; no aggregate or full-QA PASS claim.
+Subsequently source run38509084234 / server-unit job115673684312 completed
+SUCCESS: 225 discovered files, 225 executed, zero failed; registration-password
+floor mutation was assertion RED and the runner ended RESULT: PASS. Source was
+the same b758b24 test merge; log independently read. This completes the full
+server-unit domain, not the entire broad QA matrix or desktop-push build.
 Initial candidate7b49 source tests passed but the fixture cleanup guard failed;
 070 uses tests/lib/safe-rm.sh. The failed guard is retained, not counted PASS.
 No local Docker/runtime tests, production schema/token/data or deployment changes.
