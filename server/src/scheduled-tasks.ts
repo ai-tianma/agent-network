@@ -1,4 +1,5 @@
 import { bindRequirementWake, parseRequirementWake, publicRequirementWake, requirementWakeHead, pollRequirementWakes, type RequirementWake } from "./scheduled-requirement-wake.js";
+import { scheduledOutcomeGuidance } from "./scheduled-outcome-guidance.js";
 import { parseBackoffPolicy, refreshScheduledBackoff } from "./scheduled-backoff.js";
 import { db, logTaskEvent } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
@@ -583,9 +584,12 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       auth_origin: "hub_scheduler",
       ...(row.created_by_node_id ? { scheduled_by_node_id: row.created_by_node_id, scheduled_by_alias: creatorNode?.alias ?? null } : {}),
     });
-    const taskContent = row.created_by_node_id
+    const originalContent = row.created_by_node_id
       ? `${agentSchedulePrefix(creatorNode?.alias ?? null, row.created_by_node_id)}${row.task_content}`
       : row.task_content;
+    const taskContent = originalContent + (row.no_change_backoff === 1
+      && row.schedule_type === "interval" && row.overlap_policy === "skip"
+      && db.transactionalFeaturesRefusal === null ? scheduledOutcomeGuidance(taskId) : "");
     db.run(
       `INSERT INTO inbox (id, task_id, session_name, node_id, type, priority, content, from_session, requires_response, network_id, meta_json)
        VALUES (?1, ?1, ?2, ?3, 'task', ?4, ?5, 'scheduler', 'reply', ?6, ?7)`,
