@@ -7,7 +7,9 @@ import { buildOpencodeChildEnv, revalidateOpencodeChildLaunch, discardUnspawnedO
 
 assert.notEqual(process.getuid!(), 0);
 const version = process.env.OPENCODE_VERSION_UNDER_TEST!;
-const root = mkdtempSync("/tmp/test1246-"); chmodSync(root, 0o700);
+// The actual SAFE launcher requires every base ancestor to be non-writable
+// by other users; /tmp's sticky bit does not satisfy that contract.
+const root = mkdtempSync(`/run/user/${process.getuid!()}/test1246-`); chmodSync(root, 0o700);
 const dir = (name: string) => { const p = join(root, name); mkdirSync(p, { mode: 0o700 }); return p; };
 const nodeRoot = dir("node"), project = dir("原用户项目"), launchBase = dir("external-runtime");
 const identity = { nodeId: "n_fixture1246", networkId: "net_fixture1246" };
