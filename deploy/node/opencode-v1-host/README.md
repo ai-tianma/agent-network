@@ -127,3 +127,58 @@ integrity, uses non-root network-disabled Docker and synthetic credentials/model
 This proves the MCP/config primitive only; full borrowed Node lifecycle,
 ready/turn/abort, migration/final-checkpoint rollback and original Owner canary
 remain separate gates. No production files or running services are changed here.
+
+## Borrowed admission and native MCP lease (#1214)
+
+`v1-borrowed-admission.ts` is an explicit `mode: "borrowed-v1"` lifecycle API,
+not a CLI switch or permission to adopt a running node. It reloads the private
+Host registry against an independently selected Host/cohort/version/instance and
+attested binary, verifies the original complete saved binding and exact native
+session, and checks the explicitly selected model/provider and built-in denials.
+The cohort is an Owner declaration of equivalent policy/provider trust, not proof
+of separate credential isolation. Default deny-all Hosts refuse this admission.
+Initial native metadata/config preparation precedes the private proxy backup,
+because V1 can annotate a missing `$schema` on first project load.
+
+Native MCP status exposes a registration name rather than a trusted remote URL.
+Each admission therefore owns a random `commhub_<32-hex>` registration in the V1
+flat MCP namespace, backed by the exclusive directory/config lease. Existing
+live/unknown CommHub registrations refuse; old disabled names may remain after
+verified cleanup. This name preserves the pinned `commhub_*` policy and avoids
+accidentally disconnecting a sibling or a later bridge's bare `commhub` entry.
+The standalone #1212 API still defaults to the original `commhub` key. Same UID
+and shared Host password remain cooperative; a malicious peer can replace native
+state despite a lease, so this is not tenant authorization or trusted turn identity.
+
+Admission uses directory-scoped `POST /mcp`, checks its exact leased name is
+connected, and rechecks binding, native session, config lease, model and policy.
+Its published observation is `mcp-connected`; file presence or stale `/config`
+is not readiness. The returned handle reads only its exact session/history and
+has no prompt, abort, create/fork/latest, Server spawn/stop or dispose operation.
+Full Node/CLI/attach/FIFO/human-turn integration remains #1195, not this API.
+
+Close rechecks live Host/binding/project lease and the exact native name, then
+posts only `/mcp/<own-name>/disconnect` with the selected directory. It requires
+confirmed native `disabled` before revoking the proxy and restoring unchanged
+original bytes. If config, Host identity or native result is missing/unknown,
+it revokes only its own local capability and retains lock/config/private backup
+and instructions, reporting incomplete cleanup. No retry, shared Host fallback,
+other MCP cleanup or global/directory dispose follows an uncertain write.
+Startup failure obeys the same rule. A new admission after clean close gets a
+new MCP name and retains the original exact session/history.
+
+The API lives inside the future bridge process; its only listener is the
+short-lived loopback proxy and it creates no new supervisor/service. Software,
+ports and private credential sources follow the Host/proxy sections above.
+Private lease/recovery data remains Owner-managed encrypted-backup material.
+After a crash/uncertain close, the named Owner must inspect retained records and
+native scope in an approved idle window before preparing a new lease; no stale
+lease takeover or real credential/config dump is supported. Upgrade/rollback
+uses exact merged-main software, retained private data and separately verified
+final checkpoints; #1196 and original Owner adoption are still pending.
+
+Rebuild the isolated two-version lifecycle fixture with
+`tests/test1214-v1-borrowed-admission/Dockerfile` / `v1-borrowed-admission-core.yml`.
+It uses synthetic MCP/model/auth, non-root/network-none Docker and pinned source,
+Bun/package integrity. It must prove exact native disconnect plus sibling/Host
+survival, same-session reopen, refusal/startup failure and edited-file retention.

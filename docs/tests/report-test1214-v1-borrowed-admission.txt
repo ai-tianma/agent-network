@@ -1,0 +1,16 @@
+#1214 — Explicit V1 borrowed admission / native MCP lifecycle seam
+
+Validation pending ordinary main: two exact native V1 packages, non-root/network
+none Docker. Independent Host expectation/private attestation, complete binding,
+explicit equivalent-policy/provider cohort/model and default policy refusal;
+leased flat commhub_<nonce> registration, directory native MCP connected gate,
+exact native own-name disconnect/disabled confirmation before proxy/config close;
+unknown/edited startup or cleanup revokes capability but retains recovery records.
+
+No CLI/TUI/FIFO/human-turn/timeout unknown-write/abort/event integration, full
+borrowed Node readiness, migration/rollback or original machine adoption claimed.
+No Server spawn/stop/dispose/session fallback in this admission API; test fixtures
+alone own their isolated native Servers and synthetic model/Hub credentials.
+Recovery/start/port/secret/upgrade/rollback/data boundaries are versioned in
+v1-borrowed-admission.ts and deploy/node/opencode-v1-host/README.md. Real private
+history/auth/lease backups never come from clone. Default owned mode is unchanged.
