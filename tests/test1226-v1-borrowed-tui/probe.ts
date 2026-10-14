@@ -124,7 +124,7 @@ try{
   const frame=(name:string)=>execTmux(["capture-pane","-p","-t",panes.get(name)!],{encoding:"utf8",stdio:["ignore","pipe","ignore"]});
   const dead=(name:string)=>execTmux(["display-message","-p","-t",panes.get(name)!,"#{pane_dead}"],{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim()==="1";
   const killTerm=(name:string)=>execTmux(["kill-session","-t",`=${name}`],{stdio:"pipe"});
-  const awaitRecord=async(i:number,name:string)=>{await waitFor(()=>existsSync(join(states[i],BORROWED_TUI_RECORD))&&record(i).state==="running",`native ${name} record`,30000);
+  const awaitRecord=async(i:number,name:string)=>{await waitFor(()=>{if(dead(name))throw Error(`native ${name} exited before readiness: ${frame(name)}`);return existsSync(join(states[i],BORROWED_TUI_RECORD))&&record(i).state==="running";},`native ${name} record`,30000);
     await waitFor(()=>/alpha|opencode|ctrl|ask|tab/i.test(frame(name)),`native ${name} rendered frame`,15000);await Bun.sleep(1000);assert.equal(dead(name),false,frame(name));return record(i);};
   const awaitNative=async(i:number,label:string,test:(m:any[])=>boolean,budget=45000)=>{const end=Date.now()+budget;while(Date.now()<end){const h=await request(`/session/${infos[i].id}/message`,projects[i]);if(test(h))return h;await Bun.sleep(100);}throw Error(`${label} native deadline; terminal ${i}: ${frame(termNames[i])}`);};
   const human=(name:string,text:string)=>{execTmux(["send-keys","-t",panes.get(name)!,"-l",text],{stdio:"pipe"});execTmux(["send-keys","-t",panes.get(name)!,"Enter"],{stdio:"pipe"});};
