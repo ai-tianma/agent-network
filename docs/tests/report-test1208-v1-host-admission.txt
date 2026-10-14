@@ -15,10 +15,36 @@ consumer revalidation. No live shared host launcher, proxy, borrowed lifecycle,
 ready/turn integration or existing-node adoption is enabled; parent #1195 remains
 Doing and #1196 shared recovery remains pending.
 
-Validation pending before main: non-root/network-none Docker, exact V1 package
-and platform integrity for 1.18.1/1.18.34, real private filesystem refusal cases,
-stale/different instance and executable mismatch, immutable descriptor -> real
-native exact session through #1207. Synthetic password/files only; no real node
+Verified before ordinary main merge: PR2729 final head
+b750878e9dd52323ff4a239fb92328ad932a0287 -> main
+c01fe26d3df4a69326636929dde95f99c0b0cc9c (2026-10-14T05:03:19Z); fresh main
+ancestor verified. Ten required guards and four selected Docker jobs passed.
+CI tested merge 47446182019e6cc7a22b286a5a139de7b79d65b0.
+
+Admission38514296933 SUCCESS: V1 1.18.1 job115689517663/artifact11870209632;
+V1 1.18.34 job115689517450/artifact11870499336. Both artifacts independently
+downloaded/read: valid private inputs/immutable descriptor PASS, 27 filesystem,
+record and executable-attestation refusal cases PASS, registry descriptor ->
+real native exact session PASS; two stale-instance checks give 29 refusals per
+version. The replacement record in this fixture is input/binding validation,
+not evidence of a second real Server incarnation or process identity attestation.
+Synthetic password/files only, non-root Linux and network-none runtime; Windows
+ACL admission is explicitly refused, macOS/native production adoption untested.
+
+Checkpoint38514296967 SUCCESS, jobs115689517880/115689517615: independently
+downloaded reports each show 6 unit tests/0fail plus 7 native owned checkpoints
+PASS. Owned capture/import/resume regression is not shared migration completion.
+
+Preserved first failure: head228abadeabde69a35507d19ac4797196262e847e,
+run38514042581, both admission jobs FAIL before assertions because fixture
+realpathSync imported from node:path instead of node:fs (SyntaxError). Only the
+fixture import changed for the final head; production guards were not relaxed.
+This initial failure is not a guard mutation witness or a production failure.
+
+Obsolete own broad QA38514042600 ended Cancelled. Own final source38514296981
+and main duplicate38514597292 were cancelled after affected Docker/required
+checks passed; no whole-matrix PASS is claimed, no other owner's run stopped.
+No real node
 credentials/config/database/registry, account, model or process is read/changed.
 
 Reconstruction: .github/workflows/v1-host-admission-core.yml and test1208
