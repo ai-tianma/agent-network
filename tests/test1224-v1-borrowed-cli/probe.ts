@@ -24,14 +24,14 @@ const attestation=resolvePinnedOpencodeBinaryAttestation({requestedBinary:binary
 const checks:string[]=[], observations:Record<string,unknown>={}, calls:Array<{node:string,args:any,name:string}>=[];
 const pass=(s:string)=>{checks.push(s);console.log(`PASS ${s}`);};
 const tokens=["synthetic-node-token-A-1214","synthetic-node-token-B-1214"];
-const hubs=["A","B"].map((node,i)=>Bun.serve({hostname:"127.0.0.1",port:0,async fetch(req){
+const hubs=["A","B"].map((node,i)=>Bun.serve({hostname:"127.0.0.1",port:0,idleTimeout:0,async fetch(req){
   const url=new URL(req.url);
   if(url.pathname==="/health")return Response.json({version:"0.8.6-preview.137",capabilities:["status_node_id"]});
   if(req.headers.get("authorization")!==`Bearer ${tokens[i]}`)return new Response(null,{status:401});
   if(url.pathname==="/api/auth/me")return Response.json({ok:true,user:{id:"synthetic-owner",username:"synthetic-admin",role:"user"}});
   if(url.pathname==="/api/status")return Response.json({sessions:[{node_id:`n_${i}`,alias:aliases[i]}]});
   if(url.pathname.startsWith("/events/")){
-    const body=new ReadableStream({start(c){streams[i].push(c);c.enqueue(new TextEncoder().encode('data: {"type":"connected"}\n\n'));}});
+    let active:any;const body=new ReadableStream({start(c){active=c;streams[i].push(c);c.enqueue(new TextEncoder().encode('data: {"type":"connected"}\n\n'));},cancel(){streams[i]=streams[i].filter((c:any)=>c!==active);}});
     return new Response(body,{headers:{"content-type":"text/event-stream"}});
   }
   if(req.method!=="POST")return new Response(null,{status:405});
