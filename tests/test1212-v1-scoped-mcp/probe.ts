@@ -69,7 +69,7 @@ try{
     // Existing other MCP may have its own credential; original bytes are kept.
     // This node's real Hub token must not be installed as commhub credentials.
     assert.notEqual(parsed.mcp.commhub.headers.Authorization,`Bearer ${tokens[i]}`);
-    assert.ok(tokens.every(token=>!installed.includes(token)));
+    assert.doesNotMatch(installed,/synthetic-node-token-[AB]-1212/);
     assert.ok(!readFileSync(join(hostRoot,"host-settings.json"),"utf8").includes(tokens[i]));
     const cached=await request("/config",projects[i]);observations[`configAfterFileInstall${i}`]=cached.mcp?.commhub?.url===p.url?"reflects-file":"cached-without-proxy";
     assert.deepEqual(cached.mcp?.other,base.mcp.other);

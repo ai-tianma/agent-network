@@ -127,4 +127,3 @@ integrity, uses non-root network-disabled Docker and synthetic credentials/model
 This proves the MCP/config primitive only; full borrowed Node lifecycle,
 ready/turn/abort, migration/final-checkpoint rollback and original Owner canary
 remain separate gates. No production files or running services are changed here.
-
