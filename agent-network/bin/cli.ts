@@ -14660,12 +14660,46 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 }
 
 // RFC-029 — OpenCode lifecycle and pin-management commands.
+async function opencodeBorrowedAttachCommand(ref?: string) {
+  if (!ref) throw new Error("Usage: anet opencode attach <node>");
+  // The ordinary profile resolver can repair permissions and normalize from
+  // global defaults. This entry only reads explicit private selections; no repair or
+  // global profile/token fallback, and ambiguous names never select first.
+  const ids=listProfileIds(), candidates=ids.includes(ref) ? [ref] : ids;
+  const matches=candidates.flatMap(id=>{
+    try {
+      const cfg=join(nodesDir(),id,"config.json"), selected=readBorrowedLaunchConfig(cfg,process.cwd());
+      return ref===id || ref===selected.alias || ref===selected.selection.binding.nodeId ? [{id,cfg,selected}] : [];
+    } catch { return []; }
+  });
+  if(matches.length!==1)throw new Error("borrowed V1 TUI requires one exact existing private node selection");
+  const {cfg,selected}=matches[0];
+  checkRuntimeDependency("opencode-cli","start");
+  assertStartCompatibility("opencode-cli",{runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence"} as Profile,matches[0].id);
+  const plan=revalidateOpencodeAgentNodeLaunchPlan(resolveOpencodeAgentNodeLaunchPlan());
+  if (!agentNodeHelp(plan).includes("ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1")) {
+    throw new Error("exact agent-node lacks borrowed V1 TUI capability; upgrade both precise source builds before attaching");
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("borrowed V1 TUI requires an interactive terminal");
+  const child=spawn(plan.command,[...plan.argsPrefix,"--opencode-borrowed-attach",cfg],{
+    cwd:process.cwd(),stdio:"inherit",env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
+      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version},
+  });
+  const stop=()=>{try{child.kill("SIGTERM");}catch{}};
+  const signals=["SIGINT","SIGTERM","SIGHUP"] as const;
+  for(const s of signals)process.on(s,stop);
+  const code=await new Promise<number>(resolve=>{child.once("error",()=>resolve(1));child.once("exit",code=>resolve(code??1));});
+  for(const s of signals)process.off(s,stop);
+  if(code!==0)process.exit(code);
+}
+
 async function opencodeCommand() {
   const sub = args[1];
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
     console.log(`Usage: anet opencode <sub>
 
 Subcommands:
+  attach <node>          Attach the exact ready borrowed V1 session in this terminal.
   upgrade-pin <version>   Reinstall and smoke the exact release pin.
                           Different versions remain rejected until a new
                           maintainer-vetted agent-network preview bumps it.
@@ -14683,6 +14717,11 @@ Examples:
   }
   if (sub === "upgrade-pin") {
     await opencodeUpgradePinCommand(args[2]);
+    return;
+  }
+  if (sub === "attach") {
+    if (args.length!==3) throw new Error("Usage: anet opencode attach <node>");
+    await opencodeBorrowedAttachCommand(args[2]);
     return;
   }
   if (sub === "auth-login") {
