@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { revalidatePinnedOpencodeBinary, type PinnedOpencodeBinaryAttestation } from "../opencode-acp/binary";
@@ -54,8 +54,25 @@ async function requireFreePort(port: number): Promise<void> {
   });
 }
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+function groupHasLiveMembers(pgrp: number): boolean {
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      const stat = readFileSync(`/proc/${entry}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+      if (Number(fields[2]) === pgrp && fields[0] !== "Z") return true;
+    } catch (error: any) { if (error?.code !== "ENOENT" && error?.code !== "ESRCH") return true; }
+  }
+  return false;
+}
+async function requireGroupGone(child: ChildProcess): Promise<void> {
+  if (!child.pid) return;
+  for (let i = 0; i < 20; i++) { if (!groupHasLiveMembers(child.pid)) return; await pause(50); }
+  // A dead/reused leader cannot authorize another group signal. Keep controls.
+  refuse("residual or unreadable owned process group; retained for Owner recovery");
+}
 async function stopOwnedChild(child: ChildProcess, identity: LinuxProcessGroupIdentity | undefined): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) return requireGroupGone(child);
   if (!identity || identity.pgrp !== child.pid || !signalExactLinuxProcessGroup(identity, "SIGTERM")) refuse("cannot prove owned process group; retained for Owner");
   for (let i = 0; i < 50 && child.exitCode === null && child.signalCode === null; i++) await pause(50);
   if (child.exitCode === null && child.signalCode === null) {
@@ -63,6 +80,7 @@ async function stopOwnedChild(child: ChildProcess, identity: LinuxProcessGroupId
     await Promise.race([new Promise<void>(resolve => child.once("exit", () => resolve())), pause(2500)]);
     if (child.exitCode === null && child.signalCode === null) refuse("owned process exit unconfirmed");
   }
+  await requireGroupGone(child);
 }
 
 /** Host supervisor only. A borrowing node must never call this start/close API.
