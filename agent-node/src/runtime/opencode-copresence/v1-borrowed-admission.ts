@@ -1,3 +1,4 @@
+import type { Dispatcher } from "undici";
 import { randomBytes } from "node:crypto";
 import { loadV1HostRegistry, type V1HostExpectation } from "./v1-host-registry";
 import { createV1SharedReadClient, validateV1SharedBinding, type V1SharedSessionBinding } from "./v1-shared-read";
@@ -28,9 +29,9 @@ export interface V1BorrowedAdmissionOptions {
   readonly hubToken: string;
 }
 
-/** Lifecycle admission only. No Server spawn/stop, session create/fork/latest,
- * prompt, abort, dispose or TUI ownership. Runtime/CLI and turn integration are
- * still separate; this handle proves a scoped MCP connection, not a whole Node. */
+/** Admission and exact-session transport. No Server spawn/stop, session
+ * create/fork/latest, dispose or TUI ownership. The runtime owns turn/FIFO/abort
+ * decisions; admission readiness proves MCP connection, not CLI adoption. */
 export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOptions) {
   if (options.mode !== "borrowed-v1") refuse("explicit borrowed mode required");
   const host = Object.freeze({ ...options.expectedHost });
@@ -86,7 +87,7 @@ export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOption
   const proxy = await openV1ScopedCommhubMcp({ expected: binding, readBinding, readServer,
     alias: options.alias, hubMcpUrl: options.hubMcpUrl, hubToken: options.hubToken,
     stateRoot: options.stateRoot, registrationName: mcpName });
-  let maybeRegistered = false, admitted = false;
+  let maybeRegistered = false, admitted = false, recoveryRetained = false;
   let closePromise: Promise<void> | undefined;
   async function nativeStatus() {
     await proxy.verify();
@@ -98,6 +99,7 @@ export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOption
   async function close() {
     return closePromise ??= (async () => {
       admitted = false;
+      if (recoveryRetained) refuse("uncertain turn; capability revoked, recovery retained");
       try {
         if (maybeRegistered) {
           const status = await nativeStatus();
@@ -123,7 +125,7 @@ export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOption
   } catch {
     await close(); refuse("startup not admitted; no retry or Host fallback");
   }
-  return Object.freeze({ binding, mcpName, model,
+  return Object.freeze({ binding, mcpName, model, url: initialServer.url,
     get isAdmitted() { return admitted; },
     async verifyReady() {
       if (!admitted) refuse("borrowed admission closed");
@@ -132,6 +134,40 @@ export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOption
     },
     async readSession() { if (!admitted) refuse("borrowed admission closed"); await proxy.verify(); return reader().readSession(); },
     async readMessages() { if (!admitted) refuse("borrowed admission closed"); await proxy.verify(); return reader().readMessages(); },
+    /** Exact transport for the V1 runtime only; no create/fork/latest/global
+     * mutation. Directory headers and authentication cannot be overridden. */
+    async request(path: string, init: RequestInit = {}, timeoutMs = 5_000, dispatcher?: Dispatcher) {
+      if (!admitted) refuse("borrowed admission closed");
+      const method = init.method ?? "GET";
+      const sessionPath = `/session/${encodeURIComponent(binding.sessionId)}`;
+      const read = method === "GET" && [sessionPath, `${sessionPath}/message`, "/session/status"].includes(path);
+      const write = method === "POST" && [`${sessionPath}/message`, `${sessionPath}/abort`].includes(path);
+      if (!read && !write) refuse("runtime route is not exact-session scoped");
+      if (path === `${sessionPath}/message` && method === "POST") {
+        let body: any;
+        try { body = JSON.parse(String(init.body)); } catch { refuse("invalid prompt body"); }
+        if (body.model?.providerID !== model.providerID || body.model?.modelID !== model.modelID) refuse("per-turn model mismatch");
+      }
+      await proxy.verify();
+      if (await nativeStatus() !== "connected") refuse("native MCP no longer connected");
+      await policy();
+      const server = readServer();
+      const value = await fetchOpenCodeJson(server.url, server.password, path, {
+        ...init, headers: { "x-opencode-directory": encodeURIComponent(binding.directory) }, redirect: "error",
+      }, timeoutMs, dispatcher);
+      await proxy.verify();
+      if (path === sessionPath && (value?.id !== binding.sessionId || value?.directory !== binding.directory)) refuse("foreign session response");
+      if (path === `${sessionPath}/message`) {
+        const messages = method === "GET" ? value : [value];
+        if (!Array.isArray(messages) || messages.some((m: any) => m?.info?.sessionID !== binding.sessionId
+          || !Array.isArray(m.parts) || m.parts.some((part: any) => part?.sessionID !== binding.sessionId))) refuse("foreign/malformed runtime history");
+      }
+      return value;
+    },
+    /** Unknown prompt completion cannot unlock the directory for another node. */
+    async retainRecovery() {
+      recoveryRetained = true; admitted = false; await proxy.revoke();
+    },
     close,
   });
 }

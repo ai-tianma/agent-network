@@ -153,9 +153,9 @@ state despite a lease, so this is not tenant authorization or trusted turn ident
 Admission uses directory-scoped `POST /mcp`, checks its exact leased name is
 connected, and rechecks binding, native session, config lease, model and policy.
 Its published observation is `mcp-connected`; file presence or stale `/config`
-is not readiness. The returned handle reads only its exact session/history and
-has no prompt, abort, create/fork/latest, Server spawn/stop or dispose operation.
-Full Node/CLI/attach/FIFO/human-turn integration remains #1195, not this API.
+is not readiness. The admission observation is separate from the exact-session runtime transport
+added by #1216 below. No create/fork/latest, Server spawn/stop or dispose is
+exposed. Full Node/CLI/attach/human-turn qualification remains #1195.
 
 Close rechecks live Host/binding/project lease and the exact native name, then
 posts only `/mcp/<own-name>/disconnect` with the selected directory. It requires
@@ -182,3 +182,51 @@ Rebuild the isolated two-version lifecycle fixture with
 It uses synthetic MCP/model/auth, non-root/network-none Docker and pinned source,
 Bun/package integrity. It must prove exact native disconnect plus sibling/Host
 survival, same-session reopen, refusal/startup failure and edited-file retention.
+
+## Borrowed backend API (#1216)
+
+`openOpenCodeCopresenceRuntime({ borrowedV1, cwd, workDir, model, sessionId })`
+selects the explicit V1 borrowed path before owned binary probing, environment
+preparation, import, port reservation or serve spawn. `borrowedV1` is the full
+#1214 admission input. `cwd`/`workDir` must equal its canonical directory/private
+state root, and model/session must match its independently saved exact binding.
+V2, new-session/checkpoint import and owned provider/CommHub environment options
+refuse instead of falling back. No CLI flag/config adoption is exposed yet.
+
+The borrowed backend reuses the original FIFO, ascending user-message IDs,
+causal reply ownership, explicit per-turn model and deadline handling. Every
+status/session/history/prompt/abort request uses the fixed encoded directory,
+reloaded Host identity, saved binding, native session and config/MCP lease.
+Its transport permits only the exact session routes; it exposes no arbitrary
+config/session creation, event/global mutation or directory disposal. The
+existing runtime has no event subscription lane. The Host/cohort limitations
+above still apply; directory selection is not upstream tenant authorization.
+
+Only a history decision that proves the timed-out live turn belongs to this
+bridge can reach the exact-session abort path. Unknown prompt completion or
+unverified reply ownership prevents further automatic submissions, revokes
+this proxy and retains recovery controls. Such recovery requires the original
+Owner to reconcile the exact saved identity and native history; no stale lease
+stealing or automatic replay follows. Close drains this bridge's in-flight
+queue, requires a proven idle session and disconnects only its own MCP. Busy or
+unreadable status revokes this proxy while retaining recovery controls. It does not kill/restart/delete the
+Host, import/checkpoint its data or stop any human TUI. Human submissions can
+still race admission; causal reply ownership remains mandatory.
+
+`attachScriptPath` is empty in borrowed mode: shared-Host TUI launch/ownership
+and targeted informational notifications are not enabled in this slice.
+`notify` explicitly refuses, avoiding a global toast broadcast. Full CLI/TUI,
+native human race/timeout/abort qualification and #1196 migration/final
+checkpoint/rollback remain separate gates; backend API success does not close
+#1195 or authorize production adoption.
+
+This is code inside the original Node process, not a new daemon. Start/ports,
+private credential source and Host rebuilding remain the versioned procedures
+above. Upgrade uses exact merged-main source and the retained private Host,
+saved bindings and lease backups; roll back code after an Owner-approved idle
+window without deleting these data. Existing session data and real secrets
+require the original encrypted backups/private registration source, not Git.
+Rebuild `tests/test1216-v1-borrowed-backend/Dockerfile` through
+`v1-borrowed-backend-core.yml` for both pinned V1 versions. It uses synthetic
+Hub/model credentials and non-root/network-none Docker; the owned spawn golden
+and existing deadline/reply ownership regressions run in the same fixture.
