@@ -37,8 +37,10 @@ Unique occurrence claiming remains before configuration revalidation.
 This is SQLite-qualified source functionality. Unsupported transactional
 backends do not run the policy. No live policy is enabled by this change;
 producer classification and actual installed Hub/Node adoption remain separate.
-Domain-event subscription/wake and UI controls remain future slices. Routine
-bookkeeping and heartbeat events do not implicitly wake a schedule.
+Scoped requirement creation/status wake is separately documented in
+[the event wake contract](scheduled-requirement-wake.md). Other event domains
+and UI controls remain future slices. Routine bookkeeping and heartbeat events
+do not implicitly wake a schedule.
 
 ## Rebuild and recovery
 

@@ -1,5 +1,9 @@
 import { db } from "./db.js";
 
+type WakeHook = (id: string, network: string, now: Date) => boolean;
+let requirementWakeHook: WakeHook | null = null;
+export function setRequirementWakeHook(hook: WakeHook): void { requirementWakeHook = hook; }
+
 export function parseBackoffPolicy(raw: unknown, type: string, fallback = false): boolean {
   if (raw !== undefined && typeof raw !== "boolean") throw new Error("invalid_no_change_backoff");
   const enabled = raw === undefined ? fallback : raw as boolean;
@@ -12,11 +16,14 @@ export function parseBackoffPolicy(raw: unknown, type: string, fallback = false)
  * makes duplicate or out-of-order callbacks unable to increment it twice. */
 export function refreshScheduledBackoff(scheduleId: string, networkId: string, now = new Date()): void {
   if (db.transactionalFeaturesRefusal !== null) return;
+  if (requirementWakeHook?.(scheduleId, networkId, now)) return;
   const row = db.get<any>(`SELECT status, revision, target_node_id, schedule_json,
-    no_change_backoff, overlap_policy, backoff_streak, backoff_effective_seconds,
+    no_change_backoff, overlap_policy, requirement_wake_json, backoff_streak, backoff_effective_seconds,
     backoff_last_run_id, next_run_at FROM scheduled_tasks
     WHERE schedule_id = ?1 AND network_id = ?2`, scheduleId, networkId);
   if (!row || row.status !== "active" || row.no_change_backoff !== 1 || row.overlap_policy !== "skip") return;
+  // A DB-only process with no watcher loaded may not bypass its fence.
+  if (row.requirement_wake_json && !requirementWakeHook) return;
   const spec = JSON.parse(row.schedule_json);
   if (spec.type !== "interval") return;
   // Include failures/skips/unknowns: excluding them would turn separated
