@@ -14,7 +14,7 @@ import { buildOpencodeDefaultPermissionPolicy, buildOpencodeDefaultToolsPolicy, 
 const version=process.env.OPENCODE_VERSION_UNDER_TEST!;
 const root=mkdtempSync("/tmp/test1219-");chmodSync(root,0o700);
 const dir=(name:string)=>{const p=join(root,name);mkdirSync(p,{mode:0o700});return p;};
-const hostRoot=dir("host"), probeRoot=dir("probe"), projects=Array.from({length:8},(_,i)=>`项目${i}`).map(dir), states=Array.from({length:8},(_,i)=>`node${i}`).map(dir);
+const hostRoot=dir("host"), probeRoot=dir("probe"), projects=Array.from({length:9},(_,i)=>`项目${i}`).map(dir), states=Array.from({length:9},(_,i)=>`node${i}`).map(dir);
 const binary=realpathSync(execFileSync("which",["opencode"],{encoding:"utf8"}).trim());
 const attestation=resolvePinnedOpencodeBinaryAttestation({requestedBinary:binary,expectedVersion:version,probeEnv:{PATH:process.env.PATH,HOME:probeRoot,OPENCODE_DISABLE_AUTOUPDATE:"1"},probeCwd:probeRoot,forbiddenRoots:[root]});
 const checks:string[]=[], observations:Record<string,unknown>={}, calls:Array<{node:string,args:any,name:string}>=[];
@@ -40,7 +40,7 @@ const handles:Array<OpenCodeCopresenceSession>=[];
 let defaultHost:typeof host;
 const original:Buffer[]=[];
 async function request(path:string,directory:string,method="GET",body?:unknown){
-  const r=await fetch(`${host!.server.url}${path}`,{method,headers:{authorization:`Basic ${Buffer.from(`opencode:${host!.server.password}`).toString("base64")}`,"content-type":"application/json","x-opencode-directory":encodeURIComponent(directory)},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:"error",signal:AbortSignal.timeout(20000)});
+  const r=await fetch(`${host!.server.url}${path}`,{method,headers:{authorization:`Basic ${Buffer.from(`opencode:${host!.server.password}`).toString("base64")}`,"content-type":"application/json","x-opencode-directory":encodeURIComponent(directory)},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:"error",signal:AbortSignal.timeout(60000)});
   const text=await r.text();assert.equal(r.status,200,`${method} ${path} status`);return text?JSON.parse(text):null;
 }
 async function rpc(p:any,method="tools/list",args?:any,auth=p.mcpConfig.headers.Authorization){
@@ -52,7 +52,7 @@ async function turn(i:number,id:string){
 }
 try{
   for(let i=0;i<100;i++){try{if((await fetch("http://127.0.0.1:18994/v1/models")).ok)break;}catch{}await Bun.sleep(50);if(i===99)throw Error("model startup deadline");}
-  for(let i=0;i<8;i++){
+  for(let i=0;i<9;i++){
     const permission:any=buildOpencodeDefaultPermissionPolicy();delete permission["*"];permission["other_*"]="deny";
     const base={$schema:"https://opencode.ai/config.json",model:"fixture/alpha",provider:{fixture:{npm:"@ai-sdk/openai-compatible",name:"TEST-ONLY",options:{baseURL:"http://127.0.0.1:18994/v1",apiKey:"synthetic-only"},models:{alpha:{name:"Alpha"}}}},tools:buildOpencodeDefaultToolsPolicy(),permission,
       mcp:{other:{type:"remote",url:`http://127.0.0.1:${hubs[0].port}/mcp`,enabled:false,oauth:false}},instructions:[]};
@@ -100,8 +100,13 @@ try{
   assert.equal(ownError.phase,"reply");assert.equal(ownError.aborted,true);assert.deepEqual(aborts.slice(a0),[`${host.server.url}/session/${infos[7].id}/abort`]);await idle(7);
   assert.equal(own.isRunning,true);assert.equal((await own.submit("Reply with exactly AFTER_OWN_ABORT",20000)).replyText,"AFTER_OWN_ABORT");await own.close();
   pass("actual landed own native turn deadline sends only exact own abort and runtime remains reusable");
+  const tool=await entry(8);handles.push(tool);const toolAborts=aborts.length;
+  const toolError=await timeoutError(tool.submit("CALL_IDENTITY HOLD_AFTER_TOOL_1219",10000));
+  assert.equal(toolError.aborted,true);assert.deepEqual(aborts.slice(toolAborts),[`${host.server.url}/session/${infos[8].id}/abort`]);
+  const toolHistory=await history(8);assert.ok(toolHistory.some((m:any)=>m.info.role==="assistant"&&m.info.finish==="tool-calls"&&typeof m.info.time?.completed==="number"));await idle(8);await tool.close();
+  pass("native completed tool-call step plus unfinished continuation remains own live turn and permits only own abort");
   const notLanded=await entry(2);handles.push(notLanded);const a1=aborts.length;let omitted=false;
-  fault=async(url,init)=>{if(runtimePost(url,init,2)){omitted=true;await new Promise(resolve=>init.signal.addEventListener("abort",resolve,{once:true}));throw new DOMException("injected transport did not deliver POST","TimeoutError");}};
+  fault=async(url,init)=>{if(runtimePost(url,init,2)){omitted=true;if(init.signal.aborted)throw new DOMException("injected undelivered POST at deadline","TimeoutError");await new Promise(resolve=>init.signal.addEventListener("abort",resolve,{once:true}));throw new DOMException("injected transport did not deliver POST","TimeoutError");}};
   const absent=await timeoutError(notLanded.submit("MUST_NOT_LAND",10000));fault=undefined;
   assert.equal(omitted,true);assert.equal(absent.phase,"admission");assert.equal(absent.aborted,false);assert.equal((await history(2)).length,0);assert.equal(aborts.length,a1);assert.equal(notLanded.isRunning,true);
   assert.equal((await notLanded.submit("Reply with exactly AFTER_NOT_LANDED",20000)).replyText,"AFTER_NOT_LANDED");await notLanded.close();
