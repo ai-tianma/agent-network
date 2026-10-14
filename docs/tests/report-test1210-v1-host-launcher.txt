@@ -1,0 +1,27 @@
+#1210 — Independent V1 Host Owner launcher / instance publication
+
+Scope: separate Linux Host supervisor API, foreground entry and service template.
+Credential-free executable attestation, private persistent roots, exclusive
+ownership lock and stable Host/cohort/version settings precede start. The owned
+detached process group receives a new instance/password; authenticated exact
+version health precedes exclusive registry publication. Duplicate/stale inputs
+and occupied port refuse; no takeover, alternate Server or automatic restart.
+Owned shutdown removes only exact unchanged controls and keeps persistent data.
+Node borrowed runtime/MCP proxy/ready-turn and actual adoption remain #1195/#1196.
+
+Validation pending before ordinary main: both exact V1 packages, non-root/network
+none Docker. Versioned foreground entry; duplicate/port refusal; two nonempty
+directory histories; exact shutdown A leaves independent Host B healthy; same
+settings persistent restart with new real instance/password and old binding
+refusal; stale lock retained. The two Hosts are independent Servers: this does
+not certify shared Node A stop leaves Node B or original Hub/model/native use.
+
+Rebuild from exact source: test1210 Dockerfile and v1-host-launcher-core.yml pin
+Bun digest, source SHA and exact package/platform integrity from test1194. The
+stub model/sessions/passwords are synthetic and runtime network is disabled.
+Versioned startup/loopback port/private layout/secret handling/upgrade/rollback
+and encrypted-data backup limits: deploy/node/opencode-v1-host/README.md,
+start.ts and supervisor.service.template. No production template installation,
+old node/identity/model/login/process manipulation or package release occurs.
+Git contains software/structure, not real histories/auth; full shared data
+recovery and final-checkpoint rollback remain #1196 and original Owner window.
