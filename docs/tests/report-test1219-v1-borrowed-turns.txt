@@ -1,0 +1,7 @@
+TEST-ONLY #1219 borrowed API native turn gate
+Status: CI_PENDING; no claim of native PASS or main merge.
+Two exact pinned V1 versions 1.18.1 and 1.18.34, wrapper/native SRI from existing manifest; pinned Bun image; Docker non-root --network none, synthetic loopback model and Hub.
+Actual native sessions/model execution and causal parent IDs, FIFO/sibling, owned timeout abort, human lead/tail races. Injected transport faults are POST omission, history503 and abort503, explicitly distinct from native faults.
+Original owned regression and three abort-ownership mutations remain mandatory unchanged.
+No production app/Host/credentials adoption. CLI/TUI and 1196 migration remain separate gates.
+Recovery/rebuild: suite Dockerfile and run.sh reconstruct fixture; no reverse proxy or external tunnel; synthetic credentials generated only in fixture; source/version/SRI pins build exact native; rollback is checking out prior source; no production state backup or migration performed. Shared Host is created and stopped only by fixture owner; unknown node controls retained until fixture disposal.
