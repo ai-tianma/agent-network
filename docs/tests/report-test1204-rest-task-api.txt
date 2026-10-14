@@ -8,7 +8,24 @@ Production sender authentication, runtime, schemas and credentials are unchanged
 
 Original evidence: QA run 38509084234 / job 115673685747 failed with HTTP 403
 when the restTaskUser utok supplied from=qa-probe. The sender contract correctly
-rejects that mismatch. Dedicated Docker result is pending before main integration.
+rejects that mismatch.
+
+Verified result (2026-10-14): source PR2725 head
+0d44b01f9b7594e809b7b20e26f4ef15c0e8609d normally merged at 04:28:29Z to main
+fe2012ced9406b29d968e3bd34b75a85f86ab1d3. The source head is a verified main
+ancestor. All ten protected required checks and the dedicated REST Docker job
+passed before merge. Workflow 38511414245 / job 115680549212 SUCCESS;
+downloaded artifact 11869574291 independently read: Status PASS, all eight
+listed contracts, including real authenticated sender/forged sender 403 and
+bound node reply -> replied/result/completed_at. Recorded CI merge input:
+09969b88f37a256d7a354cfd23a004e128183994. The fixture runs non-root/network-none.
+
+Broad QA source run 38511414068 and main duplicate 38511568136 were cancelled
+after the affected isolated Docker contract and required gates passed; neither
+is recorded as whole-matrix success. No other owner's workflow was cancelled.
+Previous #1201 Server 225/225 files and desktop 42 tests remain separate evidence,
+not tests rerun for this fixture change. No local production test, package release,
+runtime upgrade, real node restart or physical acceptance occurred.
 
 Rebuild: .github/workflows/rest-task-api-core.yml builds the fixture from checkout
 using the digest-pinned Bun 1.3.14 image and server/package-lock.json; runs with
