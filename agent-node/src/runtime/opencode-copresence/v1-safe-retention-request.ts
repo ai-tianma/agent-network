@@ -74,8 +74,9 @@ export function revalidateV1SafeRetentionRequest(observation: V1SafeRetentionReq
   options: ObserveV1SafeRetentionRequestOptions): V1SafeRetentionRequestObservation {
   try {
     validateId(options);
-    if (issued.get(observation) !== observation.requestSha256 || observation.requestId !== options.requestId
-      || digest(options.requestId, binding(options)) !== observation.requestSha256) refuse();
+    const expected = issued.get(observation);
+    if (!expected || expected !== observation.requestSha256 || observation.requestId !== options.requestId
+      || digest(options.requestId, binding(options)) !== expected) refuse();
     return observation;
   } catch { return refuse(); }
 }
