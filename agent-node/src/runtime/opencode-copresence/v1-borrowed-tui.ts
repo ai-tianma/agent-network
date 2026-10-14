@@ -14,7 +14,11 @@ import { readStartTicks } from "./attach-tui";
 
 export const BORROWED_TUI_CAPABILITY = "ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1";
 export const BORROWED_TUI_RECORD = "opencode-borrowed-v1-tui.json";
-function refuse(reason: string): never { throw new Error(`OpenCode V1 borrowed TUI refused: ${reason}`); }
+class BorrowedV1TuiError extends Error {}
+function refuse(reason: string): never { throw new BorrowedV1TuiError(`OpenCode V1 borrowed TUI refused: ${reason}`); }
+export function borrowedTuiFailure(error: unknown): string {
+  return error instanceof BorrowedV1TuiError ? error.message : "OpenCode V1 borrowed TUI refused: inspect original bridge/Host/session/model/lease or TUI ownership; no fallback";
+}
 
 /** Read-only admission to the already-live node's cooperative lease. No second
  * MCP registration, config rewrite, Host start/stop or session create/fork. */
@@ -56,14 +60,14 @@ async function prepare(configPath: string) {
       if (requireIdle) {
         const states = await read("/session/status");
         if (!states || typeof states!=="object" || Array.isArray(states)
-          || (states[admission.expectedBinding.sessionId]?.type ?? "idle")!=="idle") refuse("session busy/retrying/unknown");
+          || (Object.hasOwn(states,admission.expectedBinding.sessionId) && states[admission.expectedBinding.sessionId]?.type!=="idle")) refuse("session busy/retrying/unknown");
       }
       selection!.readBinding();
       loadV1HostRegistry(admission.hostRoot,admission.expectedHost,admission.attestation);
       if (!inspectBorrowedLaunchHealth(configPath,0,launch.nonce).ok
         || !readPrivateV1HostFile(lockPath,uid,16384).equals(lockBytes)
         || !readPrivateV1HostFile(config,uid,1024*1024).equals(projectBytes)) refuse("authority changed during read");
-    } catch { refuse("selected bridge/Host/session/model/MCP is not ready; retain original state"); }
+    } catch (error) { if (error instanceof BorrowedV1TuiError) throw error; refuse("selected bridge/Host/session/model/MCP is not ready; retain original state"); }
   }
   await verify(true);
   return { selected, admission, server:original, verify, stateRoot, launch };

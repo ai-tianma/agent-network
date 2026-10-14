@@ -425,11 +425,13 @@ if (argv.includes("--opencode-borrowed-attach")) {
     console.error("OpenCode V1 borrowed TUI refused: only the original absolute private config is accepted");
     process.exit(1);
   }
+  let failure: ((error: unknown)=>string) | undefined;
   try {
-    const {runBorrowedV1Tui}=await import("./runtime/opencode-copresence/v1-borrowed-tui");
+    const {runBorrowedV1Tui,borrowedTuiFailure}=await import("./runtime/opencode-copresence/v1-borrowed-tui");
+    failure=borrowedTuiFailure;
     process.exit(await runBorrowedV1Tui(argv[1]));
-  } catch {
-    console.error("OpenCode V1 borrowed TUI refused: inspect original bridge/Host/session/model/lease or TUI ownership; no fallback");
+  } catch (error) {
+    console.error(failure?.(error) ?? "OpenCode V1 borrowed TUI refused: selected runtime unavailable; no fallback");
     process.exit(1);
   }
 }
