@@ -75,7 +75,11 @@ try{
     if(url.startsWith(host!.server.url)&&init.method==="POST"&&url.endsWith("/message")){
       const b=JSON.parse(init.body??"{}");if(b.messageID)writes.push({session:url,id:b.messageID});
     }
-    const injected=await fault?.(url,init);return injected??nativeFetch(input,init);
+    const injected=await fault?.(url,init);const response=injected??await nativeFetch(input,init);
+    if(url===`${host!.server.url}/session/${infos[7].id}/message`&&init.method!=="POST"&&response.ok){
+      const snapshot:any=await response.clone().json();console.log("NATIVE_OWN_HISTORY",JSON.stringify(snapshot.map((m:any)=>({id:m.info.id,role:m.info.role,parentID:m.info.parentID,time:m.info.time,finish:m.info.finish,error:m.info.error}))));
+    }
+    return response;
   }) as typeof fetch;
   const busy=async(i:number)=>{for(let j=0;j<200;j++){if((await request("/session/status",projects[i]))[infos[i].id]?.type==="busy")return;await Bun.sleep(10);}throw Error(`no actual busy session ${i}`);};
   const history=(i:number)=>request(`/session/${infos[i].id}/message`,projects[i]);
@@ -92,13 +96,14 @@ try{
   pass("native FIFO and exact parentID ownership with simultaneous scoped sibling reply");
   const own=await entry(7);handles.push(own);const a0=aborts.length;
   const ownError=await timeoutError(own.submit("Reply with exactly HOLD_NATIVE_1219_OWN",10000));
+  console.log("OWN_DEADLINE_EVIDENCE",JSON.stringify({phase:ownError.phase,aborted:ownError.aborted,aborts:aborts.slice(a0)}));
   assert.equal(ownError.phase,"reply");assert.equal(ownError.aborted,true);assert.deepEqual(aborts.slice(a0),[`${host.server.url}/session/${infos[7].id}/abort`]);await idle(7);
   assert.equal(own.isRunning,true);assert.equal((await own.submit("Reply with exactly AFTER_OWN_ABORT",20000)).replyText,"AFTER_OWN_ABORT");await own.close();
   pass("actual landed own native turn deadline sends only exact own abort and runtime remains reusable");
-  const notLanded=await entry(2);handles.push(notLanded);const a1=aborts.length;
-  fault=async(url,init)=>{if(runtimePost(url,init,2)){await new Promise(resolve=>init.signal.addEventListener("abort",resolve,{once:true}));throw new DOMException("injected transport did not deliver POST","TimeoutError");}};
-  const absent=await timeoutError(notLanded.submit("MUST_NOT_LAND",500));fault=undefined;
-  assert.equal(absent.phase,"admission");assert.equal(absent.aborted,false);assert.equal((await history(2)).length,0);assert.equal(aborts.length,a1);assert.equal(notLanded.isRunning,true);
+  const notLanded=await entry(2);handles.push(notLanded);const a1=aborts.length;let omitted=false;
+  fault=async(url,init)=>{if(runtimePost(url,init,2)){omitted=true;await new Promise(resolve=>init.signal.addEventListener("abort",resolve,{once:true}));throw new DOMException("injected transport did not deliver POST","TimeoutError");}};
+  const absent=await timeoutError(notLanded.submit("MUST_NOT_LAND",10000));fault=undefined;
+  assert.equal(omitted,true);assert.equal(absent.phase,"admission");assert.equal(absent.aborted,false);assert.equal((await history(2)).length,0);assert.equal(aborts.length,a1);assert.equal(notLanded.isRunning,true);
   assert.equal((await notLanded.submit("Reply with exactly AFTER_NOT_LANDED",20000)).replyText,"AFTER_NOT_LANDED");await notLanded.close();
   pass("injected undelivered POST deadline uses actual empty native history, no abort and no unknown lockout");
   const unread=await entry(3);handles.push(unread);let unreadSignal:AbortSignal|undefined;const a2=aborts.length;
