@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes, createHash } from "node:crypto";
 import { buildOpencodeDefaultPermissionPolicy, buildOpencodeDefaultToolsPolicy, OPENCODE_DEFAULT_DISABLED_TOOLS } from "/repo/agent-node/src/shared/opencode-preset";
 import { importV1Checkpoint, verifyV1ImportedHistory, type V1Checkpoint } from "/repo/agent-node/src/runtime/opencode-copresence/v1-checkpoint";
 
@@ -30,6 +29,8 @@ const fixtures = ["A","B"].map(node => Bun.serve({hostname:"127.0.0.1",port:0,as
   return Response.json({jsonrpc:"2.0",id:b.id,result},{headers:{"mcp-session-id":`fixture1194-${node}`}});
 }}));
 const model=spawn("python3",["/fixture/model.py",join(root,"model.jsonl")],{stdio:["ignore","ignore","pipe"]});
+let modelLog="";
+model.stderr?.on("data",(b:Buffer)=>{modelLog=(modelLog+b.toString()).slice(-2000);});
 let server: ChildProcess|undefined, serverLog="";
 const environments: NodeJS.ProcessEnv[]=[];
 const tmux=(args:string[])=>execFileSync("tmux",["-S",socket,...args],{encoding:"utf8",env:{...process.env,TMUX:undefined,TMUX_PANE:undefined},timeout:5000});
@@ -136,7 +137,7 @@ try{
   assert.equal(reply(await turn(projects[0],sessions[0],"Reply with exactly ROLLBACK_CONTINUES","alpha")),"ROLLBACK_CONTINUES");
   pass("scratch restored session accepts a new synthetic turn");
   console.log(JSON.stringify({kind:"TEST-ONLY",source:process.env.SOURCE_COMMIT,version,checks,observations,scope:"raw native feasibility; not shipped node bridge, production auth/model or migration"}));
-}catch(error){console.error("FAIL phase:",checks.at(-1)??"environment",error);console.error("fixture-only native startup tail:",serverLog);process.exitCode=1;
+}catch(error){console.error("FAIL phase:",checks.at(-1)??"environment",error);console.error("fixture-only native/model startup tail:",serverLog,modelLog);process.exitCode=1;
 }finally{
   for(const i of [0,1])try{tmux(["kill-session","-t",`=fixture${i}`]);}catch{}
   await stop();for(const fixture of fixtures)fixture.stop(true);model.kill("SIGTERM");

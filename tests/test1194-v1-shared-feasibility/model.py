@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json, re, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-LOG = sys.argv[2]
+LOG = sys.argv[1]
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
