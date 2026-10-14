@@ -79,7 +79,12 @@ async function prepare(configPath: string) {
  * abort is issued, so closing the terminal does not cancel a human Host turn. */
 export async function runBorrowedV1Tui(configPath: string): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) refuse("an interactive terminal is required");
-  const p = await prepare(configPath), nonce = randomUUID(), path = join(p.stateRoot,BORROWED_TUI_RECORD);
+  const path = join(dirname(configPath),BORROWED_TUI_RECORD);
+  // Known/unknown terminal ownership refuses before native probes and reads.
+  // The exclusive create below still handles a concurrent first attach.
+  try { lstatSync(path); refuse("existing or unknown TUI record; retain its Owner's terminal"); }
+  catch (error: any) { if (error?.code!=="ENOENT") { if(error instanceof BorrowedV1TuiError)throw error; refuse("TUI ownership unreadable; retain original state"); } }
+  const p = await prepare(configPath), nonce = randomUUID();
   const base = {schema:1,nonce,mode:"borrowed-v1",binding:p.admission.expectedBinding,model:p.selected.model,
     bridge:p.launch.bridge,wrapper:{pid:process.pid,ticks:readStartTicks(process.pid)}};
   // Exclusive cooperative ownership; stale/unknown records require Owner
