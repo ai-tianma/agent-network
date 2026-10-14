@@ -76,6 +76,12 @@ pre-switch checkpoint is insufficient after new shared turns.
    identities/logins, provider credentials or leases. Actual encrypted backup
    location, retention and restore permission remain the original Owner's input.
 
-Qualification is pending until actual dual-native Actions artifacts and source
-main are recorded. Only isolated synthetic identities/config/credentials are
+Qualification is recorded in `docs/tests/report-test1245-v1-migration-plan.txt`:
+PR #2752 ordinary main `5ec1f0d385f60251cb2c1735c78ab2c11ba339b9`, exact CI
+tree equality, both native versions (14 inherited unit and six native checks
+each), complete Node unit and Docker E2E. The four necessary sender fixture
+corrections pass their baseline/mutation gates. The separate existing
+launch-window report gate remains red and three broad jobs were cancelled;
+this is not an all-QA PASS. Qualification is limited to the explicit owned core
+API topology above. Only isolated synthetic identities/config/credentials are
 used. No original machine or live production data is read or migrated.
