@@ -1,0 +1,3 @@
+TEST-ONLY #1226 launcher readiness first slice
+Status: qualification pending. Source/fixture implemented; exact CI IDs and conclusions will be appended only after observed runs.
+Scope: actual built anet + agent-node, dual pinned native, synthetic Hub/model, private tmux lifecycle sentinels; no interactive native TUI or original-machine adoption.
