@@ -131,3 +131,14 @@ can run; deleting an unknown marker/lease is not rollback. Original Host data,
 native session history and lease/checkpoint backups require their established
 private data backups; cloning Git does not recreate them. Full migration,
 interactive TUI attach and original-device recovery remain unqualified gates.
+
+
+The #1226 first slice is qualified at ordinary source main
+`97fc2e3b61e148824b75c46d260cb77715dd0846`, with exact CI/main tree
+`d4e4e0573a38be4d9cac1d8b9a677286f8436940`. See
+[the six actual launcher gates and retained failures](../tests/report-test1226-v1-borrowed-launch.txt).
+Both accepted native versions passed, including actual daemon completion and
+normal own-node stop. The private tmux tests use lifecycle sentinels; they do
+not qualify native interactive attach. No published pair or original-machine
+adoption is implied by this source-main result. Both precise source builds must
+precede any explicit borrowed selection on an original Owner's environment.
