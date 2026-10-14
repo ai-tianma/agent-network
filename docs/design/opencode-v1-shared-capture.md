@@ -49,8 +49,9 @@ distinct scratch Host is started and closed; no binding is changed.
 2. Existing loopback Host and scoped proxy ports remain registry-owned. No
    reverse proxy, tunnel, external listener or production mapping changes.
 3. The selected Host password comes from its original private registry/password
-   file; original Hub/provider/node credentials are never copied into the
-   envelope. Synthetic model credentials in Docker do not qualify real login.
+   file; this API does not read original Hub/provider/node credential stores.
+   Historical message content remains private backup data. Synthetic model
+   credentials in Docker do not qualify real login.
 4. Upgrade requires matching exact main source builds and measured native
    readback. This primitive is not exposed by an older or current published CLI.
    No installer or npm version is released by this change.

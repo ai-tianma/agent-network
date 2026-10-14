@@ -53,10 +53,10 @@ function validateCandidate(value: V1SharedCandidate, selected: V1SharedCaptureSe
   if (Object.keys(value.binding).some(key => !["networkId", "nodeId", "serverIdentity", "directory", "sessionId"].includes(key))) refuse();
   validateV1SessionData(value.data, selected.binding.sessionId);
   if (value.data.info.directory !== selected.binding.directory || value.dataSha256 !== digest(value.data)) refuse();
-  const ids = new Set(value.data.messages.map(message => message.info.id));
+  const users = new Set(value.data.messages.filter(message => message.info.role === "user").map(message => message.info.id));
   for (const message of value.data.messages) {
     if (!["user", "assistant"].includes(message.info.role)
-      || (message.info.role === "assistant" && (!ids.has(message.info.parentID) || !message.info.time?.completed))) refuse();
+      || (message.info.role === "assistant" && (!users.has(message.info.parentID) || !message.info.time?.completed))) refuse();
   }
 }
 
@@ -97,6 +97,7 @@ export async function captureV1SharedCandidate(options: CaptureV1SharedOptions):
     }
     const first = await sample(), second = await sample();
     if (!isDeepStrictEqual(first, second)) refuse();
+    if ((await read("/config"))?.model !== model) refuse();
     authority();
     const value: V1SharedCandidate = { schema: 1, purpose: "migration-candidate", cleanShutdown: false,
       binding, version: host.version, cohortId: selectedCohortId, model,

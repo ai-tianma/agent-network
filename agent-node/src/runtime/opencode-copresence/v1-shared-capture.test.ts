@@ -53,6 +53,7 @@ test("changed bytes, external files, unfinished/orphan replies and final masquer
       (v: any) => { v.data.messages[0].parts[0] = { ...v.data.messages[0].parts[0], type: "file", url: "file:///private/real" }; },
       (v: any) => { delete v.data.messages[1].info.time.completed; },
       (v: any) => { v.data.messages[1].info.parentID = "msg_missing"; },
+      (v: any) => { v.data.messages[1].info.parentID = "msg_reply"; },
       (v: any) => { v.binding.token = "synthetic-extra-field"; },
     ]) {
       const value = structuredClone(f.value); alter(value);
