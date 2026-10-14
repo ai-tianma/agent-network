@@ -85,7 +85,7 @@ try{
   assert.ok(answers[0].replyText.includes("NODE_A"));assert.ok(answers[1].replyText.includes("NODE_A"));assert.ok(answers[2].replyText.includes("NODE_B"));
   const h0=await request(`/session/${infos[0].id}/message`,projects[0]);const users=h0.filter((m:any)=>m.info.role==="user");assert.equal(users.length,2);assert.ok(users[0].parts[0].text.includes("first"));assert.ok(users[1].parts[0].text.includes("second"));assert.ok(users.every((m:any)=>m.parts[0].text.includes("sender A")));
   pass("real native prompts use scoped original MCP and explicit model; same-node FIFO, concurrent sibling and sender provenance verified");
-  const before=await countUsers(0);saved[0]={...bindings[0],networkId:"foreign"};await assert.rejects(handles[0].submit("MUST_NOT_POST",100));saved[0]={...bindings[0]};assert.equal(await countUsers(0),before);
+  const before=await countUsers(0);saved[0]={...bindings[0],networkId:"foreign"};await assert.rejects(handles[0].submit("MUST_NOT_POST",0));saved[0]={...bindings[0]};assert.equal(await countUsers(0),before);
   await assert.rejects(handles[0].notify("no broadcast"),/not enabled/);
   pass("changed saved binding cannot POST; borrowed notification has no global toast fallback");
   const human=request(`/session/${infos[0].id}/message`,projects[0],"POST",{model:{providerID:"fixture",modelID:"alpha"},parts:[{type:"text",text:"Reply with exactly HOLD_ADMISSION_1214"}]});

@@ -494,12 +494,14 @@ async function waitUntilSessionIdle(
           try {
             const session = await request(`/session/${sessionId}`, {}, 2_000);
             if (session?.id === sessionId) return;
-          } catch {
+          } catch (error: any) {
+            if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
             // Keep waiting: missing session is not evidence of idle.
           }
         }
       }
-    } catch {
+    } catch (error: any) {
+      if (String(error?.code ?? "").startsWith("opencode_v1_") && String(error.code).endsWith("_refused")) throw error;
       // A transient status failure is also not evidence of idle.
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
