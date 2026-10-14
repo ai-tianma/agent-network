@@ -2475,6 +2475,20 @@ if (RUNTIME === "opencode" && opencodeMode !== "headless" && opencodeMode !== "c
   console.error(`[${ALIAS}] invalid opencodeMode=${JSON.stringify(opencodeMode)}; expected headless or copresence`);
   process.exit(1);
 }
+// #1224 — explicit private selection; default owned startup is unchanged.
+const { selectV1BorrowedCli } = await import("./runtime/opencode-copresence/v1-borrowed-cli");
+let opencodeBorrowedCli: ReturnType<typeof selectV1BorrowedCli> = null;
+try {
+  opencodeBorrowedCli = selectV1BorrowedCli(fileConfig.opencodeBorrowedV1, {
+    runtime: RUNTIME, generation: OPENCODE_GENERATION, mode: opencodeMode, configFile: configFilePath,
+    networkId: NETWORK_ID, nodeId: NODE_ID || "", alias: ALIAS, cwd: process.cwd(), stateRoot: NODE_DIR,
+    model: MODEL, sessionId: opencodeSessionId, newSession: NEW_SESSION,
+    unsafeTools: fileConfig.flags?.opencodeUnsafeTools === true,
+  });
+} catch (error: any) {
+  console.error(`[${ALIAS}] ${error?.message ?? "borrowed V1 selection refused"}`);
+  process.exit(1);
+}
 // #543 — OpenCode V2 is a co-presence-only preview that runs only with
 // flags.opencodeUnsafeTools=true (it ignores the V1 safety env). One line, exit.
 if (RUNTIME === "opencode" && OPENCODE_GENERATION === "v2") {
@@ -4160,8 +4174,14 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
   import("./runtime/opencode-copresence/runtime").OpenCodeCopresenceSession
 > {
   if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+  if (opencodeBorrowedCli && opencodeCopresenceSession) {
+    throw new Error("Borrowed V1 runtime unavailable; retain original binding/recovery, no automatic reopen");
+  }
   return opencodeCopresenceOpening.run(async () => {
     if (opencodeCopresenceSession?.isRunning) return opencodeCopresenceSession;
+    if (opencodeBorrowedCli && opencodeCopresenceSession) {
+      throw new Error("Borrowed V1 runtime unavailable; retain original binding/recovery, no automatic reopen");
+    }
     if (opencodeCopresenceSession) {
       await opencodeCopresenceSession.close().catch((error: any) => {
         warn(`[opencode-copresence] stale runtime cleanup failed: ${error?.message ?? error}`);
@@ -4171,6 +4191,11 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     const { openOpenCodeCopresenceRuntime } =
       await import("./runtime/opencode-copresence/runtime");
     const { opencodeBackendFor } = await import("./runtime/opencode-backend");
+    const borrowed = opencodeBorrowedCli
+      ? (await import("./runtime/opencode-copresence/v1-borrowed-cli")).borrowedV1CliAdmission(opencodeBorrowedCli, {
+          hubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, hubToken: AUTH_TOKEN,
+          binary: INITIAL_OPENCODE_BIN, binarySearchPath: INITIAL_LAUNCH_PATH, expectedVersion: INITIAL_OPENCODE_VERSION,
+        }) : undefined;
     const opened = await openOpenCodeCopresenceRuntime({
       // #543 — V1 nodes pass the V1 backend, i.e. exactly the pre-#543 default.
       backend: opencodeBackendFor(OPENCODE_GENERATION ?? "v1"),
@@ -4182,17 +4207,17 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       expectedVersion: INITIAL_OPENCODE_VERSION,
       binarySearchPath: INITIAL_LAUNCH_PATH,
       title: `${ALIAS} · Agent Network shared TUI`,
-      checkpoint: (OPENCODE_GENERATION ?? "v1") === "v1" && NODE_ID && NETWORK_ID
+      checkpoint: !borrowed && (OPENCODE_GENERATION ?? "v1") === "v1" && NODE_ID && NETWORK_ID
         ? { nodeId: NODE_ID, networkId: NETWORK_ID } : undefined,
       sessionId: opencodeSessionId,
       newSession: NEW_SESSION,
-      commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`,
-      commhubToken: AUTH_TOKEN,
-      commhubAlias: ALIAS,
-      providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+      ...(borrowed ? { borrowedV1: borrowed } : {
+        commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, commhubToken: AUTH_TOKEN, commhubAlias: ALIAS,
+        providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+      }),
       onSession: async (id) => {
         opencodeSessionId = id;
-        writebackSession(id);
+        if (!borrowed) writebackSession(id);
       },
       log,
       warn,
@@ -4202,7 +4227,7 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       throw new Error("OpenCode copresence server exited while opening");
     }
     opencodeCopresenceSession = opened;
-    log(`[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
+    log(borrowed ? "[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner" : `[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
     return opened;
   });
 }
@@ -4217,7 +4242,7 @@ async function closeOpencodeRuntime(reason: string): Promise<void> {
     });
   }
   if (opencodeCopresenceSession) {
-    log(`[opencode-copresence] stopping shared server (${reason})`);
+    log(opencodeBorrowedCli ? `[opencode-copresence] closing only borrowed node (${reason})` : `[opencode-copresence] stopping shared server (${reason})`);
     // #1957 — a config restart keeps the human's tmux pane alive (placeholder)
     // so the re-spawned generation can put the new launcher back into it.
     const restart = reason.startsWith("config restart");

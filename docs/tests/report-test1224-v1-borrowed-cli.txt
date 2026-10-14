@@ -1,0 +1,11 @@
+TEST-ONLY #1224 built CLI explicit borrowed V1 gate
+Status CI_PENDING. No native PASS or main/adoption claim yet.
+Source: independent main-based branch; exact source asserted by Docker.
+Both pinned native versions1.18.1/1.18.34, pinned Bun1.3.14/SRI, non-root network-none, synthetic Hub/model.
+Actual built CLI refusals; config→inbox→native model/MCP→original task reply; FIFO/parent IDs; config byte preservation; node close and Host/sibling survival; persisted intent/no owned fallback/exact restart; in-flight config drift/no automatic reopen.
+Owned spawn/runtime/ownership and private selection unit regressions follow only after native CLI gate passes.
+No production app/credentials adoption, interactive TUI/normal launcher health completion or #1196 full migration qualification. Versioned contract and six restore questions: docs/design/opencode-v1-borrowed-cli.md.
+
+Initial a2f7a585b/typecheck run38542754830/job115781295948 RED: two new TS2345 diagnostics at new CLI selection UID validation, caused by control-flow narrowing through arrow never helper. Converted to explicit never function declaration, retaining runtime validation; original ratchet baseline unchanged, rerun pending. Native built CLI first matrix still running.
+Initial native run38542755012/jobs115781297335,115781297445: actual built CLI refusals and dual-node inbox→native→original reply/FIFO/parent/config preservation PASS; A close/Host checks passed before fixture SSE doorbell failed because Bun default10s idle timeout closed controller. Synthetic Hub now explicitly idleTimeout0 and removes cancelled SSE controllers; original sibling/Host/reply assertions retained. This is fixture lifecycle failure, not a proven native product failure; rerun pending.
+253a2f6fc/run38543427043/jobs115783506174,115783506021 RED after real task-chain PASS: sibling task was queued but fixture sent informational new_message event; actual co-presence CLI correctly schedules only informational drain for this event. Fixture now uses actual task doorbell new_task for model work; production event handling unchanged, original task reply/sibling assertions retained.
