@@ -44,6 +44,8 @@ export interface OpenV1ScopedMcpOptions {
   readonly hubToken: string;
   /** Existing private per-node state directory, separate from the project. */
   readonly stateRoot: string;
+  /** Borrowed admission uses an unpredictable name in this reserved V1 flat namespace. */
+  readonly registrationName?: string;
 }
 
 /** Separate from the Node runtime seam: no spawn, Host stop, session mutation,
@@ -52,6 +54,8 @@ export interface OpenV1ScopedMcpOptions {
  * binding, not proof of which human/agent turn issued an upstream tool call. */
 export async function openV1ScopedCommhubMcp(options: OpenV1ScopedMcpOptions) {
   const binding = Object.freeze({ ...options.expected });
+  const registrationName = options.registrationName ?? "commhub";
+  if (!/^(commhub|commhub_[a-f0-9]{32})$/.test(registrationName)) refuse("invalid scoped registration name");
   validateV1SharedBinding(binding, options.readBinding());
   const initialServer = Object.freeze({ ...options.readServer() });
   createV1SharedReadClient(initialServer, binding, binding);
@@ -73,7 +77,8 @@ export async function openV1ScopedCommhubMcp(options: OpenV1ScopedMcpOptions) {
   let config: any;
   try { config = original ? JSON.parse(original.toString("utf8")) : {}; } catch { return refuse("project config is not plain JSON; preserve it"); }
   if (!object(config) || (config.mcp !== undefined && !object(config.mcp))
-    || config.mcp?.commhub !== undefined || config.mcp?.servers !== undefined) refuse("existing or non-V1 CommHub MCP config; preserve it");
+    || Object.keys(config.mcp ?? {}).some(name => name === "commhub" || name.startsWith("commhub_"))
+    || config.mcp?.servers !== undefined) refuse("existing or non-V1 CommHub MCP config; preserve it");
   if ((config.tools !== undefined && !object(config.tools)) || (config.permission !== undefined && !object(config.permission))
     || (config.instructions !== undefined && !Array.isArray(config.instructions))) refuse("unsupported project policy/instructions; preserve it");
   if (config.permission?.["*"] === "deny") refuse("project wildcard denies MCP; explicit policy selection required");
@@ -148,10 +153,16 @@ export async function openV1ScopedCommhubMcp(options: OpenV1ScopedMcpOptions) {
     outgoing.once("close", () => target.destroy()); target.end(body);
   });
   let closePromise: Promise<void> | undefined;
-  async function close() {
-    return closePromise ??= (async () => {
+  let revokePromise: Promise<void> | undefined;
+  function revoke(): Promise<void> {
+    return revokePromise ??= (async () => {
       active = false; for (const request of pending) request.destroy();
       await new Promise<void>(resolve => { proxy.close(() => resolve()); proxy.closeAllConnections(); });
+    })();
+  }
+  async function close() {
+    return closePromise ??= (async () => {
+      await revoke();
       if (installed && !same(installed)) refuse("edited config retained with recovery files; capability revoked");
       if (!same(lock) || (backup && !same(backup)) || (instructions && !same(instructions))) refuse("edited recovery files retained; capability revoked");
       if (installed) {
@@ -171,7 +182,7 @@ export async function openV1ScopedCommhubMcp(options: OpenV1ScopedMcpOptions) {
     const address = proxy.address(); if (!address || typeof address === "string") refuse("loopback proxy bind failed");
     const url = `http://127.0.0.1:${address.port}/mcp`;
     const mcpConfig = Object.freeze({ type: "remote", url, enabled: true, oauth: false, headers: Object.freeze({ Authorization: authorization.toString() }) });
-    config.mcp = { ...(config.mcp ?? {}), commhub: mcpConfig };
+    config.mcp = { ...(config.mcp ?? {}), [registrationName]: mcpConfig };
     config.tools = { ...(config.tools ?? {}), "commhub_*": true };
     config.permission = { ...(config.permission ?? {}), "commhub_*": "allow" };
     config.instructions = [...(config.instructions ?? []), instructionPath];
@@ -184,6 +195,6 @@ export async function openV1ScopedCommhubMcp(options: OpenV1ScopedMcpOptions) {
       try { put(configPath, staged.bytes); } finally { remove(staged); }
     }
     const stat = lstatSync(configPath); installed = { path: configPath, dev: stat.dev, ino: stat.ino, bytes: staged.bytes };
-    return Object.freeze({ url, mcpConfig, binding, close });
+    return Object.freeze({ url, mcpConfig, binding, registrationName, verify: checkScope, revoke, close });
   } catch (error) { await close(); throw error; }
 }
