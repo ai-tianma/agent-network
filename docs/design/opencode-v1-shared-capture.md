@@ -45,7 +45,9 @@ distinct scratch Host is started and closed; no binding is changed.
    `deploy/node/opencode-v1-host/start.ts`. The new independent Docker suite is
    `tests/test1236-v1-shared-capture`, pinned to both accepted native SRIs from
    `tests/test1194-v1-shared-feasibility/package-integrity.json` and source SHA.
-   Qualification is pending until its actual Actions artifact is recorded.
+   Source main a9c147cffd1da212573b4c8f8d21c2c336b4f9a9 is qualified:
+   both native versions pass 14 unit checks and six native gates. Exact
+   provenance and limits: [test1236 report](../tests/report-test1236-v1-shared-capture.txt).
 2. Existing loopback Host and scoped proxy ports remain registry-owned. No
    reverse proxy, tunnel, external listener or production mapping changes.
 3. The selected Host password comes from its original private registry/password
