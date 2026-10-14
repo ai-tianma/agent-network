@@ -126,3 +126,26 @@ or initiating-turn attestation, and admission/close checks are not atomic
 exclusion against a human TUI racing the bridge. Real credential isolation
 and original Owner migration/window need their own authority and evidence.
 Unknown writes/leases retain recovery; no restart, takeover or replay follows.
+
+LATE FULL E2E RECEIPT — not a green global baseline
+Final source standalone checks: 49 SUCCESS, 1 FAILURE (e2e).
+Run 38525948785 / job 115726204725 ended 2026-10-14T07:16:09Z;
+root's final follow-up inspection observed this at 07:24:22Z, after the
+normal scheduler reply. Do not backdate or overwrite that original reply.
+Actual broad legacy E2E: 242 pass / 39 fail. Base 102/32, Networks 22/5,
+Loop runtime 20/1, Loop self-management 45/1; other three groups green.
+Known traces: user netuser_a versus requested sender tester, and m4-tester
+versus m4-harness, refused as from_session_identity_mismatch. Channel /loop
+also lacked goals.json; inspect full artifacts before attributing all 39
+failures to one cause. No exact baseline replay was run, and complete causal
+qualification remains open; this is not evidence of a green full product.
+Diff 0db346e64944229488c7b653de96656b2585824d..362fd1745c63cd4622429da9f78256685927d86a
+confirms no change to server/, agent-network/, the four legacy E2E harnesses,
+tests/Dockerfile or .github/workflows/e2e-docker.yml. These old sender fields
+remain in the fixtures; the known failures do not exercise the borrowed API.
+The 14 directly scoped V1 Docker results above remain SUCCESS, not a global
+E2E PASS claim. #1204 qualified only its separate narrow REST fixture.
+New CommHub #1221 tracks all legacy E2E differences, preserving production
+identity/ACL guards, spoofing rejection and original assertions. Next work
+prioritizes #1221, then resumes #1219. No production change, replay, real
+credential access or new package release followed this late observation.
