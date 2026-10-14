@@ -14662,9 +14662,8 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 // RFC-029 — OpenCode lifecycle and pin-management commands.
 async function opencodeBorrowedAttachCommand(ref?: string) {
   if (!ref) throw new Error("Usage: anet opencode attach <node>");
-  // The ordinary profile resolver repairs permissions (even a 0600 chmod
-  // changes ctime), invalidating the live bridge's frozen config evidence.
-  // This entry only reads explicit private borrowed selections; no repair or
+  // The ordinary profile resolver can repair permissions and normalize from
+  // global defaults. This entry only reads explicit private selections; no repair or
   // global profile/token fallback, and ambiguous names never select first.
   const ids=listProfileIds(), candidates=ids.includes(ref) ? [ref] : ids;
   const matches=candidates.flatMap(id=>{

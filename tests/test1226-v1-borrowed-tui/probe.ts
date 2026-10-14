@@ -146,6 +146,11 @@ try{
     assert.deepEqual(readFileSync(join(states[i],"config.json")),cfgBefore[i]);assert.deepEqual(readFileSync(join(projects[i],"opencode.json")),projectAfter[i]);
   }
   assert.deepEqual(new Set((await request("/session",projects[0])).map((s:any)=>s.id)),sessionIdsBefore);
+  for(let i=0;i<2;i++){
+    const listing=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","ls"],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i]},stdio:"ignore"});
+    await stopped(listing);assert.equal(listing.exitCode,0);assert.equal(inspectBorrowedLaunchHealth(join(states[i],"config.json"),launched[i]).ok,true);
+    assert.equal(record(i).nonce,i===0?ra.nonce:rb.nonce);assert.equal(dead(i===0?"native-A":"native-B"),false);
+  }
   human("native-A","CALL_IDENTITY HUMAN_NATIVE_A");human("native-B","CALL_IDENTITY HUMAN_NATIVE_B");
   for(let i=0;i<2;i++){
     const h=await awaitNative(i,`human native ${i}`,h=>h.some((m:any)=>m.info.role==="assistant"&&m.info.time?.completed&&(m.parts??[]).some((p:any)=>String(p.text??"").includes(`NODE_${i===0?"A":"B"}`))));
