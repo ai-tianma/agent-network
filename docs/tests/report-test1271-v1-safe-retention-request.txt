@@ -92,4 +92,3 @@ Rebuild contract and six recovery questions are in
 docs/design/opencode-v1-safe-retention-request.md. Git restores software, not
 production credentials/DB/history/backups. Real Owner/permission/idle windows,
 encrypted backup key/location/retention and restore evidence remain independent.
-
