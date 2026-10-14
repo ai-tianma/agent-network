@@ -33,6 +33,9 @@ SUCCESS: 225 discovered files, 225 executed, zero failed; registration-password
 floor mutation was assertion RED and the runner ended RESULT: PASS. Source was
 the same b758b24 test merge; log independently read. This completes the full
 server-unit domain, not the entire broad QA matrix or desktop-push build.
+Later the affected test1280-desktop-user-push job115673685542 also completed
+SUCCESS, including its HTTP tests and unchanged prototype production build.
+The remaining broad QA matrix is not included in this completion statement.
 Initial candidate7b49 source tests passed but the fixture cleanup guard failed;
 070 uses tests/lib/safe-rm.sh. The failed guard is retained, not counted PASS.
 No local Docker/runtime tests, production schema/token/data or deployment changes.
