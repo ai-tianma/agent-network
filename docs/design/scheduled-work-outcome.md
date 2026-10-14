@@ -42,11 +42,13 @@ stale generations must not authorize a backoff. History is not cadence authority
 ## Remaining #756 gates
 
 Following source slice [#1278](scheduled-backoff.md) adds opt-in interval counters,
-effective cadence and changed/manual wake. Fresh domain-event wake/reset, UI
-controls and producer/current-software adoption remain incomplete. Once/daily/weekly
-timing, configured intervals and production schedules are untouched. A future
-event contract must distinguish domain changes from this iteration's own
-bookkeeping so it cannot wake itself forever. Failed/expired/skipped/usage-limit
+effective cadence and changed/manual wake. Following source slice
+[#1279](scheduled-requirement-wake.md) qualifies explicitly selected requirement
+creation/status wake. Other domains, UI controls and producer/current-software
+adoption remain incomplete. Once/daily/weekly
+timing, configured intervals and production schedules are untouched. The requirement
+event contract excludes this iteration's own bookkeeping; further domains must
+also avoid self-wake loops. Failed/expired/skipped/usage-limit
 results must never be converted into successful empty runs.
 
 The existing transactional SQLite qualification applies. The new annotation
