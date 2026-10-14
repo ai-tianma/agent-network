@@ -1,23 +1,95 @@
 TEST-ONLY — CommHub #1271, first contract slice of #1269
+Observed 2026-10-14 UTC; no public package or installer release.
 
-Status: implementation submitted for CI; no success result recorded yet.
-Source: the PR's exact source head and actual CI checkout must be recorded
-after the run. This file is not evidence of a completed native test or release.
+SOURCE / ORDINARY MAIN
+PR https://github.com/sleep2agi/agent-network/pull/2760
+Source head c3f4f7e6e7fc138cbbdf7a502f0e85247203b471
+Base 89840ca0af5a20e745fcb709ef6f53001b64ac32
+Ordinary main merge 06ea50b35a279e3ede592461fe9a2efe031969ff
+Merged at 2026-10-14T17:24:00Z (01:24:00+08); no admin/bypass/auto-merge.
+Source head was verified as fresh origin/main ancestor after merge.
+Actual PR CI checkout 5268e96e9aaf74f427cb73c52a2462e7317c4061
+CI/source-head/main-merge tree 9b06b5cbe6b213bc2ceacd7cd465982110beade4
+CI checkout and ordinary main have the exact stated base/source-head parents
+and same tree, independently checked via GitHub git-commit API and git tree.
+This fact update changes only this report.
 
-Independent Docker fixture: tests/test1271-v1-safe-retention-request/
-Workflow: .github/workflows/v1-safe-retention-request.yml
-Matrix: OpenCode 1.18.1 and 1.18.34, package SRI from the existing feasibility
-fixture; Bun 1.3.14 pinned image; npm lockfile; unprivileged, network-none run.
-Inherited SAFE child-env and checkpoint tests run before the native probe.
+INDEPENDENT DOCKER NATIVE E2E — COMPLETE BEFORE SOURCE MERGE
+https://github.com/sleep2agi/agent-network/actions/runs/38605822134
+Run head is the exact source head above, event pull_request, actual checkout
+above (do not confuse its merge SHA with source head/main publication).
+OpenCode 1.18.1 job 115996302967: SUCCESS
+OpenCode 1.18.34 job 115996303294: SUCCESS
+Each version: 25 inherited tests / 0 failed (19 SAFE child-env, 6 checkpoint),
+340 expectations; 6 actual default-native/controlled-negative groups PASS.
+These are not 31 independent native sessions: one empty actual default
+session per version plus inherited unit tests and controlled source changes.
 
-Six intended probe groups: actual default-native unprepared request; unchanged
-recheck versus JSON/copy/foreign module; changed correlation/source/software
-or installation; config/checkpoint byte changes; controlled data inode change;
-normal close still deletes the launch root and rejects the closed request.
-These are empty-session observations, not model/TUI/history-transfer evidence.
+1. Actual default-native empty session/checkpoint and disjoint requested/native
+   paths agree with the named request. State unprepared / active-allocation-only;
+   retention, cleanup participation, durability, custody, credentials cleanup,
+   handoff and commit all false. Config/checkpoint bytes remain unchanged;
+   the synthetic fixture config secret is absent from the observation.
+2. Original observation rechecks across time. JSON reconstruction, shallow copy
+   and a separate query-imported protocol module refuse issuing identity.
+3. Every independent source field, correlation ID, software selection and
+   installation-pin mismatch refuses. Invalid/trailing-newline IDs refuse.
+4. Config/checkpoint byte changes refuse even when semantic identity matches.
+   Fixture-only restoration can permit recheck again; no intervening-write
+   exclusion or history-finality proof is claimed.
+5. Controlled data inode replacement refuses. The API does not repair/adopt;
+   fixture-only original restoration permits observation recheck.
+6. Normal default close deletes the launch/data root; the exact empty session,
+   clean checkpoint, original project and config survive. Original request and
+   a new observation of the closed allocation both refuse. No cleanup exemption.
 
-No marker write, actual retention, cleanup exemption, credential-cleanup
-qualification, writer exclusion, handoff, journal commit, original-node change
-or public package/installer release. #1269/#1238/#1239 remain incomplete.
-Broader known report-only QA failures are tracked independently in #1268;
-the new fixture cannot be described as proof that all repository QA is green.
+EXACT ARTIFACTS — FULLY DOWNLOADED AND READ
+Artifact 11914094942 (1.18.1), ZIP SHA-256
+1f9742dec627d110a9a884059b789e442e4463ea0f20e4f6b2da60e6b8a9613b
+Artifact 11915144429 (1.18.34), ZIP SHA-256
+bc53d5c5274495b9e7193b55ad13bff52a2a67e72c5a5b012f3abc718687f054
+Names TEST-ONLY-v1-safe-retention-request-<version>-<CI-checkout>, files
+report-test1271-1.18.1.txt / report-test1271-1.18.34.txt. SHA-256 matched
+GitHub artifact digests and each complete report was read, including inherited
+test results, all six groups and final TEST-ONLY JSON/source/scope.
+
+Fixture tests/test1271-v1-safe-retention-request/ has its own Dockerfile.
+Workflow .github/workflows/v1-safe-retention-request.yml selects both pins.
+Bun 1.3.14 image is digest-pinned; OpenCode wrapper/native SRI is verified
+against tests/test1194-v1-shared-feasibility/package-integrity.json; npm ci
+uses the repository lock. Unprivileged bun user, --init, --network none.
+No tmux, provider prompt/payment, original login or original-node operation.
+Only disposable fixture directories and synthetic config inputs were used.
+
+ORDINARY GATES / OTHER AUTOMATIC RUNS
+All 10 protected required contexts passed before source merge (strict=false):
+no hardcoded from_session, action-pins, copresence-profile-pin,
+doc-symbol-anchors, home-path-baseline, l1-paths-sync, qa-trigger-coverage,
+no internal [[feedback_*]] slug references, public-script-safety,
+query-token-ratchet. No rule/approval/permission changes were made.
+Typecheck run 38605822415 / job 115996303849: SUCCESS at 81 errors / baseline
+81, actual tsc exit 2; this is the existing ratchet, not a clean tsc claim.
+Full Docker E2E run 38605822566 and broad QA run 38605822451 were still
+in progress at the source-merge check. Do not count waiting as passed or
+backdate later results. The scoped native Docker E2E above already passed.
+Known older report-only L0+L1 failures remain separate #1268. No all-QA-green
+claim; neither server nor those old suites was modified by this source slice.
+
+PRODUCT / RECOVERY LIMITS
+API-only observation/recheck; no automatic production caller, durable marker,
+retention or source cleanup participation, credential-cleanup qualification,
+lease/every-writer exclusion, live native version/model execution proof,
+TUI/history transfer, target/cohort acceptance, config+intent journal commit,
+lossless restore/rollback, or original-node adoption. Requested software SHA
+is a selection, not an installed-version or main-ancestry attestation.
+No marker or user-state writes; runtime auth/cleanup paths were not changed.
+#1269/#1264/#1238/#1196/#1239 remain incomplete. The next independently
+qualified slice must implement actual durable source-owned preparation and
+credentials-aware lifecycle retention, then old/external sweeper and crash/
+unknown/handoff cases. Never infer safe retention from this passing probe.
+
+Rebuild contract and six recovery questions are in
+docs/design/opencode-v1-safe-retention-request.md. Git restores software, not
+production credentials/DB/history/backups. Real Owner/permission/idle windows,
+encrypted backup key/location/retention and restore evidence remain independent.
+
