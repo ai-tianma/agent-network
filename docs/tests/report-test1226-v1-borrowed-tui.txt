@@ -1,0 +1,2 @@
+TEST-ONLY #1226 exact native TUI slice
+Qualification pending. Actual built anet/agent-node/native TUI in private non-root Docker/tmux with synthetic Hub/model and original sessions; no production or original-machine adoption.

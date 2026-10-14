@@ -142,3 +142,48 @@ normal own-node stop. The private tmux tests use lifecycle sentinels; they do
 not qualify native interactive attach. No published pair or original-machine
 adoption is implied by this source-main result. Both precise source builds must
 precede any explicit borrowed selection on an original Owner's environment.
+
+
+## #1226 exact native human attach
+
+`anet opencode attach <node>` is a foreground native V1 TUI entry. An interactive
+terminal, both precise source builds (including the new runtime help capability),
+the existing explicit selection, original project directory and live bridge
+receipt are required. Unknown/old capabilities do not delegate to an unsupported
+CLI. It independently reattests the native binary and selected Host, verifies
+original session/directory, full private binding, original model/built-in policy
+and the existing directory-bound MCP lease/connection. It never registers another
+MCP, rewrites project/node config or creates/forks/adopts a session.
+
+Only the exact native `attach <origin> --session <id> --dir <directory> --pure`
+argv is spawned. The TUI gets new private HOME/XDG roots and the selected Server
+credential, with no inherited node Hub token/provider environment or Host HOME.
+The bridge retains its frozen model/binding; native human UI actions remain
+operator-controlled within the already selected cooperative trust cohort. This
+is not a per-request firewall or hostile same-UID/Server-password isolation.
+Initial attachment is qualified by actual human native model/MCP replies in the
+original sessions, not solely a process record or rendered placeholder.
+
+`opencode-borrowed-v1-tui.json` exclusively records this wrapper/native child
+nonce, PID/birth and original binding/model/bridge. An existing or unknown record
+refuses rather than replacing a human terminal. The guardian rechecks original
+readiness nonce, full config/lease, Host/session/model/policy/MCP; losing them
+signals only this newly spawned native TUI, never aborts a Host turn, stops the
+Host, reopens the node or relaunches a different session. Exiting removes only
+unchanged own nonce/process ownership. Node stop's existing borrowed path still
+skips all alias-based TUI sweeps; this foreground wrapper independently observes
+withdrawn readiness. An uncertain lease/data recovery remains with its Owner.
+
+Reconstruction: entrypoints are the versioned anet CLI and agent-node CLI early
+attach dispatch, with `v1-borrowed-tui.ts` owning the native child. Existing Host
+ports/proxy/tunnel configuration is unchanged. Server credentials come from the
+independently selected original private Host registry/password file; no values
+are in argv, committed files or TUI ownership record. Both exact source builds
+and native qualification precede any original Owner adoption; no published pair
+or Win/macOS result is implied. Software downgrade still requires #1196 migration
+before an old CLI that ignores selection can run. Stale/edited TUI records require
+Owner inspection of exact process identities, not automatic clearing. Existing
+Host databases/history, private node credentials and unknown lease/checkpoint
+backups need their original encrypted private backup/registration sources; Git
+and the disposable TUI HOME do not reproduce that data. Full migration and
+original-machine windows remain separate gates.

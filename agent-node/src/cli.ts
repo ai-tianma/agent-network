@@ -377,6 +377,7 @@ for (let i = 0; i < argv.length; i++) {
 
 选项:
   --config <path>     配置文件 (.anet/nodes/<name>/config.json)
+  --opencode-borrowed-attach <config>  Attach the exact existing borrowed V1 TUI
   --alias <name>      Agent 别名 / CommHub alias (必需)
   --runtime <type>    claude-agent-sdk (default) | codex-sdk | codex-app-server | grok-build-acp | grok-build-cli | opencode-cli
                       (claude-code-cli is NOT here: it runs via \`anet node start\`, not by passing --runtime to agent-node — see the Runtime section)
@@ -401,7 +402,7 @@ Runtime:
   grok-build-cli    Grok Build CLI — headless 或 grokCopresence 共存 TUI 模式
   opencode-cli      opencode CLI — Anthropic/OpenAI vendor preset via ACP
 
-Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
+Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2 ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1
 `);
     process.exit(0);
   }
@@ -417,6 +418,20 @@ Capabilities: ANET_CAPABILITY_GROK_COPRESENCE_V2
 
 function expandHome(path: string): string {
   return path.replace(/^~(?=\/|$)/, home);
+}
+
+if (argv.includes("--opencode-borrowed-attach")) {
+  if (argv.length!==2 || argv[0]!=="--opencode-borrowed-attach" || !isAbsolute(argv[1])) {
+    console.error("OpenCode V1 borrowed TUI refused: only the original absolute private config is accepted");
+    process.exit(1);
+  }
+  try {
+    const {runBorrowedV1Tui}=await import("./runtime/opencode-copresence/v1-borrowed-tui");
+    process.exit(await runBorrowedV1Tui(argv[1]));
+  } catch {
+    console.error("OpenCode V1 borrowed TUI refused: inspect original bridge/Host/session/model/lease or TUI ownership; no fallback");
+    process.exit(1);
+  }
 }
 
 function parseChannelSpec(spec: string): { type: string; path?: string; raw: string } {
