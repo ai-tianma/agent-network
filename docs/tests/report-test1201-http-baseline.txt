@@ -1,0 +1,19 @@
+#1201 HTTP QA baseline corrections, 2026-10-14
+Original observed broad run: 38506584050, jobs115666011746/115666013312.
+Reviewed base main: 5cb8db3d4d2d907d43a7fd47d926cf323fa1df41.
+Legacy heartbeat test inserted NULL into a fresh NOT NULL table. Use a real
+temporary SQL table for historical nullable data and route only the production
+heartbeat SELECT to it, retaining real node/token queries and MCP/REST entry.
+No production schema, resolver, permissions or migration is changed.
+Observer used a human token with an Agent sender alias. Keep strict 403 and
+identity mismatch assertion; actual bound node token dispatches third-party
+traffic, with original observer summary/no-content assertions preserved.
+The due normalization test's failure was its exact capability list, missing
+the shipped tag_status_snapshot field. Date/time normalization and invalid
+inputs remain unchanged; capability list stays an exact full comparison.
+Earlier Hub shorthand 'date filtering extra row' is superseded by this diagnosis.
+TEST-ONLY Docker binds current source and hashes of three exact base Git blobs;
+requires expected baseline assertion failures before corrected full-file runs.
+No local runtime or production tests run. Static source/diff/shell review only.
+Dedicated Docker, SQLite/PostgreSQL identity core and affected aggregate results
+are pending at source submission; actual outcome must be appended in Hub/facts.
