@@ -135,6 +135,9 @@ try{
   // Restore matching bytes changes config metadata: explicit bridge restart is
   // required to issue fresh readiness, never fake the previous receipt.
   await stop(0);const restarted=spawnCli(0);await stopped(restarted);assert.equal(restarted.exitCode,0,logs[0]);
+  // That explicit restart legitimately replaces A's scoped MCP lease/name.
+  // Freeze its new admitted bytes before testing the read-only TUI entry.
+  projectAfter[0]=readFileSync(join(projects[0],"opencode.json"));
   pass("built attach refuses non-TTY and foreign exact-session/private-readiness binding without Host/session mutation; explicit exact bridge restart retains original history");
   term(0,"native-A");term(1,"native-B");const ra=await awaitRecord(0,"native-A"),rb=await awaitRecord(1,"native-B");
   for(const [i,r] of [[0,ra],[1,rb]] as const){
