@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { createServer } from "node:net";
 import { startOwnedV1Host } from "/repo/agent-node/src/runtime/opencode-copresence/v1-host-supervisor";
 import { loadV1HostRegistry } from "/repo/agent-node/src/runtime/opencode-copresence/v1-host-registry";
 import { resolvePinnedOpencodeBinaryAttestation } from "/repo/agent-node/src/runtime/opencode-acp/binary";
@@ -19,6 +20,7 @@ const options = { root: dirs[0], hostId: "fixture-A", cohortId: "fixture", versi
 const checks: string[] = []; const pass = (name: string) => { checks.push(name); console.log(`PASS ${name}`); };
 let a: Awaited<ReturnType<typeof startOwnedV1Host>> | undefined;
 let restarted: typeof a;
+let cancelledEntry: ReturnType<typeof spawn> | undefined;
 const model = spawn("python3", ["/fixture/model.py", join(root, "model.jsonl")], { stdio: ["ignore", "ignore", "ignore"] });
 let bReady: any, bOutput = "";
 const bProcess = spawn("bun", ["/repo/deploy/node/opencode-v1-host/start.ts", "--root", dirs[1], "--binary", binary, "--version", version,
@@ -37,6 +39,21 @@ try {
   const b = loadV1HostRegistry(dirs[1], { hostId: "fixture-B", instanceId: bReady.instanceId, cohortId: "fixture", version }, attestation);
   assert.equal(bReady.pid > 1, true); assert.ok(!("password" in bReady));
   pass("versioned foreground Host entry publishes independent ready identity without password output");
+  const cancelRoot = join(root, "cancelled-start"); mkdirSync(cancelRoot, { mode: 0o700 });
+  cancelledEntry = spawn("bun", ["/repo/deploy/node/opencode-v1-host/start.ts", "--root", cancelRoot, "--binary", binary, "--version", version,
+    "--host-id", "fixture-cancel", "--cohort", "fixture", "--port", "19212"], { stdio: "ignore" });
+  for (let i = 0; i < 4000 && !existsSync(join(cancelRoot, "host.lock")); i++) {
+    if (cancelledEntry.exitCode !== null) throw Error("cancel fixture exited before startup lock"); await Bun.sleep(5);
+  }
+  assert.ok(existsSync(join(cancelRoot, "host.lock"))); assert.equal(existsSync(join(cancelRoot, "registry.json")), false);
+  cancelledEntry.kill("SIGTERM");
+  await Promise.race([new Promise<void>(r => cancelledEntry!.once("exit", () => r())), Bun.sleep(5000)]);
+  assert.equal(cancelledEntry.exitCode, 0);
+  for (const name of ["registry.json", "server.password", "host.lock"]) assert.equal(existsSync(join(cancelRoot, name)), false);
+  await new Promise<void>((resolve, reject) => {
+    const port = createServer(); port.once("error", reject); port.listen(19212, "127.0.0.1", () => port.close(error => error ? reject(error) : resolve()));
+  });
+  pass("SIGTERM during foreground startup cancels before publication, withdraws controls and leaves no listening child");
   a = await startOwnedV1Host(options);
   assert.equal(a.isRunning, true);
   const registryBefore = readFileSync(join(dirs[0], "registry.json"));
@@ -92,6 +109,7 @@ try {
     scope: "independent Linux Host lifecycle; shared borrowing/MCP/ready-turn/migration/production adoption remain pending" }));
 } catch (error) { console.error("FAIL phase", checks.at(-1) ?? "environment", error); process.exitCode = 1; }
 finally {
+  if (cancelledEntry?.exitCode === null && cancelledEntry.signalCode === null) cancelledEntry.kill("SIGKILL");
   await restarted?.close().catch(() => {}); await a?.close().catch(() => {});
   bProcess.kill("SIGTERM");
   if (bProcess.exitCode === null && bProcess.signalCode === null) await Promise.race([new Promise<void>(r => bProcess.once("exit", () => r())), Bun.sleep(5000)]);

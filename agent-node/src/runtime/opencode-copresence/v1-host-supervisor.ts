@@ -17,6 +17,7 @@ export interface StartOwnedV1HostOptions {
   readonly port: number;
   readonly attestation: PinnedOpencodeBinaryAttestation;
   readonly startupTimeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 export class V1HostStartError extends Error {
   readonly code = "opencode_v1_host_start_refused";
@@ -65,6 +66,8 @@ async function stopOwnedChild(child: ChildProcess, identity: LinuxProcessGroupId
  * No stale-lock takeover, restart, alternate-port fallback or node migration.
  * Only Linux process-group ownership is enabled in this first launcher. */
 export async function startOwnedV1Host(options: StartOwnedV1HostOptions) {
+  const checkCancelled = () => { if (options.signal?.aborted) refuse("startup cancelled before publication"); };
+  checkCancelled();
   const uid = process.getuid?.();
   if (process.platform !== "linux" || uid === undefined) refuse("Linux ownership handshake required");
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(options.hostId) || !/^[A-Za-z0-9_-]{1,128}$/.test(options.cohortId)
@@ -103,6 +106,7 @@ export async function startOwnedV1Host(options: StartOwnedV1HostOptions) {
       validatePrivateV1HostDirectory(path, uid); roots[name] = path;
     }
     await requireFreePort(options.port);
+    checkCancelled();
     const password = randomBytes(32).toString("hex"), url = `http://127.0.0.1:${options.port}`;
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH, HOME: roots.home, XDG_CONFIG_HOME: roots.config, XDG_DATA_HOME: roots.data,
@@ -124,15 +128,18 @@ export async function startOwnedV1Host(options: StartOwnedV1HostOptions) {
     const deadline = Date.now() + (options.startupTimeoutMs ?? 20000);
     let ready = false;
     while (Date.now() < deadline) {
+      checkCancelled();
       if (spawnError || child.exitCode !== null || child.signalCode !== null) refuse("owned Server exited before readiness");
       try {
         const health = await fetchOpenCodeJson(url, password, "/global/health", {}, 1000);
+        checkCancelled();
         if (health?.healthy === true && health?.version === options.version) { ready = true; break; }
         if (health?.version) refuse("native health version mismatch");
       } catch (error) { if (error instanceof V1HostStartError) throw error; }
       await pause(100);
     }
     if (!ready || child.exitCode !== null || child.signalCode !== null) refuse("authenticated readiness deadline");
+    checkCancelled();
     const record: V1HostRecord = { schema: 1, generation: "v1", packageName: "opencode-ai", version: options.version,
       hostId: options.hostId, instanceId, cohortId: options.cohortId, binary, url, passwordFile: passwordPath, roots };
     passwordFile = createPrivateFile(passwordPath, Buffer.from(password + "\n"));
