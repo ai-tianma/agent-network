@@ -19,7 +19,7 @@ import { buildOpencodeDefaultPermissionPolicy, buildOpencodeDefaultToolsPolicy, 
 const version=process.env.OPENCODE_VERSION_UNDER_TEST!;
 const root=mkdtempSync("/tmp/test1224-");chmodSync(root,0o700);
 const dir=(name:string)=>{const p=join(root,name);mkdirSync(p,{mode:0o700});return p;};
-const hostRoot=dir("host"), probeRoot=dir("probe"), projects=["项目A","目录B","项目C","项目D","项目E"].map(dir), states=projects.map((p,i)=>{const s=join(p,".anet","nodes",`n_${i}`);mkdirSync(s,{recursive:true,mode:0o700});return s;});
+const hostRoot=dir("host"), probeRoot=dir("probe"), projects=["项目A","目录B","项目C","项目D","项目E"].map(dir), states=projects.map((p,i)=>{const s=join(p,".anet","nodes",["cliA","cliB","cliC","cliD","cliE"][i]);mkdirSync(s,{recursive:true,mode:0o700});return s;});
 const homes=projects.map((_,i)=>dir(`cliHome${i}`));
 const socket=join(root,"private-tmux.sock");process.env.ANET_TMUX_SOCKET=socket;delete process.env.TMUX;delete process.env.TMUX_PANE;
 const tuiNames=["cliA","cliA-桥","cliB"];
@@ -37,7 +37,7 @@ const hubs=["A","B"].map((node,i)=>Bun.serve({hostname:"127.0.0.1",port:0,idleTi
   if(url.pathname==="/health")return Response.json({version:"0.8.6-preview.137",capabilities:["status_node_id"]});
   if(req.headers.get("authorization")!==`Bearer ${tokens[i]}`)return new Response(null,{status:401});
   if(url.pathname==="/api/auth/me")return Response.json({ok:true,user:{id:"synthetic-owner",username:"synthetic-admin",role:"user"}});
-  if(url.pathname==="/api/status")return Response.json({sessions:[{node_id:`n_${i}`,alias:aliases[i]}]});
+  if(url.pathname==="/api/status")return Response.json({sessions:[{node_id:`node_fixture_${i}`,alias:aliases[i]}]});
   if(url.pathname.startsWith("/events/")){
     let active:any;const body=new ReadableStream({start(c){active=c;streams[i].push(c);c.enqueue(new TextEncoder().encode('data: {"type":"connected"}\n\n'));},cancel(){streams[i]=streams[i].filter((c:any)=>c!==active);}});
     return new Response(body,{headers:{"content-type":"text/event-stream"}});
@@ -91,22 +91,22 @@ try{
   }
   host=await startOwnedV1Host({root:hostRoot,hostId:"fixture1214",cohortId:"same-policy",version,port:19216,attestation,scopedCommhubMcp:true});
   const infos=await Promise.all(projects.map(directory=>request("/session",directory,"POST",{title:"TEST1214"})));
-  const bindings=infos.map((info,i)=>({networkId:"net_fixture1214",nodeId:`n_${i}`,serverIdentity:host!.server.identity,directory:projects[i],sessionId:info.id}));
+  const bindings=infos.map((info,i)=>({networkId:"net_fixture1214",nodeId:`node_fixture_${i}`,serverIdentity:host!.server.identity,directory:projects[i],sessionId:info.id}));
   const saved=bindings.map(b=>({...b}));
   const options=(i:number):V1BorrowedAdmissionOptions=>({mode:"borrowed-v1",hostRoot,expectedHost:host!.record,attestation,expectedBinding:bindings[i],readBinding:()=>saved[i],selectedCohortId:"same-policy",model:{providerID:"fixture",modelID:"alpha"},stateRoot:states[i],alias:`node${i}`,hubMcpUrl:`http://127.0.0.1:${hubs[i===1?1:0].port}/mcp`,hubToken:tokens[i===1?1:0]});
   const entry=(i:number,extra:any={})=>openOpenCodeCopresenceRuntime({cwd:projects[i],workDir:states[i],model:"fixture/alpha",sessionId:infos[i].id,borrowedV1:options(i),...extra});
   const countUsers=async(i:number)=>(await request(`/session/${infos[i].id}/message`,projects[i])).filter((m:any)=>m.info.role==="user").length;
 
-  const configs=infos.map((info,i)=>({runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence",node_id:`n_${i}`,network_id:"net_fixture1214",alias:aliases[i],hub:`http://127.0.0.1:${hubs[i===1?1:0].port}`,token:tokens[i===1?1:0],model:"fixture/alpha",session:info.id,
+  const configs=infos.map((info,i)=>({runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence",node_id:`node_fixture_${i}`,network_id:"net_fixture1214",alias:aliases[i],hub:`http://127.0.0.1:${hubs[i===1?1:0].port}`,token:tokens[i===1?1:0],model:"fixture/alpha",session:info.id,
     opencodeBorrowedV1:{schema:1,hostRoot,expectedHost:{hostId:host!.record.hostId,instanceId:host!.record.instanceId,version,cohortId:"same-policy"},selectedCohortId:"same-policy",binding:bindings[i]}}));
   for(let i=0;i<5;i++){writeFileSync(join(states[i],"config.json"),JSON.stringify(configs[i])+"\n",{mode:0o600});writeOpencodeRuntimeBinding(states[i],homes[i]);}
   const logs:string[]=[], launched:number[]=[], spawnCli=(i:number,extra:string[]=[])=>{
-    logs[i]="";launched[i]=Date.now();const child=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","start",`n_${i}`,...extra],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i],ANET_AGENT_NODE_BIN:"/opt/node_modules/@sleep2agi/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,OPENCODE_DISABLE_AUTOUPDATE:"1",ANET_TMUX_SOCKET:socket},stdio:["ignore","pipe","pipe"]});
+    logs[i]="";launched[i]=Date.now();const child=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","start",aliases[i],...extra],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i],ANET_AGENT_NODE_BIN:"/opt/node_modules/@sleep2agi/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,OPENCODE_DISABLE_AUTOUPDATE:"1",ANET_TMUX_SOCKET:socket},stdio:["ignore","pipe","pipe"]});
     for(const stream of [child.stdout,child.stderr])stream!.on("data",chunk=>{logs[i]+=chunk.toString();});children.push(child);return child;
   };
   const waitFor=async(test:()=>boolean,label:string,budget=45000)=>{const deadline=Date.now()+budget;while(Date.now()<deadline){if(test())return;await Bun.sleep(50);}throw Error(`${label} deadline; sanitized fixture CLI logs:\n${logs.map((l,i)=>`node${i}: ${l}`).join("\n")}`);};
   const stopped=async(child:any)=>{if(child.exitCode!==null||child.signalCode!==null)return;await new Promise(resolve=>child.once("exit",resolve));};
-  const stop=async(i:number)=>{const child=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","stop",`n_${i}`],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i],ANET_TMUX_SOCKET:socket},stdio:["ignore","pipe","pipe"]});let text="";child.stdout!.on("data",c=>text+=c);child.stderr!.on("data",c=>text+=c);await Promise.race([stopped(child),Bun.sleep(25000).then(()=>{throw Error("normal stop deadline");})]);assert.equal(child.exitCode,0,text);assertTuis();};
+  const stop=async(i:number)=>{const child=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","stop",aliases[i]],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i],ANET_TMUX_SOCKET:socket},stdio:["ignore","pipe","pipe"]});let text="";child.stdout!.on("data",c=>text+=c);child.stderr!.on("data",c=>text+=c);await Promise.race([stopped(child),Bun.sleep(25000).then(()=>{throw Error("normal stop deadline");})]);assert.equal(child.exitCode,0,text);assertTuis();};
   const writeConfig=(i:number,c:any)=>writeFileSync(join(states[i],"config.json"),JSON.stringify(c)+"\n",{mode:0o600});
   const beforeRegistry=readFileSync(join(hostRoot,"registry.json"));
   const baseline2=readFileSync(join(projects[2],"opencode.json"));
@@ -130,7 +130,7 @@ try{
     await stopped(i===0?a:b);assert.equal((i===0?a:b).exitCode,0,logs[i]);assert.ok(logs[i].includes("borrowed V1 bridge ready"));
     const ready=inspectBorrowedLaunchHealth(join(states[i],"config.json"),launched[i]);assert.equal(ready.ok,true);assert.equal(inspectLaunchHealth(states[i],join(states[i],"config.json"),launched[i]).ok,true);assert.equal(existsSync(join(states[i],"opencode-attach.sh")),false);
     assert.deepEqual(readFileSync(join(states[i],"config.json")),beforeConfigs[i]);
-    assert.ok(traces[i].some((t:any)=>t.name==="report_status"&&t.args.node_id===`n_${i}`));
+    assert.ok(traces[i].some((t:any)=>t.name==="report_status"&&t.args.node_id===`node_fixture_${i}`));
     for(const reply of replies[i]){assert.ok(String(reply.text).includes(`NODE_${i===0?"A":"B"}`),JSON.stringify(reply));assert.ok(queues[i].some(t=>t.task_id===reply.in_reply_to));}
   }
   const historyA=await request(`/session/${infos[0].id}/message`,projects[0]);const users=historyA.filter((m:any)=>m.info.role==="user");assert.equal(users.length,2);assert.ok(users[0].parts[0].text.includes("CLI_FIRST"));assert.ok(users[1].parts[0].text.includes("CLI_SECOND"));
@@ -147,10 +147,10 @@ try{
   const ownedFallback=structuredClone(configs[0]);delete (ownedFallback as any).opencodeBorrowedV1;writeConfig(0,ownedFallback);
   const blocked=spawnCli(0);await waitFor(()=>blocked.exitCode!==null,"no owned fallback",10000);assert.ok(!logs[0].includes("borrowed V1 bridge ready"));assert.deepEqual(readFileSync(join(projects[0],"opencode.json")),original[0]);assert.equal(host.isRunning,true);
   writeConfig(0,configs[0]);const acks:any[]=[];launched[0]=Date.now();
-  await handleStartDoorbell({request_id:"str_fixture1226_restart"},{workDir:projects[0],nodesRoot:join(projects[0],".anet","nodes"),anetBin:()=>"/fixture/anet",log(){},warn(){},
+  await handleStartDoorbell({request_id:"str_fixture1226_restart"},{workDir:projects[0],nodesRoot:join(projects[0],".anet","nodes"),anetBin:()=>"/fixture/anet",log(text){console.log("TEST-ONLY daemon:",text);},warn(text){console.error("TEST-ONLY daemon:",text);},
     spawnChild:(cmd,args,opts)=>spawn(cmd,args,{...opts,env:{...opts.env,HOME:homes[0],PATH:process.env.PATH,ANET_AGENT_NODE_BIN:"/opt/node_modules/@sleep2agi/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,ANET_TMUX_SOCKET:socket}}),
-    callCommHub:async(tool,args)=>{if(tool==="get_start_request")return {ok:true,child_node_id:"n_0",child_alias:aliases[0],start_completion_capable:true};acks.push(args);return {ok:true,status:args.status};}});
-  assert.deepEqual(acks.map(a=>a.status),["starting","started"]);const verified=inspectBorrowedLaunchHealth(join(states[0],"config.json"),launched[0]);assert.equal(verified.ok,true);if(verified.ok)assert.equal(acks.at(-1).child_pid,verified.bridgePid);assert.deepEqual(await request(`/session/${infos[0].id}/message`,projects[0]),historyA);await stop(0);
+    callCommHub:async(tool,args)=>{if(tool==="get_start_request")return {ok:true,child_node_id:"node_fixture_0",child_alias:aliases[0],start_completion_capable:true};acks.push(args);return {ok:true,status:args.status};}});
+  assert.deepEqual(acks.map(a=>a.status),["starting","started"],JSON.stringify(acks));const verified=inspectBorrowedLaunchHealth(join(states[0],"config.json"),launched[0]);assert.equal(verified.ok,true);if(verified.ok)assert.equal(acks.at(-1).child_pid,verified.bridgePid);assert.deepEqual(await request(`/session/${infos[0].id}/message`,projects[0]),historyA);await stop(0);
   pass("persisted selection blocks implicit owned fallback; real daemon starting→started verifies actual bridge PID on explicit exact borrowed restart preserves original session/history");
   // A real in-flight config identity change makes completion unprovable.
   queues[1].push(task(1,"UNKNOWN","Reply with exactly HOLD_ADMISSION_1214"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_task"}\n\n'));
