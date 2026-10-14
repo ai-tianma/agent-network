@@ -2,6 +2,7 @@ import { db } from "./db.js";
 import { ensureRequirementEvents } from "./requirement-events.js";
 import { canSeeTask, canUseProject, type TaskCaller } from "./task-access.js";
 import { setRequirementWakeHook } from "./scheduled-backoff.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
 
 ensureRequirementEvents(db);
 export type RequirementWake = { project_id: string | null; tag: string | null };
@@ -97,8 +98,10 @@ export function consumeRequirementWake(id: string, network: string, now = new Da
       matching = Number(event.id);
     }
     const cursor = Number(events.at(-1)!.id);
+    const due = parseHubTimestamp(row.next_run_at);
+    if (matching && row.next_run_at && due === null) throw new Error("requirement_wake_invalid_due_time");
     const next = matching && row.next_run_at
-      ? new Date(Math.min(Date.parse(row.next_run_at), now.getTime() + spec.every_seconds * 1000)).toISOString() : row.next_run_at;
+      ? new Date(Math.min(due!, now.getTime() + spec.every_seconds * 1000)).toISOString() : row.next_run_at;
     const result = db.run(`UPDATE scheduled_tasks SET requirement_wake_cursor = ?1,
       requirement_wake_last_event_id = CASE WHEN ?2 IS NOT NULL THEN ?2 ELSE requirement_wake_last_event_id END,
       backoff_streak = CASE WHEN ?2 IS NOT NULL THEN 0 ELSE backoff_streak END,
