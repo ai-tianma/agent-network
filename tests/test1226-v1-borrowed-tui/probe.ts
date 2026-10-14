@@ -115,19 +115,19 @@ try{
   const projectAfter=[0,1].map(i=>readFileSync(join(projects[i],"opencode.json"))),cfgBefore=[0,1].map(i=>readFileSync(join(states[i],"config.json")));
   const sessionIdsBefore=new Set((await request("/session",projects[0])).map((s:any)=>s.id));
   const record=(i:number)=>JSON.parse(readFileSync(join(states[i],BORROWED_TUI_RECORD),"utf8"));
-  const termNames=["native-A","native-B","native-refusal"];
+  const termNames=["native-A","native-B","native-refusal"],panes=new Map<string,string>();
   const term=(i:number,name:string)=>{
-    execTmux(["new-session","-d","-s",name,"-c",projects[i],"-x","140","-y","45","bash","-c",
-      `sleep 1; exec env HOME='${homes[i]}' PATH='${process.env.PATH}' ANET_AGENT_NODE_BIN=/opt/node_modules/@sleep2agi/agent-node/dist/cli.js ANET_OPENCODE_BIN='${binary}' ANET_OPENCODE_VERSION='${version}' ANET_TMUX_SOCKET='${socket}' node /repo/agent-network/dist/bin/cli.js opencode attach '${aliases[i]}'`],{stdio:"pipe"});
-    execTmux(["set-option","-w","-t",`=${name}`,"remain-on-exit","on"],{stdio:"pipe"});
+    const pane=execTmux(["new-session","-d","-P","-F","#{pane_id}","-s",name,"-c",projects[i],"-x","140","-y","45","bash","-c",
+      `sleep 1; exec env HOME='${homes[i]}' PATH='${process.env.PATH}' ANET_AGENT_NODE_BIN=/opt/node_modules/@sleep2agi/agent-node/dist/cli.js ANET_OPENCODE_BIN='${binary}' ANET_OPENCODE_VERSION='${version}' ANET_TMUX_SOCKET='${socket}' node /repo/agent-network/dist/bin/cli.js opencode attach '${aliases[i]}'`],{encoding:"utf8",stdio:"pipe"}).trim();
+    panes.set(name,pane);execTmux(["set-option","-p","-t",pane,"remain-on-exit","on"],{stdio:"pipe"});
   };
-  const frame=(name:string)=>execTmux(["capture-pane","-p","-t",`=${name}`],{encoding:"utf8",stdio:["ignore","pipe","ignore"]});
-  const dead=(name:string)=>execTmux(["display-message","-p","-t",`=${name}`,"#{pane_dead}"],{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim()==="1";
+  const frame=(name:string)=>execTmux(["capture-pane","-p","-t",panes.get(name)!],{encoding:"utf8",stdio:["ignore","pipe","ignore"]});
+  const dead=(name:string)=>execTmux(["display-message","-p","-t",panes.get(name)!,"#{pane_dead}"],{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim()==="1";
   const killTerm=(name:string)=>execTmux(["kill-session","-t",`=${name}`],{stdio:"pipe"});
   const awaitRecord=async(i:number,name:string)=>{await waitFor(()=>existsSync(join(states[i],BORROWED_TUI_RECORD))&&record(i).state==="running",`native ${name} record`,30000);
     await waitFor(()=>/alpha|opencode|ctrl|ask|tab/i.test(frame(name)),`native ${name} rendered frame`,15000);await Bun.sleep(1000);assert.equal(dead(name),false,frame(name));return record(i);};
   const awaitNative=async(i:number,label:string,test:(m:any[])=>boolean,budget=45000)=>{const end=Date.now()+budget;while(Date.now()<end){const h=await request(`/session/${infos[i].id}/message`,projects[i]);if(test(h))return h;await Bun.sleep(100);}throw Error(`${label} native deadline; terminal ${i}: ${frame(termNames[i])}`);};
-  const human=(name:string,text:string)=>{execTmux(["send-keys","-t",`=${name}`,"-l",text],{stdio:"pipe"});execTmux(["send-keys","-t",`=${name}`,"Enter"],{stdio:"pipe"});};
+  const human=(name:string,text:string)=>{execTmux(["send-keys","-t",panes.get(name)!,"-l",text],{stdio:"pipe"});execTmux(["send-keys","-t",panes.get(name)!,"Enter"],{stdio:"pipe"});};
   const closeTui=async(i:number,name:string)=>{const r=record(i);process.kill(r.wrapper.pid,"SIGTERM");await waitFor(()=>dead(name)&&!existsSync(join(states[i],BORROWED_TUI_RECORD)),`close only ${name}`,15000);assert.equal(host!.isRunning,true);assertTuis();};
   const refusal=async(i:number,name:string)=>{term(i,name);await waitFor(()=>dead(name),`refusal ${name}`,15000);const text=frame(name);assert.ok(/refused|not ready|mismatch|capability/i.test(text),text);assert.ok(!existsSync(join(states[i],BORROWED_TUI_RECORD)));killTerm(name);};
   const headless=spawn("node",["/repo/agent-network/dist/bin/cli.js","opencode","attach",aliases[0]],{cwd:projects[0],env:{PATH:process.env.PATH,HOME:homes[0],ANET_AGENT_NODE_BIN:"/opt/node_modules/@sleep2agi/agent-node/dist/cli.js"},stdio:"ignore"});await stopped(headless);assert.notEqual(headless.exitCode,0);

@@ -21,6 +21,7 @@ function refuse(reason: string): never { throw new Error(`OpenCode V1 borrowed T
 async function prepare(configPath: string) {
   if (!inspectBorrowedLaunchHealth(configPath,0).ok) refuse("original bridge is not proven ready");
   const selected = readBorrowedLaunchConfig(configPath,process.cwd()), stateRoot = dirname(configPath), uid = process.getuid!();
+  readPrivateV1HostFile(join(stateRoot,"opencode-borrowed-v1-selection.json"),uid,16384);
   const raw = JSON.parse(readPrivateV1HostFile(configPath,uid,1024*1024).toString("utf8"));
   const selection = selectV1BorrowedCli(raw.opencodeBorrowedV1,{runtime:"opencode",generation:"v1",mode:raw.opencodeMode,
     configFile:configPath,networkId:raw.network_id,nodeId:raw.node_id,alias:raw.alias,cwd:process.cwd(),stateRoot,
