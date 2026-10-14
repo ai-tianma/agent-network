@@ -1,3 +1,4 @@
+import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
 import { selectHumanInboxIds } from "./human-inbox.js";
 import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -2212,6 +2213,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     };
   const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
       const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
+      const workSignal = parseScheduledWorkOutcome(meta, replyStatus);
+      if (!workSignal.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: workSignal.error, reply_queued: false }) }] };
+      if (workSignal.outcome && !in_reply_to) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_task_required", reply_queued: false }) }] };
       const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
@@ -2297,6 +2301,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         lateSql = addScope(lateSql, lateParams, effectiveNetId);
         const lateCandidate = db.get<LateTask>(lateSql, ...lateParams) ?? null;
         if (lateCandidate && !["created", "delivered", "acked", "running"].includes(lateCandidate.status)) {
+          if (workSignal.outcome) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_terminal", reply_queued: false }) }] };
           // Old runtimes do not send turn identity and retain the old result.
           if (!threadId || !turnId) {
             return { content: [{ type: "text" as const, text: JSON.stringify({
@@ -2460,6 +2465,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
         }
 
+        let workBinding: Extract<ReturnType<typeof qualifyScheduledWorkOutcome>, { ok: true }> | undefined;
+        if (workSignal.outcome) {
+          if (!in_reply_to || !callerTokenIsNetwork || !callerTokenId || !enforceNetworkId || effectiveNetId !== enforceNetworkId)
+            return { ok: false as const, error: "scheduled_work_outcome_bound_node_required" };
+          const token = db.get<{ bound_node_id: string | null }>(
+            "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2", callerTokenId, enforceNetworkId);
+          const qualified = qualifyScheduledWorkOutcome(in_reply_to, enforceNetworkId, token?.bound_node_id ?? null);
+          if (!qualified.ok) return qualified;
+          workBinding = qualified;
+        }
+
         // #507 — write meta_json on inbox insert (parity with send_task L952).
         // Prior to this the attachments field on a send_reply call was
         // silently stripped by MCP Zod, leaving `ok:true` with no persisted
@@ -2514,11 +2530,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           if (result.changes === 0) {
             throw new Error(`reply_atomic_cas_failed:${in_reply_to}`);
           }
+          if (workBinding && workSignal.outcome) saveScheduledWorkOutcome(workBinding.binding, workSignal.outcome);
           syncScheduledRunForTask(in_reply_to, effectiveNetId);
           // #1548 —— 终态回复是最强的活性证据:一个还标着 blocked 的发送方在此回到 idle。
           //   只出 blocked;working 可能真在忙别的任务,不碰。
           releaseBlockedSession(from_session, effectiveNetId);
-          return { ok: true as const, replyLogged: true };
+          return { ok: true as const, replyLogged: true, ...(workSignal.outcome ? { workOutcome: workSignal.outcome } : {}) };
         }
         return { ok: true as const, replyLogged: false };
       });
@@ -2632,6 +2649,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           text: JSON.stringify({
             ok: true,
             message_id: id,
+            ...("workOutcome" in replyOutcome ? { scheduled_work_outcome: replyOutcome.workOutcome } : {}),
             session_status: session?.status ?? "unknown",
             ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
