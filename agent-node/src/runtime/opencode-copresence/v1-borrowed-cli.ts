@@ -19,7 +19,7 @@ export class V1BorrowedCliError extends Error {
   readonly code = "opencode_v1_borrowed_cli_refused";
   constructor(reason: string) { super(`OpenCode V1 borrowed CLI refused: ${reason}`); this.name = "V1BorrowedCliError"; }
 }
-const refuse = (reason: string): never => { throw new V1BorrowedCliError(reason); };
+function refuse(reason: string): never { throw new V1BorrowedCliError(reason); }
 function object(value: any, fields: string[]): void {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || Object.keys(value).length !== fields.length || fields.some(k => !Object.hasOwn(value, k))) refuse("invalid selection fields");

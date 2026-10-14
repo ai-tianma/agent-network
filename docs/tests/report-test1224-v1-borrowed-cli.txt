@@ -5,3 +5,5 @@ Both pinned native versions1.18.1/1.18.34, pinned Bun1.3.14/SRI, non-root networ
 Actual built CLI refusals; config→inbox→native model/MCP→original task reply; FIFO/parent IDs; config byte preservation; node close and Host/sibling survival; persisted intent/no owned fallback/exact restart; in-flight config drift/no automatic reopen.
 Owned spawn/runtime/ownership and private selection unit regressions follow only after native CLI gate passes.
 No production app/credentials adoption, interactive TUI/normal launcher health completion or #1196 full migration qualification. Versioned contract and six restore questions: docs/design/opencode-v1-borrowed-cli.md.
+
+Initial a2f7a585b/typecheck run38542754830/job115781295948 RED: two new TS2345 diagnostics at new CLI selection UID validation, caused by control-flow narrowing through arrow never helper. Converted to explicit never function declaration, retaining runtime validation; original ratchet baseline unchanged, rerun pending. Native built CLI first matrix still running.
