@@ -11,6 +11,10 @@ const temp = mkdtempSync(join(tmpdir(), 'launch-window-'));
 const config = join(temp, 'config.json'), attachPath = join(temp, 'opencode-attach.json');
 const gate = join(temp, 'exec-ready'), shellPath = join(temp, 'attach.sh');
 const q = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+// Health inspection reads the private node config before process identity.
+// The foreign path must also exist to reach the bridge-config mismatch guard.
+writeFileSync(config, '{}\n', { mode: 0o600, flag: 'wx' });
+writeFileSync(config + '.wrong', '{}\n', { mode: 0o600, flag: 'wx' });
 const launchedAt = Date.now();
 const bridge = spawn('bun', ['/fixture/bridge.ts', temp, '--config', config], { stdio: 'inherit' });
 let identity: { pid: number; startTicks: number } | undefined;
