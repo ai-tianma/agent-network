@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, chmodSync, realpathSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { openOpenCodeCopresenceRuntime } from "/repo/agent-node/src/runtime/opencode-copresence/runtime";
+import { openVettedOpenCodeCopresence } from "/repo/agent-node/src/runtime/opencode-copresence/runtime";
+import { buildOpencodeDefaultPermissionPolicy, buildOpencodeDefaultToolsPolicy } from "/repo/agent-node/src/shared/opencode-preset";
 import { readV1Checkpoint, importV1Checkpoint } from "/repo/agent-node/src/runtime/opencode-copresence/v1-checkpoint";
 import { startOwnedV1Host } from "/repo/agent-node/src/runtime/opencode-copresence/v1-host-supervisor";
 import { resolvePinnedOpencodeBinaryAttestation } from "/repo/agent-node/src/runtime/opencode-acp/binary";
@@ -19,7 +20,7 @@ const model = spawn("python3", ["/fixture/stub-model.py", "18906", join(root, "m
 const owner = { nodeId: "n_plan1245", networkId: "net_plan1245" };
 const nativeConfig = { model: modelName, provider: { stub: { npm: "@ai-sdk/openai-compatible", name: "TEST-ONLY",
   options: { baseURL: "http://127.0.0.1:18906/v1", apiKey: "synthetic-only" }, models: { "stub-model": { name: "Stub" } } } } };
-let original: Awaited<ReturnType<typeof openOpenCodeCopresenceRuntime>> | undefined;
+let original: Awaited<ReturnType<typeof openVettedOpenCodeCopresence>> | undefined;
 let target: Awaited<ReturnType<typeof startOwnedV1Host>> | undefined;
 const checks: string[] = [], pass = (s: string) => { checks.push(s); console.log(`PASS ${s}`); };
 async function request(path: string, directory: string, method = "GET", body?: any) {
@@ -34,13 +35,22 @@ try {
   writeFileSync(join(nodeRoot, ".config", "opencode", "opencode.json"), JSON.stringify(nativeConfig), { mode: 0o600 });
   for (const directory of [project, sibling]) writeFileSync(join(directory, "opencode.json"), JSON.stringify(nativeConfig), { mode: 0o600 });
   for (let i = 0; i < 100; i++) { try { if ((await fetch("http://127.0.0.1:18906/v1/models")).ok) break; } catch {} await Bun.sleep(50); if (i === 99) throw Error("model readiness"); }
-  original = await openOpenCodeCopresenceRuntime({ cwd: project, workDir: nodeRoot, unsafeTools: false, expectedVersion: version,
-    model: modelName, binarySearchPath: process.env.PATH, startupTimeoutMs: 30000, checkpoint: owner });
+  const ownedRoot = dir("explicit-owned-private-roots");
+  const ownedRoots = Object.fromEntries(["home", "config", "data", "cache", "state", "runtime", "managed"].map(name => {
+    const path = join(ownedRoot, name); mkdirSync(path, { mode: 0o700 }); return [name, path];
+  }));
+  const permission = { ...buildOpencodeDefaultPermissionPolicy() }; delete permission["*"]; permission["commhub_*"] = "allow";
+  original = await openVettedOpenCodeCopresence({ cwd: project, workDir: nodeRoot, binary, model: modelName,
+    env: { PATH: process.env.PATH, HOME: ownedRoots.home, XDG_CONFIG_HOME: ownedRoots.config, XDG_DATA_HOME: ownedRoots.data,
+      XDG_CACHE_HOME: ownedRoots.cache, XDG_STATE_HOME: ownedRoots.state, XDG_RUNTIME_DIR: ownedRoots.runtime,
+      OPENCODE_TEST_MANAGED_CONFIG_DIR: ownedRoots.managed, OPENCODE_DISABLE_AUTOUPDATE: "1", OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_DISABLE_CLAUDE_CODE: "1", OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: modelName, permission, tools: buildOpencodeDefaultToolsPolicy() }) },
+    startupTimeoutMs: 30000, checkpoint: owner });
   const reply = await original.submit("Reply with exactly ORIGINAL1245", 30000);
   assert.ok(reply.replyText.includes("ORIGINAL1245"));
   const checkpoint = readV1Checkpoint(nodeRoot, owner, original.sessionId)!;
   assert.ok(checkpoint.data.messages.length >= 2); assert.equal(checkpoint.cleanShutdown, false);
-  pass("actual safe owned runtime produces original exact session and nonfinal private checkpoint");
+  pass("actual owned core with explicit private directory/denied built-ins produces exact session and nonfinal checkpoint");
   const configPath = join(nodeRoot, "config.json");
   const config = { node_id: owner.nodeId, network_id: owner.networkId, alias: "原节点甲", runtime: "opencode-cli",
     opencodeGeneration: "v1", opencodeMode: "copresence", session: original.sessionId, model: modelName,

@@ -14,6 +14,16 @@ unqualified. Source config and checkpoint bytes are reread around asynchronous
 target checks. Existing borrowed selection/readiness/TUI intent or any project
 MCP lease refuses, including unknown/symlink residues; nothing is cleared.
 
+The current default owned safe wrapper runs in an external temporary workspace
+and strips custom provider packages/base URLs. This slice never remaps that
+native directory into the configured project or enables unsafe mode. A source
+whose checkpoint directory differs from the independently selected original
+config/directory refuses. The fixture qualifies the existing owned core API
+with an explicit persistent private directory and measured denied built-ins;
+it does not qualify migration of every current default owned CLI node. #1238
+must resolve the actual original topology/directory/provider contract before
+offering a real cutover, preserving original identity and safety.
+
 The independently selected target must be this full original identity on the
 selected Host incarnation and canonical directory. Actual native model and
 built-in deny/external-directory/scoped CommHub policy must match; existing or
