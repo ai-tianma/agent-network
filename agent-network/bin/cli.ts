@@ -2473,6 +2473,9 @@ async function startBorrowedV1Bridge(resolved: {id: string; profile: Profile}, o
   }
   if (liveNodePidFromPidfile(resolved.id) !== null) throw new Error("borrowed V1 node already running; retain its existing bridge");
   resolveStartProfile(resolved.id,resolved.profile);
+  checkRuntimeDependency("opencode-cli","start");
+  assertStartCompatibility("opencode-cli",resolved.profile,resolved.id);
+  if (opencodeLaunchIdentity?.version !== selected.selection.expectedHost.version) throw new Error("borrowed V1 launch version differs from selected Host");
   const logPath = join(nodeDir,"opencode-borrowed-v1-bridge.log");
   const fd = openSync(logPath,constants.O_WRONLY|constants.O_CREAT|constants.O_APPEND|constants.O_NOFOLLOW|constants.O_NONBLOCK,0o600);
   let child: ReturnType<typeof spawn>;

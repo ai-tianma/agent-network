@@ -154,8 +154,8 @@ export async function handleStartDoorbell(
     const config = JSON.parse(readFileSync(cfgPath, "utf8"));
     codexCopresence = config?.codexCopresence === true;
     runtime = config?.runtime;
-    opencodeCopresence = runtime === "opencode-cli" && config?.opencodeMode === "copresence"
-      && (config?.opencodeGeneration === "v2" || hasBorrowedV1Intent(verifiedChildDir,config));
+    opencodeCopresence = hasBorrowedV1Intent(verifiedChildDir,config)
+      || (runtime === "opencode-cli" && config?.opencodeMode === "copresence" && config?.opencodeGeneration === "v2");
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
     deps.warn(`[start-daemon] ${error}`);

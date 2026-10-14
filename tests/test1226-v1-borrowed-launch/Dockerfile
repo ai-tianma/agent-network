@@ -18,6 +18,7 @@ RUN cd /repo/agent-network && npm ci --ignore-scripts --no-audit --no-fund
 COPY agent-network/bin /repo/agent-network/bin
 RUN cd /repo/agent-network && bun build bin/cli.ts --outdir dist/bin --target node --external @sleep2agi/commhub-server --external bun:sqlite --external '../../server/*' 
 RUN npm run build
+RUN mkdir -p /opt/node_modules/@sleep2agi && cp -a /repo/agent-node /opt/node_modules/@sleep2agi/agent-node
 COPY deploy/node/opencode-v1-host /repo/deploy/node/opencode-v1-host
 COPY tests/test1226-v1-borrowed-launch /fixture
 COPY tests/test651-opencode-timeout-abort/run.sh /fixture/timeout-mutation.sh

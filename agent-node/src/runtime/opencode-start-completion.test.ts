@@ -128,3 +128,10 @@ for (const capable of [true,false]) test(`borrowed V1 uses completion gate; Hub 
   if(capable)expect(f.acks.at(-1).child_pid).toBe(4343);
   else expect(f.acks.at(-1).error).toBe("opencode_start_completion_unsupported");
 });
+
+test("invalid borrowed mode cannot fall back to spawn-only daemon success",async()=>{
+  const f=fixture();writeFileSync(join(root,"child","config.json"),JSON.stringify({node_id:"node_child",node_name:"child",runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"headless",opencodeBorrowedV1:{schema:1}}),{mode:0o600});
+  f.deps.inspectOpenCodeStartHealth=()=>({ok:false,reason:"borrowed V1 launch evidence unavailable or mismatched"});
+  const run=handleStartDoorbell({request_id:"str_borrowed_wrong_mode"},f.deps);await tick();expect(f.acks.map(a=>a.status)).toEqual(["starting"]);f.child.emit("exit",0,null);await run;
+  expect(f.acks.at(-1).status).toBe("start_failed");expect(getChildrenSnapshot()).toEqual([]);
+});

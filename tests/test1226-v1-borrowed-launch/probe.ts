@@ -101,7 +101,7 @@ try{
     opencodeBorrowedV1:{schema:1,hostRoot,expectedHost:{hostId:host!.record.hostId,instanceId:host!.record.instanceId,version,cohortId:"same-policy"},selectedCohortId:"same-policy",binding:bindings[i]}}));
   for(let i=0;i<5;i++){writeFileSync(join(states[i],"config.json"),JSON.stringify(configs[i])+"\n",{mode:0o600});writeOpencodeRuntimeBinding(states[i],homes[i]);}
   const logs:string[]=[], launched:number[]=[], spawnCli=(i:number,extra:string[]=[])=>{
-    logs[i]="";launched[i]=Date.now();const child=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","start",`n_${i}`,...extra],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i],ANET_AGENT_NODE_BIN:"/repo/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,OPENCODE_DISABLE_AUTOUPDATE:"1",ANET_TMUX_SOCKET:socket},stdio:["ignore","pipe","pipe"]});
+    logs[i]="";launched[i]=Date.now();const child=spawn("node",["/repo/agent-network/dist/bin/cli.js","node","start",`n_${i}`,...extra],{cwd:projects[i],env:{PATH:process.env.PATH,HOME:homes[i],ANET_AGENT_NODE_BIN:"/opt/node_modules/@sleep2agi/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,OPENCODE_DISABLE_AUTOUPDATE:"1",ANET_TMUX_SOCKET:socket},stdio:["ignore","pipe","pipe"]});
     for(const stream of [child.stdout,child.stderr])stream!.on("data",chunk=>{logs[i]+=chunk.toString();});children.push(child);return child;
   };
   const waitFor=async(test:()=>boolean,label:string,budget=45000)=>{const deadline=Date.now()+budget;while(Date.now()<deadline){if(test())return;await Bun.sleep(50);}throw Error(`${label} deadline; sanitized fixture CLI logs:\n${logs.map((l,i)=>`node${i}: ${l}`).join("\n")}`);};
@@ -148,7 +148,7 @@ try{
   const blocked=spawnCli(0);await waitFor(()=>blocked.exitCode!==null,"no owned fallback",10000);assert.ok(!logs[0].includes("borrowed V1 bridge ready"));assert.deepEqual(readFileSync(join(projects[0],"opencode.json")),original[0]);assert.equal(host.isRunning,true);
   writeConfig(0,configs[0]);const acks:any[]=[];launched[0]=Date.now();
   await handleStartDoorbell({request_id:"str_fixture1226_restart"},{workDir:projects[0],nodesRoot:join(projects[0],".anet","nodes"),anetBin:()=>"/fixture/anet",log(){},warn(){},
-    spawnChild:(cmd,args,opts)=>spawn(cmd,args,{...opts,env:{...opts.env,HOME:homes[0],PATH:process.env.PATH,ANET_AGENT_NODE_BIN:"/repo/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,ANET_TMUX_SOCKET:socket}}),
+    spawnChild:(cmd,args,opts)=>spawn(cmd,args,{...opts,env:{...opts.env,HOME:homes[0],PATH:process.env.PATH,ANET_AGENT_NODE_BIN:"/opt/node_modules/@sleep2agi/agent-node/dist/cli.js",ANET_OPENCODE_BIN:binary,ANET_OPENCODE_VERSION:version,ANET_TMUX_SOCKET:socket}}),
     callCommHub:async(tool,args)=>{if(tool==="get_start_request")return {ok:true,child_node_id:"n_0",child_alias:aliases[0],start_completion_capable:true};acks.push(args);return {ok:true,status:args.status};}});
   assert.deepEqual(acks.map(a=>a.status),["starting","started"]);const verified=inspectBorrowedLaunchHealth(join(states[0],"config.json"),launched[0]);assert.equal(verified.ok,true);if(verified.ok)assert.equal(acks.at(-1).child_pid,verified.bridgePid);assert.deepEqual(await request(`/session/${infos[0].id}/message`,projects[0]),historyA);await stop(0);
   pass("persisted selection blocks implicit owned fallback; real daemon starting→started verifies actual bridge PID on explicit exact borrowed restart preserves original session/history");
