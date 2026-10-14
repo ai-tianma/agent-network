@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { resolvePinnedOpencodeBinaryAttestation } from "../../../agent-node/src/runtime/opencode-acp/binary";
-import { startOwnedV1Host } from "../../../agent-node/src/runtime/opencode-copresence/v1-host-supervisor";
+import { startOwnedV1Host, V1HostStartupCancelledError } from "../../../agent-node/src/runtime/opencode-copresence/v1-host-supervisor";
 
 const { values } = parseArgs({ options: {
   root: { type: "string" }, binary: { type: "string" }, version: { type: "string" },
@@ -35,7 +35,7 @@ try { attestation = resolvePinnedOpencodeBinaryAttestation({ requestedBinary: va
 finally { rmSync(probeRoot, { recursive: true, force: true }); }
 try {
   host = await startOwnedV1Host({ root, hostId: values["host-id"]!, cohortId: values.cohort!, version: values.version!, port: Number(values.port), attestation, signal: controller.signal });
-} catch (error) { if (controller.signal.aborted) process.exit(0); throw error; }
+} catch (error) { if (error instanceof V1HostStartupCancelledError) process.exit(0); throw error; }
 if (controller.signal.aborted) await stop();
 console.log(JSON.stringify({ kind: "v1-host-ready", hostId: host.record.hostId, instanceId: host.record.instanceId,
   version: host.record.version, url: host.record.url, pid: host.pid, registry: join(root, "registry.json") }));

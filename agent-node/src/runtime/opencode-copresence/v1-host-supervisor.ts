@@ -23,6 +23,9 @@ export class V1HostStartError extends Error {
   readonly code = "opencode_v1_host_start_refused";
   constructor(reason: string) { super(`OpenCode V1 host start refused: ${reason}`); this.name = "V1HostStartError"; }
 }
+export class V1HostStartupCancelledError extends V1HostStartError {
+  constructor() { super("startup cancelled before publication"); this.name = "V1HostStartupCancelledError"; }
+}
 function refuse(reason: string): never { throw new V1HostStartError(reason); }
 type OwnedFile = { path: string; dev: number; ino: number; bytes: Buffer };
 function existsEntry(path: string): boolean {
@@ -66,7 +69,7 @@ async function stopOwnedChild(child: ChildProcess, identity: LinuxProcessGroupId
  * No stale-lock takeover, restart, alternate-port fallback or node migration.
  * Only Linux process-group ownership is enabled in this first launcher. */
 export async function startOwnedV1Host(options: StartOwnedV1HostOptions) {
-  const checkCancelled = () => { if (options.signal?.aborted) refuse("startup cancelled before publication"); };
+  const checkCancelled = () => { if (options.signal?.aborted) throw new V1HostStartupCancelledError(); };
   checkCancelled();
   const uid = process.getuid?.();
   if (process.platform !== "linux" || uid === undefined) refuse("Linux ownership handshake required");
