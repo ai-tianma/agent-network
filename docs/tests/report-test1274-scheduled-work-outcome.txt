@@ -1,0 +1,16 @@
+TEST-ONLY — P0 #1274, first slice of #756
+Status: source implementation submitted for CI; no passed run claimed yet.
+
+Independent fixture tests/test1274-scheduled-work-outcome/, workflow
+.github/workflows/scheduled-work-outcome.yml. Digest-pinned Bun 1.3.14,
+server lockfile, disposable SQLite DBs, actual loopback HTTP/MCP, network-none.
+Build and new outcome qualification precede inherited scheduled-run terminal
+and scheduled-task HTTP regression suites. No model, tmux, original identity,
+production DB/frequency change or public release.
+
+Source/CI/main commits, run/job IDs, actual case counts and complete artifact
+digest/results will be recorded after real execution. Explicit self-report
+classification is not automatic backoff, new-event wake, independently proved
+domain completeness or actual current software adoption. Parent #756 remains
+incomplete. Existing broad Windows and L0 failures remain #1262/#1268; no
+all-repository CI-green claim.

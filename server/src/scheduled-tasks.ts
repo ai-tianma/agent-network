@@ -244,7 +244,7 @@ export function scheduleRuns(row: ScheduledRow, limit: number): Record<string, u
     // #523 — a task that ended `failed` leaves run.error_message empty; its reason is the task's reply text.
     `SELECT r.run_id, r.schedule_id, r.scheduled_for, r.task_id, r.status, r.error_code,
             CASE WHEN r.error_message IS NULL AND r.status = 'failed' THEN SUBSTR(t.result, 1, 500) ELSE r.error_message END AS error_message,
-            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at
+            r.blocked_by_task_id, r.blocked_by_state, r.created_at, r.completed_at, r.work_outcome, r.schedule_revision, r.work_outcome_node_id
        FROM scheduled_task_runs r
        LEFT JOIN tasks t ON t.task_id = r.task_id AND t.network_id = r.network_id
       WHERE r.schedule_id = ?1 AND r.network_id = ?2 ORDER BY r.created_at DESC, r.scheduled_for DESC LIMIT ?3`,
@@ -373,9 +373,9 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
     // UNIQUE(schedule_id, scheduled_for) is the cross-process claim. If two
     // Hub processes race, one INSERT wins and the other transaction aborts.
     db.run(
-      `INSERT INTO scheduled_task_runs (run_id, schedule_id, network_id, scheduled_for, status)
-       VALUES (?1, ?2, ?3, ?4, 'claiming')`,
-      [runId, row.schedule_id, row.network_id, scheduledFor],
+      `INSERT INTO scheduled_task_runs (run_id, schedule_id, network_id, scheduled_for, status, schedule_revision)
+       VALUES (?1, ?2, ?3, ?4, 'claiming', ?5)`,
+      [runId, row.schedule_id, row.network_id, scheduledFor, row.revision],
     );
 
     // Board #757 — do not create a task that will merely expire while its
