@@ -1,0 +1,23 @@
+TEST-ONLY — CommHub #1271, first contract slice of #1269
+
+Status: implementation submitted for CI; no success result recorded yet.
+Source: the PR's exact source head and actual CI checkout must be recorded
+after the run. This file is not evidence of a completed native test or release.
+
+Independent Docker fixture: tests/test1271-v1-safe-retention-request/
+Workflow: .github/workflows/v1-safe-retention-request.yml
+Matrix: OpenCode 1.18.1 and 1.18.34, package SRI from the existing feasibility
+fixture; Bun 1.3.14 pinned image; npm lockfile; unprivileged, network-none run.
+Inherited SAFE child-env and checkpoint tests run before the native probe.
+
+Six intended probe groups: actual default-native unprepared request; unchanged
+recheck versus JSON/copy/foreign module; changed correlation/source/software
+or installation; config/checkpoint byte changes; controlled data inode change;
+normal close still deletes the launch root and rejects the closed request.
+These are empty-session observations, not model/TUI/history-transfer evidence.
+
+No marker write, actual retention, cleanup exemption, credential-cleanup
+qualification, writer exclusion, handoff, journal commit, original-node change
+or public package/installer release. #1269/#1238/#1239 remain incomplete.
+Broader known report-only QA failures are tracked independently in #1268;
+the new fixture cannot be described as proof that all repository QA is green.
