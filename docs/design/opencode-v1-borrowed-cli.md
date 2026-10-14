@@ -44,6 +44,9 @@ explicit Host policy/cohort from the earlier contract.
 
 Start the existing built CLI with its private config (no new public environment
 switch): `node agent-node/dist/cli.js --config /private/node/config.json`.
+This schema is supported by the matching built CLI from the qualified exact
+main source. Older installed CLIs do not consume this selection/intent record;
+verify matching software before configuring it.
 Normal launcher config propagation remains the existing route; its interactive
 TUI/start-completion UI is not qualified by this standalone CLI fixture.
 Node cwd, persisted session, model, network and node identity must match the
@@ -75,9 +78,11 @@ human TUI is stopped. Unknown recovery remains retained.
   and encrypted backup; no credentials are committed, read or changed here.
 - Pin a main-merged source and native package/version/SRI, then verify the actual
   selected session and native task reply; source/CI is not proof of live adoption.
-- Roll back software by selecting the previous main source. Restore selected
-  node/Host config and intent record from the same approved backup/window;
-  no automatic mode downgrade, unknown clearing or replay is provided.
+- Software downgrade requires the Owner-approved #1196 migration/rollback
+  window first: older CLI cannot enforce this intent schema. Keep matching
+  software while borrowed selection is active. Restore selected node/Host
+  config and intent from the same approved backup; no automatic mode downgrade,
+  unknown clearing or replay is provided.
 - Git restores software/schema/templates. Existing session history, node login,
   config/selection intent and unknown leases require original encrypted data
   backup and #1196 migration/rollback qualification, not clone alone.
