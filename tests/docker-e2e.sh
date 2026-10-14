@@ -42,10 +42,10 @@ for _i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 [ -n "$TOKEN" ] || { echo "FATAL: could not obtain bootstrap TOKEN — V3 auth bootstrap failed"; exit 1; }
-# #1221: /api/auth/me returns a flat username. Assert the original authenticated
+# #1221: /api/auth/me returns user.username. Assert the original authenticated
 # sender rather than inventing a persona; later token rotations are derived by
 # Hub independently, so helpers must not rewrite explicit negative identities.
-BOOTSTRAP_SENDER=$(curl -fsS http://127.0.0.1:9200/api/auth/me -H "Authorization: Bearer $TOKEN" | jq -er '.username | select(type == "string" and length > 0)')
+BOOTSTRAP_SENDER=$(curl -fsS http://127.0.0.1:9200/api/auth/me -H "Authorization: Bearer $TOKEN" | jq -er '.user.username | select(type == "string" and length > 0)')
 [ -n "$BOOTSTRAP_SENDER" ] || { echo "FATAL: authenticated user identity missing"; exit 1; }
 
 # #266 A1: bootstrap NETWORK_ID for utok-scoped writes.
