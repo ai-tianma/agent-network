@@ -6809,16 +6809,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const schedId = z.string();
   const schedFields = {
     name: z.string(), task: z.string(), target_node_id: z.string().optional(),
-    schedule: z.any().describe("once{run_at}|interval{every_seconds>=60}|daily{time}|weekly{time,weekdays}"),
+    schedule: z.any().describe("once{run_at}|interval{every_seconds}|daily|weekly"),
     timezone: z.string().optional(), priority: z.string().optional(), no_change_backoff: z.boolean().optional(),
   };
   server.tool("schedule_list", "Hub schedules for or by you.", { status: z.string().optional() },
     async ({ status }) => scheduleCall(id => agentListSchedules(id, status)));
   server.tool("schedule_get", "One schedule.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall(id => agentGetSchedule(id, schedule_id)));
-  server.tool("schedule_create", "Schedule a task to target_node_id (default you).", schedFields,
+  server.tool("schedule_create", "Schedule to target_node_id (default you).", schedFields,
     async (args) => scheduleCall((id, w) => agentCreateSchedule(id, w, args as Record<string, unknown>)));
-  server.tool("schedule_update", "Edit your schedule; status=paused|active.",
+  server.tool("schedule_update", "Edit yours; status=paused|active.",
     { ...schedFields, schedule_id: schedId, base_revision: z.number().int().min(0).optional().describe("Reject if current revision differs."), name: z.string().optional(), task: z.string().optional(), schedule: z.any().optional(), status: z.string().optional() },
     async ({ schedule_id, ...rest }) => scheduleCall((id, w) => agentUpdateSchedule(id, w, schedule_id, rest as Record<string, unknown>)));
   server.tool("schedule_batch_interval", "Batch interval edit; per-ID results.",
