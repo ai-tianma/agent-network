@@ -3,6 +3,27 @@
 Review date: 2026-10-14. This is an implementation contract, not a shipped
 shared-V1 feature or permission to migrate a running node.
 
+### Exact native feasibility result (#1194)
+
+PR #2721 merged normally at main
+`c0e9a387d89f4ec2e47bf21326a6f5ab5f0ad38b`. Actions run `38506584150`
+passed both exact V1 packages in non-root, network-disabled Docker, with 11
+native checkpoints each. Directory-scoped flat MCP/config, actual synthetic
+MCP identity and model routing, two native attach TUIs, persistent restart and
+offline scratch history import passed. This is raw native feasibility within
+equivalent policies/a common synthetic provider credential; it does not ship
+the node bridge or prove separate credential/policy or same-directory identity
+isolation. Detailed provenance: `docs/tests/report-test1194-v1-shared-feasibility.txt`.
+
+Both versions returned A's session to a GET carrying B's directory. The bridge
+must check the complete binding and returned directory; upstream directory
+selection is not session authorization. A directory-scoped toast reached only
+A's native event stream in this fixture; retain scoped routing and verify actual
+UI/platform behavior before claiming broader notification support.
+
+The implementation/recovery slices below remain pending. Do not repeat this
+native gate without a relevant change or unresolved result.
+
 ## Reviewed inputs and decision
 
 - Repository main: `0c07c3a17eee7f87e07c523e25312608d0a0a66b`.
