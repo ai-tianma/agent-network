@@ -168,8 +168,8 @@ original sessions, not solely a process record or rendered placeholder.
 nonce, PID/birth and original binding/model/bridge. An existing or unknown record
 refuses rather than replacing a human terminal. The guardian rechecks original
 readiness nonce, full config/lease, Host/session/model/policy/MCP; losing them
-signals only this newly spawned native TUI, never aborts a Host turn, stops the
-Host, reopens the node or relaunches a different session. Exiting removes only
+signals only this newly spawned native TUI, issues no session abort, and never
+stops the Host, reopens the node or relaunches a different session. Exiting removes only
 unchanged own nonce/process ownership. Node stop's existing borrowed path still
 skips all alias-based TUI sweeps; this foreground wrapper independently observes
 withdrawn readiness. An uncertain lease/data recovery remains with its Owner.
@@ -187,3 +187,14 @@ Host databases/history, private node credentials and unknown lease/checkpoint
 backups need their original encrypted private backup/registration sources; Git
 and the disposable TUI HOME do not reproduce that data. Full migration and
 original-machine windows remain separate gates.
+
+This native attach slice is qualified at ordinary source main
+`440455d3c6e5239f964772bf71a4ce9154228c2c`, with exact CI/main tree
+`a0ebcdaca1677cf7951711b1f795947a6db0cd1c`. See
+[the five actual native TUI gates and retained failures](../tests/report-test1226-v1-borrowed-tui.txt).
+Both accepted native versions used full rendered TUIs and keyboard input, including
+ordinary `anet node ls` while they remained live: already-private profile repair
+does not change config ctime; real permission errors still use the existing repair.
+Full E2E has seven nonzero groups, 289 pass/0 fail. TUI close is qualified after
+completed human turns; active-human-terminal-close is not claimed by this fixture.
+Public packages, original-machine adoption and #1196 migration remain separate.
