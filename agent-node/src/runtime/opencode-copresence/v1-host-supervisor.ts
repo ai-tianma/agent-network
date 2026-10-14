@@ -18,6 +18,8 @@ export interface StartOwnedV1HostOptions {
   readonly attestation: PinnedOpencodeBinaryAttestation;
   readonly startupTimeoutMs?: number;
   readonly signal?: AbortSignal;
+  /** Explicit equivalent-policy cohort: built-ins stay denied; only commhub_* is allowed. */
+  readonly scopedCommhubMcp?: boolean;
 }
 export class V1HostStartError extends Error {
   readonly code = "opencode_v1_host_start_refused";
@@ -116,7 +118,8 @@ export async function startOwnedV1Host(options: StartOwnedV1HostOptions) {
   }
   try {
     const settingsPath = join(options.root, "host-settings.json");
-    const settings = Buffer.from(JSON.stringify({ schema: 1, hostId: options.hostId, cohortId: options.cohortId, version: options.version }));
+    const settings = Buffer.from(JSON.stringify({ schema: 1, hostId: options.hostId, cohortId: options.cohortId, version: options.version,
+      ...(options.scopedCommhubMcp ? { scopedCommhubMcp: true } : {}) }));
     if (existsEntry(settingsPath)) {
       if (!readPrivateV1HostFile(settingsPath, uid, 16384).equals(settings)) refuse("persistent host settings mismatch; no data adoption");
     } else { createPrivateFile(settingsPath, settings); }
@@ -129,12 +132,19 @@ export async function startOwnedV1Host(options: StartOwnedV1HostOptions) {
     await requireFreePort(options.port);
     checkCancelled();
     const password = randomBytes(32).toString("hex"), url = `http://127.0.0.1:${options.port}`;
+    const permission: Record<string, string> = buildOpencodeDefaultPermissionPolicy();
+    const tools: Record<string, boolean> = buildOpencodeDefaultToolsPolicy();
+    if (options.scopedCommhubMcp === true) {
+      // Exact V1 normalizes wildcard deny after specific allows. All known
+      // built-ins remain explicitly denied; no other dynamic MCP gets an allow.
+      delete permission["*"]; permission["commhub_*"] = "allow"; tools["commhub_*"] = true;
+    }
     const env: NodeJS.ProcessEnv = {
       PATH: process.env.PATH, HOME: roots.home, XDG_CONFIG_HOME: roots.config, XDG_DATA_HOME: roots.data,
       XDG_CACHE_HOME: roots.cache, XDG_STATE_HOME: roots.state, XDG_RUNTIME_DIR: roots.runtime,
       OPENCODE_TEST_MANAGED_CONFIG_DIR: roots.managed, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password,
       OPENCODE_DISABLE_AUTOUPDATE: "1", OPENCODE_DISABLE_EXTERNAL_SKILLS: "1", OPENCODE_DISABLE_CLAUDE_CODE: "1",
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: buildOpencodeDefaultPermissionPolicy(), tools: buildOpencodeDefaultToolsPolicy() }),
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission, tools }),
     };
     // Final byte/path recheck after input preparation, before the secret env is supplied.
     revalidatePinnedOpencodeBinary(options.attestation, { expectedVersion: options.version, forbiddenRoots: [options.root] });

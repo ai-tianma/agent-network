@@ -70,3 +70,61 @@ slice on main for source rollback; later turns still require a final checkpoint.
 Actual session databases, provider auth and Hub identities require encrypted
 private backups/registration. Backup authority/location/retention and shared-aware
 final checkpoint/rollback remain #1196; clone does not restore production data.
+# Directory-bound MCP primitive (#1212)
+
+Host Owner may explicitly select `--scoped-commhub-mcp` on a **new, private,
+equivalent-policy trust cohort**. The default still denies all tools. This option
+removes V1's catch-all deny only after keeping every pinned built-in explicitly
+denied, and allows `commhub_*` only. It is recorded in persistent Host settings;
+changing it on retained data refuses instead of silently adopting another policy.
+The node's Hub token never enters Host environment/configuration. Same UID and
+Host password remain cooperative trust, not tenant or provider-secret isolation.
+
+`agent-node/src/runtime/opencode-copresence/v1-scoped-mcp.ts` supplies a separately
+reviewable API, not a Node opt-in switch. `openV1ScopedCommhubMcp` needs independent
+expected network/node/Host-instance/canonical-directory/exact-session identity,
+fresh original binding/admitted Host readers, original node alias/token and an
+existing separate private state root. It checks the full binding, exact native
+session/directory and unchanged Host authority before forwarding each MCP request.
+An original node token authenticates upstream caller identity; prompts cannot
+select credentials, network or outbound sender. MCP itself does not provide a
+trusted session/turn identity. The unique directory capability prevents accidental
+crosswiring, but this API does not prove human/network turn ownership.
+
+The proxy uses an ephemeral `127.0.0.1` port and random bearer capability. Only
+that short-lived local capability goes into private V1 flat `mcp.commhub` config;
+upstream Hub credentials stay in bridge memory and do not appear in errors.
+It retains provider/model/other MCP entries and creates scoped instructions in
+the private node state root. Plain JSON/private single-link 0600 project config
+is required; existing CommHub, V2 config, JSONC or wildcard-denied project policy
+refuses rather than overwrites or widens it. An exclusive `.anet-v1-mcp.lock`
+prevents a second bridge in that directory. It does not support two node identities
+in one canonical directory.
+
+Writing project config is **not proof of native activation**. The isolated test
+characterizes cached `/config` after an instance already exists, then exercises
+directory-scoped V1 `POST /mcp` and verifies live native tools using a synthetic
+model. No global/directory dispose, Host restart or live Node adoption is performed
+by this API. Borrowed runtime integration must explicitly reconcile native state
+and revoke/disconnect only its own MCP before publishing readiness or releasing
+the directory; that consumer and ready/turn contract remain #1195.
+
+Close revokes the capability and its HTTP connections, and restores exact original
+config bytes only while its own installed inode/bytes and recovery files are
+unchanged. Edited config/control files are retained, with a reported cleanup gap;
+the dead capability is never resurrected. Private `v1-mcp-<lease>.original` and
+instruction files plus the project lock remain for the named Owner to inspect.
+Crash recovery does not adopt a stale lock automatically: Owner must verify no
+bridge owns it, preserve edits, recover original private data, and explicitly
+prepare a new lease. Backup private project settings/data under the existing
+Owner-managed encrypted-data procedure before actual adoption; Git does not
+contain their secrets. Upgrade/rollback uses exact merged-main software and
+retained private backups; changed Host policy requires a separately chosen root.
+
+Both pinned V1 packages must pass `tests/test1212-v1-scoped-mcp/Dockerfile` via
+`v1-scoped-mcp-core.yml` before ordinary main merge. It pins source/Bun/package
+integrity, uses non-root network-disabled Docker and synthetic credentials/model.
+This proves the MCP/config primitive only; full borrowed Node lifecycle,
+ready/turn/abort, migration/final-checkpoint rollback and original Owner canary
+remain separate gates. No production files or running services are changed here.
+

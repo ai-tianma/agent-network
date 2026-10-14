@@ -10,6 +10,7 @@ import { startOwnedV1Host, V1HostStartupCancelledError } from "../../../agent-no
 const { values } = parseArgs({ options: {
   root: { type: "string" }, binary: { type: "string" }, version: { type: "string" },
   "host-id": { type: "string" }, cohort: { type: "string" }, port: { type: "string" },
+  "scoped-commhub-mcp": { type: "boolean", default: false },
 }, strict: true });
 const controller = new AbortController();
 let host: Awaited<ReturnType<typeof startOwnedV1Host>> | undefined;
@@ -34,7 +35,8 @@ let attestation;
 try { attestation = resolvePinnedOpencodeBinaryAttestation({ requestedBinary: values.binary!, expectedVersion: values.version!, probeEnv, probeCwd: probeRoot, forbiddenRoots: [root] }); }
 finally { rmSync(probeRoot, { recursive: true, force: true }); }
 try {
-  host = await startOwnedV1Host({ root, hostId: values["host-id"]!, cohortId: values.cohort!, version: values.version!, port: Number(values.port), attestation, signal: controller.signal });
+  host = await startOwnedV1Host({ root, hostId: values["host-id"]!, cohortId: values.cohort!, version: values.version!, port: Number(values.port), attestation, signal: controller.signal,
+    scopedCommhubMcp: values["scoped-commhub-mcp"] });
 } catch (error) { if (error instanceof V1HostStartupCancelledError) process.exit(0); throw error; }
 if (controller.signal.aborted) await stop();
 console.log(JSON.stringify({ kind: "v1-host-ready", hostId: host.record.hostId, instanceId: host.record.instanceId,
