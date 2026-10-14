@@ -9,6 +9,12 @@ Fixture SOURCE_COMMIT (PR test merge): 1e86643ecbd767417cf61d08a1e9ba42bf8c7dd8
 1.18.34 job115665384478 / artifact11867354420
 10 required guards SUCCESS before ordinary exact-head merge.
 Broader QA jobs were still pending; this is not a full-QA PASS declaration.
+Subsequent broad run38506584050: server-unit job115666011746 failed in three
+unchanged files (legacy sessions.network_id NULL insert, observer task dispatch
+403 versus 200/202, due-date filtering extra row). Desktop-push job115666013312
+also failed on that observer assertion. Server/runtime source is unchanged from
+c103, but no separate exact-base run was performed, so these are pending triage,
+not proven stale tests or a proven product regression. Tracked separately in Hub.
 
 Per version, 11 checkpoints passed (22 across the two exact packages):
 1 exact binary/version and loopback model environment
