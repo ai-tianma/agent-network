@@ -85,6 +85,19 @@ First post-source-merge snapshot74SUCCESS/107pending, zero observed rollup failu
 Full automatic E2E38599279927 and broad QA still pending at source merge; later
 results must be recorded later, not backdated as passed before merge.
 
+Later automatic complete regression
+-----------------------------------
+QA38599280227/job115974427389 subsequently SUCCESS:2917PASS/2SKIP/0FAIL,
+2919 tests across231files,216.37s; auxiliary66/0 and five runner groups/0.
+Full E2E38599279927 subsequently SUCCESS:job115974004724 plus rename115974003982.
+Actual checkoutd931b03b84db7391d4c3045f784ce6bf4e2ee2c5 matches qualified tree.
+Artifact11913830585 SHA256
+33a346417f1636b347154ee2674d9b22ade645e99ff106c2c7ae2ccb7eabb8da
+All eight complete logs read; seven groups139+25+28+16+22+12+47=289PASS/0FAIL.
+Aggregate test-all.log is not an extra group. Archive hash matches API digest.
+These are later evidence, not source-merge qualification already completed then.
+Broad QA still has unfinished report-only gates; no all-QA/original-adoption claim.
+
 Older broad QA failure preserved (#1268)
 ----------------------------------------
 Previous #1246 QA38594880454/job115959877632 L0+L1 report-only FAILURE at
