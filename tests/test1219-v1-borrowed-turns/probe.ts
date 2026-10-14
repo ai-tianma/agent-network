@@ -79,8 +79,8 @@ try{
   }) as typeof fetch;
   const busy=async(i:number)=>{for(let j=0;j<200;j++){if((await request("/session/status",projects[i]))[infos[i].id]?.type==="busy")return;await Bun.sleep(10);}throw Error(`no actual busy session ${i}`);};
   const history=(i:number)=>request(`/session/${infos[i].id}/message`,projects[i]);
-  const idle=async(i:number)=>{for(let j=0;j<500;j++){const s=(await request("/session/status",projects[i]))[infos[i].id];if(!s||s.type==="idle")return;await Bun.sleep(10);}throw Error(`session ${i} did not settle`);};
-  const rawHuman=(i:number,label:string)=>request(`/session/${infos[i].id}/message`,projects[i],"POST",{model:{providerID:"fixture",modelID:"alpha"},parts:[{type:"text",text:`Reply with exactly HOLD_ADMISSION_1214_${label}`}]});
+  const idle=async(i:number)=>{for(let j=0;j<2500;j++){const s=(await request("/session/status",projects[i]))[infos[i].id];if(!s||s.type==="idle")return;await Bun.sleep(10);}throw Error(`session ${i} did not settle`);};
+  const rawHuman=(i:number,label:string)=>request(`/session/${infos[i].id}/message`,projects[i],"POST",{model:{providerID:"fixture",modelID:"alpha"},parts:[{type:"text",text:`Reply with exactly HOLD_NATIVE_1219_${label}`}]});
   const runtimePost=(url:string,init:any,i:number)=>url===`${host!.server.url}/session/${infos[i].id}/message`&&init.method==="POST"&&JSON.parse(init.body??"{}").messageID;
   const recovery=async(h:OpenCodeCopresenceSession,i:number)=>{assert.equal(h.isRunning,false);const before=writes.length;await assert.rejects(h.submit("MUST_NOT_REPLAY",100));assert.equal(writes.length,before);await assert.rejects(h.close(),/completion unknown/);assert.ok(existsSync(join(projects[i],".anet-v1-mcp.lock")));assert.ok(readdirSync(states[i]).length>=2);};
   const timeoutError=async(p:Promise<any>)=>{try{await p;assert.fail("expected deadline");}catch(e){assert.ok(e instanceof OpenCodeCopresenceTimeoutError,String(e));return e as OpenCodeCopresenceTimeoutError;}};
@@ -91,7 +91,7 @@ try{
   for(const w of writes.filter(w=>w.session.includes(infos[0].id)))assert.ok(h.some((m:any)=>m.info.role==="assistant"&&m.info.parentID===w.id));
   pass("native FIFO and exact parentID ownership with simultaneous scoped sibling reply");
   const own=await entry(7);handles.push(own);const a0=aborts.length;
-  const ownError=await timeoutError(own.submit("Reply with exactly HOLD_ADMISSION_1214_OWN",1500));
+  const ownError=await timeoutError(own.submit("Reply with exactly HOLD_NATIVE_1219_OWN",10000));
   assert.equal(ownError.phase,"reply");assert.equal(ownError.aborted,true);assert.deepEqual(aborts.slice(a0),[`${host.server.url}/session/${infos[7].id}/abort`]);await idle(7);
   assert.equal(own.isRunning,true);assert.equal((await own.submit("Reply with exactly AFTER_OWN_ABORT",20000)).replyText,"AFTER_OWN_ABORT");await own.close();
   pass("actual landed own native turn deadline sends only exact own abort and runtime remains reusable");
@@ -103,22 +103,22 @@ try{
   pass("injected undelivered POST deadline uses actual empty native history, no abort and no unknown lockout");
   const unread=await entry(3);handles.push(unread);let unreadSignal:AbortSignal|undefined;const a2=aborts.length;
   fault=async(url,init)=>{if(runtimePost(url,init,3))unreadSignal=init.signal;if(unreadSignal?.aborted&&url===`${host!.server.url}/session/${infos[3].id}/message`&&init.method!=="POST")return new Response("injected unreadable history",{status:503});};
-  const unknown=await timeoutError(unread.submit("Reply with exactly HOLD_ADMISSION_1214_UNREAD",1500));fault=undefined;
+  const unknown=await timeoutError(unread.submit("Reply with exactly HOLD_NATIVE_1219_UNREAD",10000));fault=undefined;
   assert.equal(unknown.phase,"reply");assert.equal(unknown.aborted,false);assert.equal(aborts.length,a2);await recovery(unread,3);await idle(3);
   pass("landed native turn plus injected unreadable history retains unknown recovery without abort or replay");
   const failed=await entry(4);handles.push(failed);const a3=aborts.length;
   fault=async(url,init)=>{if(url===`${host!.server.url}/session/${infos[4].id}/abort`&&init.method==="POST")return new Response("injected abort transport failure",{status:503});};
-  const failure=await timeoutError(failed.submit("Reply with exactly HOLD_ADMISSION_1214_ABORT_FAIL",1500));fault=undefined;
+  const failure=await timeoutError(failed.submit("Reply with exactly HOLD_NATIVE_1219_ABORT_FAIL",10000));fault=undefined;
   assert.equal(failure.phase,"reply");assert.equal(failure.aborted,false);assert.ok(failure.userReplyText.includes("中止会话失败"));assert.deepEqual(aborts.slice(a3),[`${host.server.url}/session/${infos[4].id}/abort`]);await recovery(failed,4);await idle(4);
   pass("actual own native turn with injected abort failure gives truthful failure receipt and retains recovery");
   const lead=await entry(5);handles.push(lead);let leading:Promise<any>|undefined;const a4=aborts.length;
   fault=async(url,init)=>{if(runtimePost(url,init,5)){fault=undefined;leading=rawHuman(5,"LEAD");await busy(5);}};
-  const leadingError=await timeoutError(lead.submit("Reply with exactly NETWORK_BEHIND_HUMAN",1500));fault=undefined;
+  const leadingError=await timeoutError(lead.submit("Reply with exactly NETWORK_BEHIND_HUMAN",10000));fault=undefined;
   assert.equal(leadingError.phase,"reply");assert.equal(leadingError.aborted,false);assert.equal(aborts.length,a4);await recovery(lead,5);await leading;await idle(5);
   const leadHistory=await history(5);assert.equal(leadHistory.filter((m:any)=>m.info.role==="user").length,2);
   pass("native human wins idle-to-POST race; queued network deadline does not abort human and retains exact recovery");
   const tail=await entry(6);handles.push(tail);const a5=aborts.length;
-  const pending=tail.submit("Reply with exactly HOLD_ADMISSION_1214_NETWORK",1500);await busy(6);const trailing=rawHuman(6,"TAIL");
+  const pending=tail.submit("Reply with exactly HOLD_NATIVE_1219_NETWORK",10000);await busy(6);const trailing=rawHuman(6,"TAIL");
   for(let j=0;j<100;j++){if((await history(6)).filter((m:any)=>m.info.role==="user").length===2)break;await Bun.sleep(10);if(j===99)throw Error("human did not queue");}
   const tailError=await timeoutError(pending);assert.equal(tailError.aborted,false);assert.equal(aborts.length,a5);await recovery(tail,6);await trailing;await idle(6);
   pass("native human queued after network turn prevents session-scoped abort and automatic replay");

@@ -5,3 +5,5 @@ Actual native sessions/model execution and causal parent IDs, FIFO/sibling, owne
 Original owned regression and three abort-ownership mutations remain mandatory unchanged.
 No production app/Host/credentials adoption. CLI/TUI and 1196 migration remain separate gates.
 Recovery/rebuild: suite Dockerfile and run.sh reconstruct fixture; no reverse proxy or external tunnel; synthetic credentials generated only in fixture; source/version/SRI pins build exact native; rollback is checking out prior source; no production state backup or migration performed. Shared Host is created and stopped only by fixture owner; unknown node controls retained until fixture disposal.
+
+Initial head212f900d4 / run38536277074 / native1.18.1 job115759812719: actual FIFO/parent IDs passed, own-turn gate FAILED because 1500ms exhausted admission before native POST; not a proven production abort failure. Fixture budget corrected to10000ms with synthetic model hold15s; original expected landed/abort assertions retained, native rerun pending.

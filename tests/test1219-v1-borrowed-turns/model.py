@@ -16,7 +16,7 @@ class H(BaseHTTPRequestHandler):
         if isinstance(user,list):user=" ".join(p.get("text","") for p in user if isinstance(p,dict))
         results=[m for m in messages[user_index+1:] if m.get("role")=="tool"]
         with open(LOG,"a") as f:f.write(json.dumps({"model":body.get("model"),"tools":tools,"user":user,"toolResults":len(results)})+"\n")
-        if "HOLD_ADMISSION_1214" in user: time.sleep(3)
+        if "HOLD_NATIVE_1219" in user: time.sleep(15)
         call="CALL_IDENTITY" in user and not results
         name=next((n for n in tools if n and n.endswith("read_identity")),None)
         if call and not name:raise RuntimeError("identity MCP tool was not offered")
