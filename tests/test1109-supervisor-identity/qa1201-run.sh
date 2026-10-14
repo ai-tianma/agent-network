@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+source /work/tests/lib/safe-rm.sh
 test -f /.dockerenv
 test "$(id -u)" != 0
 test -n "${SOURCE_COMMIT:-}"
@@ -9,7 +10,7 @@ unset DATABASE_URL COMMHUB_TEST_PG_URL
 cd /work/server
 echo "TEST-ONLY source=$SOURCE_COMMIT selected-baseline=$BASE_COMMIT"
 fixture_dir=$(mktemp -d /tmp/qa1201.XXXXXXXX)
-trap 'rm -rf -- "$fixture_dir"' EXIT
+trap 'safe_rm_rf "$fixture_dir"' EXIT
 files=(host-supervisor-identity-http.test.ts observer-avatar-http.test.ts requirements-http.test.ts)
 mkdir "$fixture_dir/candidate"
 for f in "${files[@]}"; do cp "src/$f" "$fixture_dir/candidate/$f"; cp "/baseline/$f" "src/$f"; done

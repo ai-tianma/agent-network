@@ -10,6 +10,7 @@ COPY agent-network/src /work/agent-network/src
 COPY agent-network/bin /work/agent-network/bin
 COPY contracts/side-thread/v1 /work/contracts/side-thread/v1
 COPY tests/test1109-supervisor-identity/ /work/tests/test1109-supervisor-identity/
+COPY tests/lib/safe-rm.sh /work/tests/lib/safe-rm.sh
 ARG BASE_COMMIT=5cb8db3d4d2d907d43a7fd47d926cf323fa1df41
 RUN mkdir /baseline && for f in host-supervisor-identity-http.test.ts observer-avatar-http.test.ts requirements-http.test.ts; do curl --fail --silent --show-error --location --max-time 30 "https://raw.githubusercontent.com/sleep2agi/agent-network/$BASE_COMMIT/server/src/$f" -o "/baseline/$f"; done
 RUN python3 - <<'PY'
