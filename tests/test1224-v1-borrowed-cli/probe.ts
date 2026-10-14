@@ -128,18 +128,18 @@ try{
   assert.ok(users.every((u:any)=>historyA.some((m:any)=>m.info.role==="assistant"&&m.info.parentID===u.info.id)));
   pass("actual built CLI config→inbox→native model/scoped MCP→original task reply on two exact bindings; FIFO/parent IDs, sender provenance and byte-preserved config verified");
   await stop(a);assert.deepEqual(readFileSync(join(projects[0],"opencode.json")),original[0]);assert.ok(existsSync(join(states[0],"opencode-borrowed-v1-selection.json")));assert.equal(host.isRunning,true);assert.deepEqual(readFileSync(join(hostRoot,"registry.json")),beforeRegistry);
-  queues[1].push(task(1,"AFTER_A_CLOSE"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_message"}\n\n'));await waitFor(()=>replies[1].length>=2,"sibling after A close");
+  queues[1].push(task(1,"AFTER_A_CLOSE"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_task"}\n\n'));await waitFor(()=>replies[1].length>=2,"sibling after A close");
   assert.ok(String(replies[1].at(-1).text).includes("NODE_B"));pass("CLI SIGTERM closes only own MCP/config; shared Host and sibling CLI native model remain live, selected intent persists");
   const ownedFallback=structuredClone(configs[0]);delete (ownedFallback as any).opencodeBorrowedV1;writeConfig(0,ownedFallback);
   const blocked=spawnCli(0);await waitFor(()=>blocked.exitCode!==null,"no owned fallback",10000);assert.ok(logs[0].includes("no owned fallback"));assert.deepEqual(readFileSync(join(projects[0],"opencode.json")),original[0]);assert.equal(host.isRunning,true);
   writeConfig(0,configs[0]);const resumed=spawnCli(0);await waitFor(()=>logs[0].includes("SSE connected"),"same exact borrowed restart");assert.deepEqual(await request(`/session/${infos[0].id}/message`,projects[0]),historyA);await stop(resumed);
   pass("persisted selection blocks implicit owned fallback; explicit exact borrowed restart preserves original session/history");
   // A real in-flight config identity change makes completion unprovable.
-  queues[1].push(task(1,"UNKNOWN","Reply with exactly HOLD_ADMISSION_1214"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_message"}\n\n'));
+  queues[1].push(task(1,"UNKNOWN","Reply with exactly HOLD_ADMISSION_1214"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_task"}\n\n'));
   let busy=false;for(let j=0;j<500;j++){if((await request("/session/status",projects[1]))[infos[1].id]?.type==="busy"){busy=true;break;}await Bun.sleep(10);}assert.equal(busy,true);
   const changed=structuredClone(configs[1]);changed.network_id="foreign";writeConfig(1,changed);await waitFor(()=>replies[1].length>=3,"unknown failure receipt");
   const countBefore=(await request(`/session/${infos[1].id}/message`,projects[1])).filter((m:any)=>m.info.role==="user").length;
-  writeConfig(1,configs[1]);queues[1].push(task(1,"MUST_NOT_REOPEN"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_message"}\n\n'));await waitFor(()=>replies[1].length>=4,"no reopen failure receipt");
+  writeConfig(1,configs[1]);queues[1].push(task(1,"MUST_NOT_REOPEN"));for(const c of streams[1])c.enqueue(new TextEncoder().encode('data: {"type":"new_task"}\n\n'));await waitFor(()=>replies[1].length>=4,"no reopen failure receipt");
   assert.ok(String(replies[1].at(-1).text).includes("no automatic reopen"));assert.equal((await request(`/session/${infos[1].id}/message`,projects[1])).filter((m:any)=>m.info.role==="user").length,countBefore);assert.ok(existsSync(join(projects[1],".anet-v1-mcp.lock")));assert.equal(host.isRunning,true);await stop(b);
   pass("actual CLI in-flight identity drift retains unknown recovery and original binding; next task cannot reopen or replay even after config restored; Host survives");
   console.log(JSON.stringify({kind:"TEST-ONLY",source:process.env.SOURCE_COMMIT,version,checks,result:"PASS",scope:"actual built agent-node CLI with synthetic Hub/model and native borrowed Host; no interactive TUI/product adoption/migration/live credentials"}));
