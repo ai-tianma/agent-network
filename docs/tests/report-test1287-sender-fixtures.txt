@@ -61,6 +61,18 @@ entrypoints/proxy/ports/secret sources and software rollback remain authoritativ
 Git restores software/fixtures, not actual identities/history/backup contents.
 No full production recovery, live adoption or real LLM proof is certified.
 
+Post-cutoff failure retained under existing dependency-input ledger #1282:
+recovered suites run38636579274/job116101452708 FAILURE at21:02:21Z.
+The failing build is tests/qa-daemon-lifecycle-e2e/Dockerfile:45:
+agent-network bun install --silent && bun run build stops while unpacking
+@types/node with ZlibError, before that lifecycle script runs. Other suites
+had already executed in this batch. This is not a sender baseline failure;
+no shared cause with earlier hono integrity failure is established.
+Complete job log154224B SHA256
+ 74a312afd5626c0a4c0bb4586bf8610a4fbc0ff5fcebb7ee86bfd6893ff0a509.
+Artifact11929285565; no checksum relaxation, retry-green or independent old-base
+zero-impact claim. The dependency diagnosis remains open.
+
 ----- COMPLETE ORIGINAL INDEPENDENT CI REPORT (5824 bytes) -----
 TEST-ONLY source=416809d65e3d0a77680f73d288dc758cb761d3e0 scope=original sender fixtures case=baseline
 source_commit=416809d65e3d0a77680f73d288dc758cb761d3e0
