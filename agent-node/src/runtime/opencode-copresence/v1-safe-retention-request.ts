@@ -40,7 +40,8 @@ function digest(requestId: string, sourceBinding: Binding): string {
     purpose: "owned-safe-v1-retention-request-observation", requestId, sourceBinding })).digest("hex");
 }
 function validateId(options: ObserveV1SafeRetentionRequestOptions): void {
-  if (!/^[a-f0-9]{32,64}$/.test(options.requestId)) refuse();
+  if (typeof options.requestId !== "string" || options.requestId.length < 32 || options.requestId.length > 64
+    || /[^a-f0-9]/.test(options.requestId)) refuse();
 }
 
 /** Read-only correlation and exact source recheck; does not prepare retention.

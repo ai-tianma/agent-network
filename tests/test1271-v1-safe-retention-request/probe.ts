@@ -60,7 +60,7 @@ try {
   for (const key of Object.keys(options.source))
     assert.throws(() => revalidateV1SafeRetentionRequest(request, { ...options,
       source: { ...options.source, [key]: "foreign1271" } } as any), V1SafeRetentionRequestError);
-  for (const changed of [{ requestId: "b".repeat(48) }, { requestId: "../1271" },
+  for (const changed of [{ requestId: "b".repeat(48) }, { requestId: "../1271" }, { requestId: "a".repeat(32) + "\n" },
     { requestedSoftwareMain: "b".repeat(40) }, { binaryAttestation: { ...attestation, expectedVersion: "2.0.22" } }])
     assert.throws(() => revalidateV1SafeRetentionRequest(request, { ...options, ...changed }), V1SafeRetentionRequestError);
   assert.throws(() => observeV1SafeRetentionRequest({ ...options, requestId: "invalid" }), V1SafeRetentionRequestError);
