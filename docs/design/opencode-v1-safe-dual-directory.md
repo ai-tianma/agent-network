@@ -53,7 +53,9 @@ and actual default wrapper/native 1.18.1/1.18.34 empty sessions. It keeps inheri
 SAFE/checkpoint tests, observes native directory/policy/close, and exercises source
 coordinates/config, unknown residues, controlled inode substitution and copied
 marker refusal. Unspawned data substitution is not a native writer/TUI race.
-Actual artifacts and failures remain pending until recorded in `docs/tests/`.
+Both native versions passed25 inherited unit tests and9 actual/controlled
+observations. Artifacts, exact source and remaining failures/gates are in
+[`report-test1267-v1-safe-dual-directory.txt`](../tests/report-test1267-v1-safe-dual-directory.txt).
 
 1. No new resident service; existing runtime startup stays authoritative. The
    independent Dockerfile/run.sh reproduces observations, not a migration daemon.
