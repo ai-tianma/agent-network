@@ -64,7 +64,8 @@ async function prepare(configPath: string) {
           || (Object.hasOwn(states,admission.expectedBinding.sessionId) && states[admission.expectedBinding.sessionId]?.type!=="idle")) refuse("session busy/retrying/unknown");
       }
       selection!.readBinding();
-      loadV1HostRegistry(admission.hostRoot,admission.expectedHost,admission.attestation);
+      const after = loadV1HostRegistry(admission.hostRoot,admission.expectedHost,admission.attestation).server;
+      if (after.identity!==original.identity || after.url!==original.url || after.password!==original.password) refuse("Host authority changed during read");
       if (!inspectBorrowedLaunchHealth(configPath,0,launch.nonce).ok
         || !readPrivateV1HostFile(lockPath,uid,16384).equals(lockBytes)
         || !readPrivateV1HostFile(config,uid,1024*1024).equals(projectBytes)) refuse("authority changed during read");

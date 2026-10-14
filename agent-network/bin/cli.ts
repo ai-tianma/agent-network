@@ -14662,15 +14662,21 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 // RFC-029 — OpenCode lifecycle and pin-management commands.
 async function opencodeBorrowedAttachCommand(ref?: string) {
   if (!ref) throw new Error("Usage: anet opencode attach <node>");
-  const resolved = resolveNodeRef(ref);
-  if (!resolved) throw new Error(nodeNotFound(ref));
-  const cfg=join(nodesDir(),resolved.id,"config.json");
-  const selected=readBorrowedLaunchConfig(cfg,process.cwd());
-  if (selected.selection.binding.nodeId!==resolved.profile.node_id || selected.alias!==nodeDisplayName(resolved.id,resolved.profile)) {
-    throw new Error("borrowed V1 TUI node identity mismatch");
-  }
+  // The ordinary profile resolver repairs permissions (even a 0600 chmod
+  // changes ctime), invalidating the live bridge's frozen config evidence.
+  // This entry only reads explicit private borrowed selections; no repair or
+  // global profile/token fallback, and ambiguous names never select first.
+  const ids=listProfileIds(), candidates=ids.includes(ref) ? [ref] : ids;
+  const matches=candidates.flatMap(id=>{
+    try {
+      const cfg=join(nodesDir(),id,"config.json"), selected=readBorrowedLaunchConfig(cfg,process.cwd());
+      return ref===id || ref===selected.alias || ref===selected.selection.binding.nodeId ? [{id,cfg,selected}] : [];
+    } catch { return []; }
+  });
+  if(matches.length!==1)throw new Error("borrowed V1 TUI requires one exact existing private node selection");
+  const {cfg,selected}=matches[0];
   checkRuntimeDependency("opencode-cli","start");
-  assertStartCompatibility("opencode-cli",resolved.profile,resolved.id);
+  assertStartCompatibility("opencode-cli",{runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence"} as Profile,matches[0].id);
   const plan=revalidateOpencodeAgentNodeLaunchPlan(resolveOpencodeAgentNodeLaunchPlan());
   if (!agentNodeHelp(plan).includes("ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1")) {
     throw new Error("exact agent-node lacks borrowed V1 TUI capability; upgrade both precise source builds before attaching");
