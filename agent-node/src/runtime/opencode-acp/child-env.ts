@@ -67,6 +67,9 @@ interface TrackedLaunchRoot {
   workDir: string;
   workDirDev: number | bigint;
   workDirIno: number | bigint;
+  requestedCwd: string;
+  requestedIdentity?: { dev: number | bigint; ino: number | bigint };
+  dataIdentity?: { dev: number | bigint; ino: number | bigint };
   effectiveCwd: string;
   safeWorkspace: boolean;
   enforceManagedPreflight: boolean;
@@ -1338,6 +1341,33 @@ export interface BuildOpencodeChildEnvOptions {
   managedPolicyMode?: "enforce" | "redirect-only";
 }
 
+/** Read-only observation of this module instance's own SAFE allocation.
+ * It grants no retention/transfer lease, process liveness or writer exclusion.
+ * A marker from another process is deliberately insufficient. */
+export function inspectOpencodeOwnedSafeLaunch(
+  workDir: string, requestedDirectory: string, nativeDirectory: string,
+) {
+  function fail(): never { throw new Error("OpenCode owned SAFE topology unavailable"); }
+  const canonical = (path: string) => typeof path === "string" && isAbsolute(path)
+    && !path.includes("\0") && resolve(path) === path && realpathSync(path) === path;
+  if (!canonical(workDir) || !canonical(requestedDirectory) || !canonical(nativeDirectory)) fail();
+  const launchRoot = dirname(nativeDirectory), tracked = trackedLaunchRoots.get(launchRoot);
+  if (!tracked || !tracked.active || !tracked.safeWorkspace || tracked.workDir !== workDir
+    || tracked.requestedCwd !== requestedDirectory || tracked.effectiveCwd !== nativeDirectory
+    || !tracked.requestedIdentity || !tracked.dataIdentity) fail();
+  revalidateOpencodeChildLaunch(workDir, { PWD: nativeDirectory,
+    XDG_DATA_HOME: join(launchRoot, "data"), OPENCODE_TEST_MANAGED_CONFIG_DIR: tracked.managedConfigDir });
+  const project = lstatSync(requestedDirectory), dataPath = join(launchRoot, "data"), data = lstatSync(dataPath);
+  if (!project.isDirectory() || project.isSymbolicLink() || !sameIdentity(project, tracked.requestedIdentity)
+    || !sameIdentity(data, tracked.dataIdentity)) fail();
+  assertPrivateDirectory(dataPath, "observed native data root");
+  const identity = (path: string) => { const st = lstatSync(path);
+    return Object.freeze({ path, dev: String(st.dev), ino: String(st.ino) }); };
+  return Object.freeze({ ownerInstanceId: PROCESS_INSTANCE_ID, ownerPid: process.pid,
+    workDir: identity(workDir), requested: identity(requestedDirectory),
+    native: identity(nativeDirectory), launch: identity(launchRoot), data: identity(dataPath) });
+}
+
 /**
  * Construct the complete environment for `opencode acp` from an empty
  * allowlist. Safe PWD, HOME, temporary storage, and every XDG root live in one
@@ -1363,6 +1393,14 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
 
   assertPrivateDirectory(workDir, "node workDir");
   const workDirStat = lstatSync(workDir);
+  // Missing/noncanonical projects retain existing launch behavior. A later
+  // topology review refuses them instead of inventing their original identity.
+  let requestedIdentity: { dev: number | bigint; ino: number | bigint } | undefined;
+  try {
+    const st = lstatSync(requestedCwd);
+    if (st.isDirectory() && !st.isSymbolicLink() && realpathSync(requestedCwd) === requestedCwd)
+      requestedIdentity = { dev: st.dev, ino: st.ino };
+  } catch { /* Observation only; no new launch admission. */ }
 
   const config = ensurePrivateChildDirectory(workDir, workDir, ".config", "config root");
   const configOpencode = ensurePrivateChildDirectory(workDir, config, "opencode", "OpenCode config directory");
@@ -1403,6 +1441,8 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
     workDir,
     workDirDev: workDirStat.dev,
     workDirIno: workDirStat.ino,
+    requestedCwd,
+    requestedIdentity,
     effectiveCwd: requestedCwd,
     safeWorkspace: opts.unsafeTools !== true,
     enforceManagedPreflight: opts.unsafeTools !== true
@@ -1444,6 +1484,8 @@ export function buildOpencodeChildEnv(opts: BuildOpencodeChildEnvOptions): NodeJ
       "data",
       "fresh OpenCode data root",
     );
+    const dataStat = lstatSync(effectiveData);
+    trackedLaunchRoots.get(launchRoot)!.dataIdentity = { dev: dataStat.dev, ino: dataStat.ino };
     const effectiveDataOpencode = ensurePrivateChildDirectory(
       launchRoot,
       effectiveData,
