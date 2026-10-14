@@ -50,6 +50,18 @@ baseline to five. Replaced with parseHubTimestamp without changing the baseline;
 final head's ratchet passes. Local isolated fixture results were 53, then57,
 then58 passes as cases were added, not independent final-head certificates.
 
+Post-cutoff actual broad QA failure, tracked as CommHub #1282:
+run38628072206/job116073019873 failed at 2026-10-14T20:01:25Z before
+functional execution: tests/qa-codex-copresence-stop-start/Dockerfile:35,
+server bun install --silent, "Integrity check failed for tarball: hono".
+The Docker image never completed; this is not proof that Codex stop/start
+behavior failed or passed. Complete sanitized job log80853 B, SHA256
+33b9bfc48c326d176b801d68809d40bf71b50a520eec630527adde6bea560bf2.
+Source package/lock and this Dockerfile have no diff from the parent; no
+independent base experiment or exact registry/download cause was obtained.
+Checksum was not bypassed, no healthy suite was rerun, no product recovery
+was fabricated. The original scoped58 pass remains, while whole QA is red.
+
 ----- COMPLETE ORIGINAL INDEPENDENT CI REPORT (26870 bytes) -----
 TEST-ONLY source=65decf7c76e1a41218bb4126bff463818e500638 scope=opt-in SQLite scoped-requirement-wake
 Bundled 367 modules in 54ms
