@@ -93,6 +93,21 @@ Full final-head E2E38612606230 and other broad QA remain pending at this
 report cutoff; not counted as passed. Existing historical Windows stop and
 L0 failures remain #1262/#1268; no all-repository CI-green claim.
 
+LATER COMPLETE NODE / FULL E2E RESULTS (NOT BACKDATED TO SOURCE MERGE)
+Source QA38612605907/job116020315185 agent-node unit SUCCESS:
+2917 pass / 2 skip / 0 fail, 2919 tests/231 files/218.30s;
+auxiliary66/0 and five runner groups/0. Full571041-byte job log read;
+actual terminal results18:16:19Z/18:16:28Z follow18:14:22Z source merge.
+Full E2E38612606230 jobs116019510526/116019510819 SUCCESS.
+Artifact11919146831 e2e-suite-logs-1 complete ZIP SHA-256
+cc9275a3f4a39e18c4f03bf3e6a649221d51016d2595142233ff1a9e8c57c945
+matched published digest; all8 complete logs were downloaded/read.
+Seven suites139+25+28+16+22+12+47 =289 pass/0 fail; test-all.log agrees
+and is not counted as an eighth independent suite. The npm-pack fixture
+is not a public package release. These are later automatic results,
+not passed at source merge. Other broad QA still incomplete at this cutoff;
+existing Windows/L0 issues remain independent and no all-CI-green claim.
+
 PRODUCT / ADOPTION / RECOVERY LIMITS
 New field is an authenticated self-report, not independent domain-completeness
 evidence. Producer annotations are opt-in; no runtime automatically marks
