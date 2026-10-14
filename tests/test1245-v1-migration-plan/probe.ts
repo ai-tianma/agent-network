@@ -75,6 +75,8 @@ try {
   await assert.rejects(prepareV1MigrationPlan({ ...options, target: { ...selected, selectedCohortId: "foreign" } }), V1MigrationPlanError);
   await assert.rejects(prepareV1MigrationPlan({ ...options, requestedSoftwareMain: "latest" }), V1MigrationPlanError);
   await assert.rejects(prepareV1MigrationPlan({ ...options, sourceAttestation: { ...attestation, expectedVersion: "2.0.22" } }), V1MigrationPlanError);
+  await assert.rejects(prepareV1MigrationPlan({ ...options, source: { ...source, token: config.token } } as any), V1MigrationPlanError);
+  await assert.rejects(prepareV1MigrationPlan({ ...options, target: { ...selected, expectedHost: { ...selected.expectedHost, password: target.server.password } } } as any), V1MigrationPlanError);
   pass("independent source identity fields, cohort, requested pin and cross-version inputs refuse");
   for (const path of [join(nodeRoot, "opencode-borrowed-v1-selection.json"), join(nodeRoot, "opencode-borrowed-v1-launch.json"),
     join(nodeRoot, "opencode-borrowed-v1-tui.json"), join(project, ".anet-v1-mcp.lock")]) {

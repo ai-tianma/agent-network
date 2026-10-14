@@ -38,6 +38,10 @@ export async function prepareV1MigrationPlan(options: PrepareV1MigrationPlanOpti
     const { sourceRoot, configPath, sourceAttestation, requestedSoftwareMain } = options;
     const target = Object.freeze({ ...options.target, expectedHost: host, expectedBinding: binding, model: source.model });
     const uid = process.getuid?.();
+    const exactFields = (value: object, names: string[]) => Object.keys(value).length === names.length
+      && Object.keys(value).every(k => names.includes(k));
+    if (!exactFields(source, ["networkId", "nodeId", "alias", "directory", "sessionId", "model"])
+      || !exactFields(host, ["hostId", "instanceId", "version", "cohortId"])) refuse();
     if (uid === undefined || dirname(configPath) !== sourceRoot || configPath !== join(sourceRoot, "config.json")
       || !/^[a-f0-9]{40}$/.test(requestedSoftwareMain) || !/^[^/\s]+\/[^/\s]+$/.test(source.model)
       || !source.alias || (sourceAttestation.generation ?? "v1") !== "v1"
@@ -99,6 +103,8 @@ export async function prepareV1MigrationPlan(options: PrepareV1MigrationPlanOpti
     const candidate = await captureV1SharedCandidate(target);
     verifyV1ImportedHistory(original, candidate.data);
     await policy();
+    revalidatePinnedOpencodeBinary(sourceAttestation, { expectedVersion: host.version,
+      forbiddenRoots: [sourceRoot, source.directory, target.hostRoot] });
     // These fingerprints describe observed private source bytes, not a lock or
     // permission to commit. No config credentials or history body are returned.
     return Object.freeze({ schema: 1 as const, purpose: "owned-to-borrowed-v1-review-plan" as const,
