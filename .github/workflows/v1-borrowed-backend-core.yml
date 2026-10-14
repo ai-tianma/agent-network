@@ -13,6 +13,7 @@ on:
       - 'agent-node/src/runtime/opencode-acp/binary.ts'
       - 'deploy/node/opencode-v1-host/**'
       - 'tests/test1216-v1-borrowed-backend/**'
+      - 'tests/test651-opencode-timeout-abort/**'
       - 'tests/test1194-v1-shared-feasibility/package-integrity.json'
       - '.github/workflows/v1-borrowed-backend-core.yml'
   workflow_dispatch:

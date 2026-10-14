@@ -13,6 +13,7 @@ COPY agent-node/src ./src
 COPY agent-network/src /repo/agent-network/src
 COPY deploy/node/opencode-v1-host /repo/deploy/node/opencode-v1-host
 COPY tests/test1216-v1-borrowed-backend /fixture
+COPY tests/test651-opencode-timeout-abort/run.sh /fixture/timeout-mutation.sh
 ARG SOURCE_COMMIT
 ENV SOURCE_COMMIT=$SOURCE_COMMIT OPENCODE_VERSION_UNDER_TEST=$OPENCODE_VERSION
 USER bun
