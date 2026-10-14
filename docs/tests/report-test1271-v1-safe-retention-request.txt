@@ -85,6 +85,21 @@ Auxiliary tests: 66 pass / 0 fail across 3 files; runner groups 5 passed /
 API is separately qualified by the six native fixture groups above.
 Full E2E and the broad QA run remain pending at this later observation.
 
+LATER BROAD WINDOWS RED — RETAINED IN EXISTING #1262
+QA run 38605822451 / job 115996308523 Windows Codex co-presence native smoke
+completed FAILURE. Full job log read (35972 bytes). At 17:25:39Z the fixture
+failed node stop windows-picker in tests/test751-codex-copresence-windows/
+windows-e2e.mjs:57: taskkill.exe /PID 3796 /T /F reported that a descendant
+could not be terminated, reason The operation attempted is not supported.
+Earlier fixture start/stop/restart resumed the same thread and current-health
+checks passed; this does not qualify the later failing stop. Precise cause
+remains unknown. Same failing stage as existing #1262, not a new duplicate
+requirement and not evidence that all descendants stopped. Preserve process
+birth-identity protections; no original Windows node/process operation.
+This source changed none of agent-network, Windows harness or stop code and
+has no automatic production caller. No separate Windows baseline was run;
+no claim of a newly proved source regression or all-QA success.
+
 PRODUCT / RECOVERY LIMITS
 API-only observation/recheck; no automatic production caller, durable marker,
 retention or source cleanup participation, credential-cleanup qualification,
