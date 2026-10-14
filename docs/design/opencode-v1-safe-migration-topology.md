@@ -55,7 +55,9 @@ An existing checkpoint can be nonfinal; cleanShutdown alone is not exclusion.
 request. It reads only its synthetic empty session/checkpoint and native policy,
 checks lifecycle retirement, and compares a later unspawned allocation. This is
 not nonempty historical restore, a human TUI race or an actual second native
-resume. Qualification remains pending until actual artifacts are recorded.
+resume. Both versions passed four actual observations at the exact qualified
+source tree; artifacts, earlier REDs and remaining gates are recorded in
+[`report-test1246-v1-safe-topology.txt`](../tests/report-test1246-v1-safe-topology.txt).
 
 1. Existing runtime startup remains authoritative; fixture Dockerfile/run.sh
    reproduces this observation, not a new persistent service or CLI migration.
