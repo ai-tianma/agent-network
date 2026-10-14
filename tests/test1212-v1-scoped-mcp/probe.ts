@@ -58,6 +58,14 @@ try{
     original.push(Buffer.from(`${JSON.stringify(base)}\n`));writeFileSync(join(projects[i],"opencode.json"),original[i],{mode:0o600});
   }
   const infos=await Promise.all(projects.map(directory=>request("/session",directory,"POST",{title:"TEST1212"})));
+  // Exact native V1 adds $schema when it first loads a project file. Capture
+  // the actual pre-lease bytes, while proving that annotation changed no inputs.
+  for(let i=0;i<3;i++){
+    const baseline=JSON.parse(original[i].toString()),current=readFileSync(join(projects[i],"opencode.json")),loaded=JSON.parse(current.toString());
+    assert.equal(typeof loaded.$schema,"string");delete loaded.$schema;assert.deepEqual(loaded,baseline);
+    original[i]=current;
+  }
+  observations.nativeInitialSchemaAnnotation=true;
   const bindings=infos.map((info,i)=>({networkId:"net_fixture1212",nodeId:`n_${i}`,serverIdentity:host!.server.identity,directory:projects[i],sessionId:info.id}));
   const saved=bindings.map(b=>({...b}));
   const readServer=()=>loadV1HostRegistry(hostRoot,host!.record,attestation).server;
