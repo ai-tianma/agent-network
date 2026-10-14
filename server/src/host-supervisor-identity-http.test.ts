@@ -100,10 +100,26 @@ for (const entry of ["MCP", "REST"] as const) {
   test(`${entry}: null-network legacy heartbeat is accepted only for globally unique aliases`, async () => {
     const unique = node("globalunique"), shared = node("globalshared"); node("globalshared", foreign);
     credential(unique); credential(shared);
-    heartbeat(unique, { bound: null, network: null }); heartbeat(shared, { bound: null, network: null });
-    const rows = await list(entry);
-    expect(rows.find(r => r.daemon_node_id === unique).online).toBe(true);
-    expect(rows.find(r => r.daemon_node_id === shared).online).toBe(false);
+    // Fresh sessions is NOT NULL. Exercise the historical nullable shape in
+    // an actual temporary SQL table, without changing the production schema
+    // or mocking returned rows. Only the heartbeat read uses this table;
+    // the production node/token/scoped SQL and both HTTP/MCP paths stay real.
+    db.exec("CREATE TEMP TABLE lhs1109_legacy_sessions AS SELECT * FROM sessions WHERE 0=1");
+    for (const id of [unique, shared]) {
+      const n = db.get<any>("SELECT alias FROM nodes WHERE node_id=?1", id)!;
+      db.run(`INSERT INTO lhs1109_legacy_sessions(resume_id,alias,network_id,node_id,last_seen_at,updated_at,status)
+        VALUES(?1,?2,NULL,NULL,?3,?3,'idle')`, [`s_lhs1109_${++sequence}`, n.alias, new Date().toISOString()]);
+    }
+    const original = db.all.bind(db);
+    db.all = ((sql: string, ...params: any[]) => original(sql.replace("FROM sessions s", "FROM lhs1109_legacy_sessions s"), ...params)) as any;
+    try {
+      const rows = await list(entry);
+      expect(rows.find(r => r.daemon_node_id === unique).online).toBe(true);
+      expect(rows.find(r => r.daemon_node_id === shared).online).toBe(false);
+    } finally {
+      db.all = original;
+      db.exec("DROP TABLE lhs1109_legacy_sessions");
+    }
   });
   test(`${entry}: bound heartbeat ignores stale alias but refuses wrong network and stale timestamps`, async () => {
     const renamed = node("newalias"), wrong = node("wrongnet"), stale = node("stale");
