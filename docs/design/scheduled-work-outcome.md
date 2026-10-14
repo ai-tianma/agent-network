@@ -41,9 +41,9 @@ stale generations must not authorize a backoff. History is not cadence authority
 
 ## Remaining #756 gates
 
-Continuous-empty counters, 10–30 minute effective intervals, durable state,
-fresh domain-event wake/reset, overlap/retry races, policy ownership/visibility
-and producer/current-software adoption remain incomplete. Once/daily/weekly
+Following source slice [#1278](scheduled-backoff.md) adds opt-in interval counters,
+effective cadence and changed/manual wake. Fresh domain-event wake/reset, UI
+controls and producer/current-software adoption remain incomplete. Once/daily/weekly
 timing, configured intervals and production schedules are untouched. A future
 event contract must distinguish domain changes from this iteration's own
 bookkeeping so it cannot wake itself forever. Failed/expired/skipped/usage-limit

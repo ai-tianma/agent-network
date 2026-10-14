@@ -1,3 +1,4 @@
+import { parseBackoffPolicy, refreshScheduledBackoff } from "./scheduled-backoff.js";
 import { db, logTaskEvent } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
@@ -38,6 +39,10 @@ export type ScheduledRow = {
   status: "active" | "paused" | "completed" | "cancelled";
   next_run_at: string | null;
   last_run_at: string | null;
+  no_change_backoff: number;
+  backoff_streak: number;
+  backoff_effective_seconds: number | null;
+  backoff_last_run_id: string | null;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -184,8 +189,11 @@ export function nextOccurrence(spec: ScheduleSpec, timezone: string, after: Date
 function decodeRow(row: ScheduledRow): Record<string, unknown> {
   let schedule: unknown = null;
   try { schedule = JSON.parse(row.schedule_json); } catch {}
-  const { created_by: _createdBy, created_by_node_id: _createdByNode, schedule_json: _scheduleJson, ...publicRow } = row;
-  return { ...publicRow, schedule };
+  const { created_by: _createdBy, created_by_node_id: _createdByNode, schedule_json: _scheduleJson,
+    no_change_backoff, backoff_streak, backoff_effective_seconds, backoff_last_run_id, ...publicRow } = row;
+  return { ...publicRow, schedule, ...(no_change_backoff === 1 ? { no_change_backoff: true,
+    backoff: { streak: backoff_streak, effective_seconds: backoff_effective_seconds
+      ?? (schedule as { every_seconds?: number } | null)?.every_seconds, last_run_id: backoff_last_run_id } } : {}) };
 }
 
 /** MCP (agent) shape: REST shape + which node created it (null = a person / old row). Never the user id. */
@@ -202,7 +210,7 @@ export class ScheduleInputError extends Error {
 }
 
 export type ValidatedScheduleCreate = {
-  name: string; content: string; priority: string; misfirePolicy: MisfirePolicy;
+  name: string; content: string; priority: string; misfirePolicy: MisfirePolicy; backoff: boolean;
   target: { node_id: string; alias: string }; spec: ScheduleSpec; timezone: string; next: Date;
 };
 
@@ -219,16 +227,17 @@ export function validateScheduleCreate(networkId: string, body: Record<string, u
   const { spec, timezone } = parseScheduleSpec(body.schedule, body.timezone);
   const next = nextOccurrence(spec, timezone, new Date());
   if (!next) throw new Error("schedule_has_no_future_occurrence");
-  return { name, content, priority, misfirePolicy, target, spec, timezone, next };
+  return { name, content, priority, misfirePolicy, target, spec, timezone, next,
+    backoff: parseBackoffPolicy(body.no_change_backoff, spec.type) };
 }
 
 export function insertSchedule(networkId: string, createdBy: string | null, createdByNodeId: string | null, v: ValidatedScheduleCreate): ScheduledRow {
   const scheduleId = `sched_${crypto.randomUUID()}`;
   db.run(
     `INSERT INTO scheduled_tasks
-     (schedule_id, network_id, created_by, created_by_node_id, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'skip', ?13, ?14)`,
-    [scheduleId, networkId, createdBy, createdByNodeId, v.name, v.target.node_id, v.target.alias, v.content, v.priority, v.spec.type, JSON.stringify(v.spec), v.timezone, v.misfirePolicy, iso(v.next)],
+     (schedule_id, network_id, created_by, created_by_node_id, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at, no_change_backoff)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'skip', ?13, ?14, ?15)`,
+    [scheduleId, networkId, createdBy, createdByNodeId, v.name, v.target.node_id, v.target.alias, v.content, v.priority, v.spec.type, JSON.stringify(v.spec), v.timezone, v.misfirePolicy, iso(v.next), v.backoff ? 1 : 0],
   );
   return getScheduleRow(scheduleId)!;
 }
@@ -236,7 +245,7 @@ export function insertSchedule(networkId: string, createdBy: string | null, crea
 /** Idempotent cancel (shared by REST DELETE / POST cancel and MCP schedule_cancel). */
 export function cancelSchedule(row: ScheduledRow): void {
   if (row.status === "cancelled") return;
-  db.run("UPDATE scheduled_tasks SET status = 'cancelled', next_run_at = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?1", [row.schedule_id]);
+  db.run("UPDATE scheduled_tasks SET status = 'cancelled', next_run_at = NULL, backoff_streak = 0, backoff_effective_seconds = NULL, backoff_last_run_id = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?1", [row.schedule_id]);
 }
 
 export function scheduleRuns(row: ScheduledRow, limit: number): Record<string, unknown> {
@@ -281,24 +290,29 @@ export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>):
     // with no next occurrence. The recompute uses the same DST-safe helper
     // as creation and dispatch advancement.
     const scheduleJson = JSON.stringify(parsed.spec);
+    const backoff = parseBackoffPolicy(body.no_change_backoff, parsed.spec.type, row.no_change_backoff === 1);
+    if (backoff && row.overlap_policy !== "skip") throw new Error("no_change_backoff_requires_skip_overlap");
+    // Every edit creates a new reporting generation. Reset opted-in cadence
+    // too, so the visible state never describes an older target/revision.
     const schedulingChanged = scheduleJson !== row.schedule_json || parsed.timezone !== row.timezone;
+    const backoffGenerationReset = row.no_change_backoff === 1 || backoff;
     const resumed = row.status !== "active" && requestedStatus === "active";
     const next = requestedStatus !== "active"
       ? null
-      : schedulingChanged || resumed || !row.next_run_at
+      : schedulingChanged || backoffGenerationReset || resumed || !row.next_run_at
         ? nextOccurrence(parsed.spec, parsed.timezone, new Date())
         : new Date(row.next_run_at);
     if (requestedStatus === "active" && !next) throw new Error("schedule_has_no_future_occurrence");
     // Runs no longer bump revision, so the scheduler may have advanced
     // next_run_at after `row` was read. When cadence is preserved, keep the
     // stored value instead of writing back the already-fired occurrence.
-    const keepStoredNext = requestedStatus === "active" && !schedulingChanged && !resumed && !!row.next_run_at ? 1 : 0;
+    const keepStoredNext = requestedStatus === "active" && !schedulingChanged && !backoffGenerationReset && !resumed && !!row.next_run_at ? 1 : 0;
     const updated = db.run(
       `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
        priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9,
        next_run_at = CASE WHEN ?14 = 1 AND next_run_at IS NOT NULL THEN next_run_at ELSE ?10 END,
-       misfire_policy = ?11, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
-      [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext],
+       misfire_policy = ?11, no_change_backoff = ?15, backoff_streak = 0, backoff_effective_seconds = NULL, backoff_last_run_id = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
+      [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext, backoff ? 1 : 0],
     );
     if (updated.changes !== 1) throw new ScheduleInputError("revision_conflict", 409);
     return getScheduleRow(row.schedule_id)!;
@@ -377,6 +391,23 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
        VALUES (?1, ?2, ?3, ?4, 'claiming', ?5)`,
       [runId, row.schedule_id, row.network_id, scheduledFor, row.revision],
     );
+
+    const current = getScheduleRow(row.schedule_id);
+    if (!current || current.revision !== row.revision || current.status === "cancelled"
+      || (advanceSchedule && current.status !== "active")) throw new Error("schedule_changed");
+    row = current;
+    // Manual dispatch is an explicit wake. Its new generation fences all
+    // already-running reports, while a paused schedule remains paused.
+    if (!advanceSchedule && row.no_change_backoff === 1) {
+      const base = JSON.parse(row.schedule_json).every_seconds;
+      db.run(`UPDATE scheduled_tasks SET revision = revision + 1, backoff_streak = 0,
+        backoff_effective_seconds = NULL, backoff_last_run_id = NULL,
+        next_run_at = CASE WHEN status = 'active' THEN ?1 ELSE next_run_at END,
+        updated_at = datetime('now') WHERE schedule_id = ?2 AND revision = ?3`,
+        [new Date(advanceAfter.getTime() + base * 1000).toISOString(), row.schedule_id, row.revision]);
+      row = getScheduleRow(row.schedule_id)!;
+    }
+    db.run("UPDATE scheduled_task_runs SET schedule_revision = ?1 WHERE run_id = ?2", [row.revision, runId]);
 
     // Board #757 — do not create a task that will merely expire while its
     // exact target session is offline. This branch deliberately precedes the
@@ -589,8 +620,12 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
 // a status change the user sees and it is what stops an in-flight PATCH (whose
 // UPDATE is guarded by `AND revision = ?`) from reviving a finished one-shot.
 function advance(row: ScheduledRow, scheduledFor: string, after = new Date(), recordLastRun = true): void {
+  refreshScheduledBackoff(row.schedule_id, row.network_id, after);
+  const stored = getScheduleRow(row.schedule_id)!;
   const spec = JSON.parse(row.schedule_json) as ScheduleSpec;
-  const next = nextOccurrence(spec, row.timezone, after);
+  const effective = spec.type === "interval" && stored.no_change_backoff === 1
+    ? { ...spec, every_seconds: Math.max(spec.every_seconds, stored.backoff_effective_seconds ?? spec.every_seconds) } : spec;
+  const next = nextOccurrence(effective, row.timezone, after);
   const lastRunAt = recordLastRun ? scheduledFor : row.last_run_at;
   if (spec.type === "once" || !next) {
     db.run(
@@ -615,9 +650,9 @@ function skipScheduledMisfire(row: ScheduledRow, scheduledFor: string, now: Date
   db.transaction(() => {
     db.run(
       `INSERT INTO scheduled_task_runs
-       (run_id, schedule_id, network_id, scheduled_for, status, error_code, error_message, completed_at)
-       VALUES (?1, ?2, ?3, ?4, 'skipped', 'misfire_skipped', 'The occurrence was overdue and the schedule is configured to skip missed runs', datetime('now'))`,
-      [runId, row.schedule_id, row.network_id, scheduledFor],
+       (run_id, schedule_id, network_id, scheduled_for, status, error_code, error_message, completed_at, schedule_revision)
+       VALUES (?1, ?2, ?3, ?4, 'skipped', 'misfire_skipped', 'The occurrence was overdue and the schedule is configured to skip missed runs', datetime('now'), ?5)`,
+      [runId, row.schedule_id, row.network_id, scheduledFor, row.revision],
     );
     // A skipped occurrence is auditable but is not an execution: preserve
     // last_run_at while moving the schedule directly to its next future slot.

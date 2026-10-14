@@ -1,3 +1,4 @@
+import { refreshScheduledBackoff } from "./scheduled-backoff.js";
 import { createAdapter, type DbAdapter } from "./db-adapter"; import { withStatementHook } from "./status-read-cache"; // #431 写 sessions 的语句让 /api/status 缓存失效
 
 export const db: DbAdapter = withStatementHook(createAdapter());
@@ -1710,6 +1711,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_scheduled_runs_network
     ON scheduled_task_runs(network_id, created_at DESC);
 `);
+// #1278 — opt-in state. Existing schedules remain disabled.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN no_change_backoff INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_streak INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_effective_seconds INTEGER"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_last_run_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN backoff_excluded INTEGER NOT NULL DEFAULT 0"); } catch {}
 // #1274 — explicit successful-work signal and dispatch revision, separate
 // from lifecycle. NULL is unknown for legacy runs; rollback ignores columns.
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN work_outcome TEXT"); } catch {}
@@ -2158,6 +2165,10 @@ type ScheduledTaskBinding = { run_id: string; schedule_id: string };
  * the history reflects the current retry rather than the first failed attempt.
  */
 export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
+  return db.transaction(() => syncScheduledRunForTaskInTransaction(taskId, expectedNetworkId));
+}
+
+function syncScheduledRunForTaskInTransaction(taskId: string, expectedNetworkId?: string | null): { matched: boolean; status?: string } {
   const task = db.get<ScheduledTaskLifecycleRow>(
     `SELECT task_id, network_id, status, completed_at
        FROM tasks
@@ -2192,14 +2203,17 @@ export function syncScheduledRunForTask(taskId: string, expectedNetworkId?: stri
         WHERE run_id = ?4 AND task_id = ?5 AND network_id = ?6 AND schedule_id = ?7`,
       [task.status, errorCode, task.completed_at, binding.run_id, task.task_id, task.network_id, binding.schedule_id],
     );
-    if (updated.changes === 1) fireScheduledRunTerminalHook(binding.schedule_id, task.status);
+    if (updated.changes === 1) {
+      refreshScheduledBackoff(binding.schedule_id, task.network_id!);
+      fireScheduledRunTerminalHook(binding.schedule_id, task.status);
+    }
     return { matched: updated.changes === 1, status: task.status };
   }
 
   if (task.status === "delivered") {
     const updated = db.run(
       `UPDATE scheduled_task_runs
-          SET status = 'delivered', error_code = NULL, error_message = NULL, completed_at = NULL, work_outcome = NULL, work_outcome_node_id = NULL
+          SET status = 'delivered', error_code = NULL, error_message = NULL, completed_at = NULL, work_outcome = NULL, work_outcome_node_id = NULL, backoff_excluded = 1
         WHERE run_id = ?1 AND task_id = ?2 AND network_id = ?3 AND schedule_id = ?4`,
       [binding.run_id, task.task_id, task.network_id, binding.schedule_id],
     );

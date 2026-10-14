@@ -6810,7 +6810,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const schedFields = {
     name: z.string(), task: z.string(), target_node_id: z.string().optional(),
     schedule: z.any().describe("once{run_at}|interval{every_seconds>=60}|daily{time}|weekly{time,weekdays}"),
-    timezone: z.string().optional(), priority: z.string().optional(),
+    timezone: z.string().optional(), priority: z.string().optional(), no_change_backoff: z.boolean().optional(),
   };
   server.tool("schedule_list", "Hub schedules for or by you.", { status: z.string().optional() },
     async ({ status }) => scheduleCall(id => agentListSchedules(id, status)));
