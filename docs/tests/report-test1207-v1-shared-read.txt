@@ -1,0 +1,32 @@
+#1207 — V1 shared Server directory/binding primitive (parent #1195)
+
+This slice extracts the existing owned HTTP implementation without changing its
+signature/default behavior, and adds a read-only shared client. Its independently
+selected binding must match the persisted network/node/host-generation identity/
+canonical directory/exact session. Every request carries the encoded directory;
+health/version, returned session ID/directory and history session IDs are checked.
+Foreign HTTP200, missing session and mismatch refuse; no latest/create/fork,
+prompt, abort, process teardown or configuration rewrite is exposed.
+
+The caller must supply an independently attested generation-specific host
+identity. HTTP health does not prove that identity, and possession of the common
+password is a cooperative trust cohort, not malicious-tenant authorization.
+This primitive is not wired as a selectable shared runtime yet. Parent #1195's
+registry/launcher, scoped MCP proxy, borrowed lifecycle and ready/turn handling
+remain required; #1196 migration/recovery and original-node adoption remain open.
+
+Validation pending before main: isolated HTTP boundary assertions, both exact
+native versions 1.18.1/1.18.34 with Unicode directories, native foreign-read200
+as a refusal witness, missing session/no fallback and owned spawn/runtime tests.
+No original node/credentials/data/process is read or changed.
+
+Rebuild: workflow v1-shared-read-core.yml and test1207 Dockerfile pin Bun digest,
+server-independent source SHA, npm lock and exact wrapper/native integrity from
+test1194/package-integrity.json. Build-time install only; run as bun/network none
+with synthetic password and temporary HOME/XDG roots. Fixture owns and stops
+only its child Server; no tmux, production proxy/tunnel or resident service is
+changed. Secrets remain actual Owner's private sources; templates contain none.
+Switch validation source through ordinary exact main checkout and compare CI
+report SHA/package version. Roll back by reverting this source slice on main;
+owned mode remains default. Real histories, provider auth and Hub identities
+require encrypted private backups or registration. Full shared DR is not claimed.
