@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, symlinkSync, linkSync, renameSync, unlinkSync, readFileSync } from "node:fs";
-import { join, realpathSync } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, symlinkSync, linkSync, renameSync, unlinkSync, readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { loadV1HostRegistry, V1HostAdmissionError, type V1HostRecord } from "/repo/agent-node/src/runtime/opencode-copresence/v1-host-registry";
 import { resolvePinnedOpencodeBinaryAttestation } from "/repo/agent-node/src/runtime/opencode-acp/binary";
 import { createV1SharedReadClient, V1SharedBindingError } from "/repo/agent-node/src/runtime/opencode-copresence/v1-shared-read";
