@@ -12,6 +12,7 @@ const version = process.env.OPENCODE_VERSION_UNDER_TEST!;
 assert.ok(["1.18.1", "1.18.34"].includes(version));
 const binary = execFileSync("which", ["opencode"], { encoding: "utf8" }).trim();
 const socket = join(root, "tmux.sock");
+const panes:string[]=[];
 const checks: string[] = [], observations: Record<string, unknown> = {};
 const pass = (name: string) => { checks.push(name); console.log(`PASS: ${name}`); };
 const auth = `Basic ${Buffer.from("opencode:fixture1194-private").toString("base64")}`;
@@ -104,9 +105,17 @@ try{
   pass("native missing session is 404; foreign-read behavior characterized, bridge guard still required");
   for(let i=0;i<2;i++){
     const script=join(root,`attach${i}.sh`);writeFileSync(script,["#!/bin/bash","set -eu",...Object.entries(hostEnv).map(([k,v])=>`export ${k}='${v}'`),`exec '${binary}' attach http://127.0.0.1:19494 --session '${sessions[i]}' --dir '${projects[i]}' --pure`].join("\n"),{mode:0o700});
-    tmux(["new-session","-d","-s",`fixture${i}`,"-x","130","-y","40",script]);
+    const pane=tmux(["new-session","-d","-P","-F","#{pane_id}","-s",`fixture${i}`,"-x","130","-y","40","sleep 180"]).trim();
+    assert.match(pane,/^%\d+$/);panes.push(pane);
+    tmux(["set-option","-p","-t",pane,"remain-on-exit","on"]);
+    tmux(["respawn-pane","-k","-t",pane,script]);
   }
-  for(let i=0;i<100;i++){const rendered=[0,1].map(j=>tmux(["capture-pane","-p","-t",`=fixture${j}`,"-S","-100"]));if(rendered.every(p=>p.includes("ctrl+p")))break;await Bun.sleep(100);if(i===99)throw new Error("two native attach TUI render deadline");}
+  for(let i=0;i<100;i++){
+    const rendered=panes.map(p=>tmux(["capture-pane","-p","-t",p,"-S","-100"]));
+    for(let j=0;j<2;j++)if(tmux(["display-message","-p","-t",panes[j],"#{pane_dead}"]).trim()==="1")throw new Error(`fixture native attach ${j} exited: ${rendered[j]}`);
+    if(rendered.every(p=>p.includes("ctrl+p")))break;await Bun.sleep(100);
+    if(i===99)throw new Error(`two native attach TUI render deadline: ${rendered.join("\n")}`);
+  }
   pass("two native full attach TUIs rendered against one Server");
   const eventController=new AbortController();const streams=await Promise.all(projects.map(async dir=>{
     const response=await fetch("http://127.0.0.1:19494/event",{headers:{authorization:auth,"x-opencode-directory":dir},signal:eventController.signal});assert.equal(response.status,200);let content="";
@@ -117,6 +126,7 @@ try{
   eventController.abort();await Promise.all(streams.map(s=>s.done));
   pass("toast routing measured from both native directory event streams (not assumed scoped)");
   tmux(["kill-session","-t","=fixture0"]);tmux(["has-session","-t","=fixture1"]);
+  assert.equal(tmux(["display-message","-p","-t",panes[1],"#{pane_dead}"]).trim(),"0");
   assert.equal((await request("/global/health",projects[1])).status,200);
   assert.equal(reply(await turn(projects[1],sessions[1],"Reply with exactly B_STILL_ALIVE","beta")),"B_STILL_ALIVE");
   pass("closing exact attach A leaves attach B and shared Server working");
