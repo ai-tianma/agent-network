@@ -153,9 +153,9 @@ state despite a lease, so this is not tenant authorization or trusted turn ident
 Admission uses directory-scoped `POST /mcp`, checks its exact leased name is
 connected, and rechecks binding, native session, config lease, model and policy.
 Its published observation is `mcp-connected`; file presence or stale `/config`
-is not readiness. The returned handle reads only its exact session/history and
-has no prompt, abort, create/fork/latest, Server spawn/stop or dispose operation.
-Full Node/CLI/attach/FIFO/human-turn integration remains #1195, not this API.
+is not readiness. The admission observation is separate from the exact-session runtime transport
+added by #1216 below. No create/fork/latest, Server spawn/stop or dispose is
+exposed. Full Node/CLI/attach/human-turn qualification remains #1195.
 
 Close rechecks live Host/binding/project lease and the exact native name, then
 posts only `/mcp/<own-name>/disconnect` with the selected directory. It requires
@@ -208,7 +208,8 @@ unverified reply ownership prevents further automatic submissions, revokes
 this proxy and retains recovery controls. Such recovery requires the original
 Owner to reconcile the exact saved identity and native history; no stale lease
 stealing or automatic replay follows. Close drains this bridge's in-flight
-queue and disconnects only its own MCP. It does not kill/restart/delete the
+queue, requires a proven idle session and disconnects only its own MCP. Busy or
+unreadable status revokes this proxy while retaining recovery controls. It does not kill/restart/delete the
 Host, import/checkpoint its data or stop any human TUI. Human submissions can
 still race admission; causal reply ownership remains mandatory.
 

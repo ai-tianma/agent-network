@@ -981,6 +981,13 @@ export async function openVettedOpenCodeCopresence(
               await borrowed.retainRecovery();
               throw new Error("Borrowed V1 turn completion unknown; recovery retained, no automatic reopen");
             }
+            const statuses = await borrowed.request("/session/status").catch(() => null);
+            const state = statuses && typeof statuses === "object" && !Array.isArray(statuses)
+              ? (Object.hasOwn(statuses, created.id) ? statuses[created.id] : { type: "idle" }) : null;
+            if (state?.type !== "idle") {
+              await borrowed.retainRecovery();
+              throw new Error("Borrowed V1 close requires a proven idle session; recovery retained");
+            }
             await borrowed.close();
           })();
         }

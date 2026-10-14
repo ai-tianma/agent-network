@@ -29,9 +29,9 @@ export interface V1BorrowedAdmissionOptions {
   readonly hubToken: string;
 }
 
-/** Lifecycle admission only. No Server spawn/stop, session create/fork/latest,
- * prompt, abort, dispose or TUI ownership. Runtime/CLI and turn integration are
- * still separate; this handle proves a scoped MCP connection, not a whole Node. */
+/** Admission and exact-session transport. No Server spawn/stop, session
+ * create/fork/latest, dispose or TUI ownership. The runtime owns turn/FIFO/abort
+ * decisions; admission readiness proves MCP connection, not CLI adoption. */
 export async function openV1BorrowedAdmission(options: V1BorrowedAdmissionOptions) {
   if (options.mode !== "borrowed-v1") refuse("explicit borrowed mode required");
   const host = Object.freeze({ ...options.expectedHost });

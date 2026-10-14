@@ -103,6 +103,10 @@ try{
   const c=await entry(2);handles.push(c);const pending=c.submit("Reply with exactly HOLD_ADMISSION_1214",20000);
   busy=false;for(let i=0;i<100;i++){if((await request("/session/status",projects[2]))[infos[2].id]?.type==="busy"){busy=true;break;}await Bun.sleep(20);}assert.equal(busy,true);saved[2]={...bindings[2],nodeId:"changed"};await assert.rejects(pending);assert.equal(c.isRunning,false);await assert.rejects(c.submit("MUST_NOT_REPLAY",100));await assert.rejects(c.close(),/completion unknown/);await assert.rejects(c.close(),/completion unknown/);assert.ok(existsSync(join(projects[2],".anet-v1-mcp.lock")));assert.ok(readdirSync(states[2]).length>=2);assert.equal(host.isRunning,true);assert.ok((await handles[1].submit("CALL_IDENTITY after unknown",20000)).replyText.includes("NODE_B"));
   pass("in-flight identity drift preserves unknown write, revokes only own capability and retains recovery; no replay, sibling and Host survive");
+  const d=await entry(3);handles.push(d);
+  const heldD=request(`/session/${infos[3].id}/message`,projects[3],"POST",{model:{providerID:"fixture",modelID:"alpha"},parts:[{type:"text",text:"Reply with exactly HOLD_ADMISSION_1214"}]});
+  busy=false;for(let i=0;i<100;i++){if((await request("/session/status",projects[3]))[infos[3].id]?.type==="busy"){busy=true;break;}await Bun.sleep(20);}assert.equal(busy,true);await assert.rejects(d.close(),/proven idle/);assert.ok(existsSync(join(projects[3],".anet-v1-mcp.lock")));await heldD;assert.equal(host.isRunning,true);assert.ok((await handles[1].submit("CALL_IDENTITY after busy close",20000)).replyText.includes("NODE_B"));
+  pass("close during an external busy turn refuses native disconnect and retains controls without stopping that turn or sibling");
   await handles[1].close();
   console.log(JSON.stringify({kind:"TEST-ONLY",source:process.env.SOURCE_COMMIT,version,checks,result:"PASS",scope:"actual borrowed API backend/FIFO/scope/unknown/only-own MCP lifecycle; no CLI/TUI/native adoption or live credentials"}));
 }catch(error){console.error("FAIL phase",checks.at(-1)??"environment",error);process.exitCode=1;}
