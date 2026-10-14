@@ -86,3 +86,48 @@ human TUI is stopped. Unknown recovery remains retained.
 - Git restores software/schema/templates. Existing session history, node login,
   config/selection intent and unknown leases require original encrypted data
   backup and #1196 migration/rollback qualification, not clone alone.
+
+
+## #1226 finite normal-launcher readiness (first slice)
+
+With the same explicit private `opencodeBorrowedV1` config and exact built pair,
+`anet node start <node>` starts only a detached bridge. It returns success after
+runtime admission publishes a fresh `opencode-borrowed-v1-launch.json` matching
+this launch's nonce, original config inode/metadata, full selection, model,
+directory and live bridge PID/birth/argv. The daemon requires negotiated
+`start_completion_capable` and uses the same evidence after the finite launcher
+exits; an old Hub receives `opencode_start_completion_unsupported`, never
+spawn-only success. Generic status/Host health and owned serve/TUI records cannot
+substitute. Linux `/proc` evidence is required; this slice does not certify
+Windows/macOS launcher adoption or native interactive TUI readiness.
+
+The launcher accepts no new session, transient Hub override, tmux wrapper or
+dev-channel prompt path. Existing bridges are retained rather than replaced.
+It does not start/stop the shared Host, create or attach a human TUI, or publish
+an owned attach script. On finite timeout it reports failure and retains an
+uncertain bridge/lease for explicit inspection, without automatic close/reopen.
+Config restarts are unavailable for this borrowed pair; sentinel 75 does not
+respawn it. Runtime unknown admission revokes startup evidence; clean close
+removes only its own nonce/PID/birth record. This evidence is a one-shot start
+receipt, not ongoing availability, task completion or an OS security boundary.
+
+`anet node stop` uses the node's existing lifecycle process identities and
+skips all alias-based tmux sweeps for a borrowed selection (including persisted
+intent). Missing lifecycle ownership refuses stop rather than adopting a
+same-name process/TUI. Owner Host/session/history and foreign terminal sessions
+remain independently owned. Unknown admission retains cooperative recovery;
+a stopped process is not evidence that the unknown lease has been restored.
+
+Recovery facts: source entrypoints are `agent-network/bin/cli.ts` and
+`agent-node/src/cli.ts`; the versioned receipt contract is mirrored under both
+packages' `src/shared/opencode-borrowed-launch-health.ts`. No reverse proxy,
+tunnel or Host port changes belong to this bridge slice; existing Owner registry
+and node Hub endpoint remain authoritative. Credentials stay in the original
+private node config/Owner registry password file, never in startup evidence.
+Upgrade requires both exact source packages and receipt readback in an isolated
+fixture before any original Owner adoption window. Software downgrade still
+requires #1196's explicit migration before an older CLI that ignores selection
+can run; deleting an unknown marker/lease is not rollback. Original Host data,
+native session history and lease/checkpoint backups require their established
+private data backups; cloning Git does not recreate them. Full migration,
+interactive TUI attach and original-device recovery remain unqualified gates.

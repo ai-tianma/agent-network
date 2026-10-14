@@ -2,7 +2,7 @@
 // get_start_request is the authenticated envelope. Before spawning we bind
 // that envelope to the daemon-owned local config and the pinned anet binary.
 
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
@@ -153,8 +153,9 @@ export async function handleStartDoorbell(
     const config = JSON.parse(readFileSync(cfgPath, "utf8"));
     codexCopresence = config?.codexCopresence === true;
     runtime = config?.runtime;
-    opencodeCopresence = runtime === "opencode-cli" && config?.opencodeGeneration === "v2"
-      && config?.opencodeMode === "copresence";
+    opencodeCopresence = runtime === "opencode-cli" && config?.opencodeMode === "copresence"
+      && (config?.opencodeGeneration === "v2" || config?.opencodeBorrowedV1 !== undefined
+        || existsSync(join(verifiedChildDir, "opencode-borrowed-v1-selection.json")));
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
     deps.warn(`[start-daemon] ${error}`);

@@ -114,3 +114,17 @@ test("real child delayed nonzero exit is never started", async () => {
   expect(f.acks.map(a => a.status)).toEqual(["starting", "start_failed"]);
   expect(f.acks.at(-1).error).toBe("opencode_launcher_exit:7");
 });
+
+for (const capable of [true,false]) test(`borrowed V1 uses completion gate; Hub capable=${capable}`,async () => {
+  const f=fixture();
+  writeFileSync(join(root,"child","config.json"),JSON.stringify({node_id:"node_child",node_name:"child",runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence",opencodeBorrowedV1:{schema:1}}),{mode:0o600});
+  const call=f.deps.callCommHub;
+  f.deps.callCommHub=async(tool:string,args:any)=>{const r=await call(tool,args);if(tool==="get_start_request")r.start_completion_capable=capable;return r;};
+  const run=handleStartDoorbell({request_id:`str_borrowed_${capable}`},f.deps);await tick();
+  if(capable){expect(f.acks.map(a=>a.status)).toEqual(["starting"]);f.child.emit("exit",0,null);}
+  await run;
+  expect(f.spawns()).toBe(capable?1:0);
+  expect(f.acks.at(-1).status).toBe(capable?"started":"start_failed");
+  if(capable)expect(f.acks.at(-1).child_pid).toBe(4343);
+  else expect(f.acks.at(-1).error).toBe("opencode_start_completion_unsupported");
+});

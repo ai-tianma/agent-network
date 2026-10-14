@@ -2464,6 +2464,7 @@ let grokModelSource: "readback" | "argv" | "default" | undefined;
 // subprocess exits (crash-restart path handled by resetting the
 // holder — the next turn spawns fresh).
 let opencodeSessionId: string | undefined = RUNTIME === "opencode" ? (SESSION_ID || undefined) : undefined;
+let clearBorrowedLaunchHealth: (() => void) | undefined;
 let opencodeRuntimeSession: import("./runtime/opencode-acp/runtime").OpencodeRuntimeSession | null = null;
 // Set synchronously immediately after spawn, before initialize or session/new
 // resolves. shutdown() uses this handle during the handshake window.
@@ -4091,6 +4092,9 @@ async function processWithOpencode(
       onSubmitted: evidence?.submitted,
       onConsumed: evidence?.consumed,
       onCapacityRetry: reportCapacityRetry,
+    }).catch(error => {
+      if (opencodeBorrowedCli && !runtime.isRunning) clearBorrowedLaunchHealth?.();
+      throw error;
     });
     log(`[opencode-copresence] turn done | reply=${outcome.replyText.length}ch session=${runtime.sessionId.slice(0, 12)}`);
     return outcome.replyText || "（无回复）";
@@ -4227,12 +4231,17 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       throw new Error("OpenCode copresence server exited while opening");
     }
     opencodeCopresenceSession = opened;
+    if (borrowed && process.env.ANET_BORROWED_V1_LAUNCH_ID) {
+      const { publishBorrowedLaunchHealth } = await import("./shared/opencode-borrowed-launch-health");
+      clearBorrowedLaunchHealth = publishBorrowedLaunchHealth(configFilePath, process.env.ANET_BORROWED_V1_LAUNCH_ID);
+    }
     log(borrowed ? "[opencode-copresence] borrowed existing V1 session; Host/TUI lifecycle remains with its Owner" : `[opencode-copresence] human TUI launcher: ${opened.attachScriptPath}`);
     return opened;
   });
 }
 
 async function closeOpencodeRuntime(reason: string): Promise<void> {
+  clearBorrowedLaunchHealth?.();
   // An inbox recovery drain can race startup. Wait for that one shared open
   // attempt before closing so shutdown cannot orphan a just-created server.
   const opening = opencodeCopresenceOpening.pending();

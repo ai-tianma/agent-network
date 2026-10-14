@@ -1,6 +1,7 @@
 // #829: a tmux launcher exits successfully while its runtime remains alive.
 // Linux-only evidence for daemon create, not a general readiness/security API.
-import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, renameSync, rmSync } from "node:fs";
+import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, renameSync, rmSync, existsSync } from "node:fs";
+import { inspectBorrowedLaunchHealth } from "../../shared/opencode-borrowed-launch-health";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -100,6 +101,10 @@ export function classifyTuiArgv(args: string[], generation: string): "match" | "
 export function inspectLaunchHealth(dir: string, configPath: string, launchedAt: number) {
   if (process.platform !== "linux") return { ok: false as const, reason: "daemon V2 launch health requires Linux process identity" };
   try {
+    if (readRecord(configPath)?.opencodeBorrowedV1 !== undefined
+      || existsSync(join(dir,"opencode-borrowed-v1-selection.json"))) {
+      return inspectBorrowedLaunchHealth(configPath,launchedAt);
+    }
     return validateLaunchHealth(readRecord(join(dir, LAUNCH_HEALTH_FILE)),
       readRecord(join(dir, "opencode-attach.json")), configPath, launchedAt);
   } catch { return { ok: false as const, reason: "missing or unsafe launch/attach record" }; }
