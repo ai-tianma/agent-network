@@ -1,3 +1,4 @@
+import { bindRequirementWake, parseRequirementWake, publicRequirementWake, requirementWakeHead, pollRequirementWakes, type RequirementWake } from "./scheduled-requirement-wake.js";
 import { parseBackoffPolicy, refreshScheduledBackoff } from "./scheduled-backoff.js";
 import { db, logTaskEvent } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
@@ -43,6 +44,9 @@ export type ScheduledRow = {
   backoff_streak: number;
   backoff_effective_seconds: number | null;
   backoff_last_run_id: string | null;
+  requirement_wake_json: string | null;
+  requirement_wake_cursor: number;
+  requirement_wake_last_event_id: number | null;
   revision: number;
   created_at: string;
   updated_at: string;
@@ -190,8 +194,12 @@ function decodeRow(row: ScheduledRow): Record<string, unknown> {
   let schedule: unknown = null;
   try { schedule = JSON.parse(row.schedule_json); } catch {}
   const { created_by: _createdBy, created_by_node_id: _createdByNode, schedule_json: _scheduleJson,
-    no_change_backoff, backoff_streak, backoff_effective_seconds, backoff_last_run_id, ...publicRow } = row;
-  return { ...publicRow, schedule, ...(no_change_backoff === 1 ? { no_change_backoff: true,
+    no_change_backoff, backoff_streak, backoff_effective_seconds, backoff_last_run_id,
+    requirement_wake_json, requirement_wake_cursor, requirement_wake_last_event_id, ...publicRow } = row;
+  if (requirement_wake_json && schedule && typeof schedule === "object")
+    schedule = { ...schedule, requirement_wake: publicRequirementWake(requirement_wake_json) };
+  return { ...publicRow, schedule, ...(requirement_wake_json ? { requirement_wake_state:
+    { cursor: requirement_wake_cursor, last_event_id: requirement_wake_last_event_id } } : {}), ...(no_change_backoff === 1 ? { no_change_backoff: true,
     backoff: { streak: backoff_streak, effective_seconds: backoff_effective_seconds
       ?? (schedule as { every_seconds?: number } | null)?.every_seconds, last_run_id: backoff_last_run_id } } : {}) };
 }
@@ -210,7 +218,7 @@ export class ScheduleInputError extends Error {
 }
 
 export type ValidatedScheduleCreate = {
-  name: string; content: string; priority: string; misfirePolicy: MisfirePolicy; backoff: boolean;
+  name: string; content: string; priority: string; misfirePolicy: MisfirePolicy; backoff: boolean; wake: RequirementWake | null;
   target: { node_id: string; alias: string }; spec: ScheduleSpec; timezone: string; next: Date;
 };
 
@@ -228,16 +236,19 @@ export function validateScheduleCreate(networkId: string, body: Record<string, u
   const next = nextOccurrence(spec, timezone, new Date());
   if (!next) throw new Error("schedule_has_no_future_occurrence");
   return { name, content, priority, misfirePolicy, target, spec, timezone, next,
-    backoff: parseBackoffPolicy(body.no_change_backoff, spec.type) };
+    backoff: parseBackoffPolicy(body.no_change_backoff, spec.type),
+    wake: parseRequirementWake((body.schedule as Record<string, unknown>).requirement_wake) };
 }
 
 export function insertSchedule(networkId: string, createdBy: string | null, createdByNodeId: string | null, v: ValidatedScheduleCreate): ScheduledRow {
   const scheduleId = `sched_${crypto.randomUUID()}`;
+  const wakeJson = bindRequirementWake({ network_id: networkId, created_by: createdBy,
+    created_by_node_id: createdByNodeId, target_node_id: v.target.node_id }, v.wake, v.backoff, v.spec.type, createdBy);
   db.run(
     `INSERT INTO scheduled_tasks
-     (schedule_id, network_id, created_by, created_by_node_id, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at, no_change_backoff)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'skip', ?13, ?14, ?15)`,
-    [scheduleId, networkId, createdBy, createdByNodeId, v.name, v.target.node_id, v.target.alias, v.content, v.priority, v.spec.type, JSON.stringify(v.spec), v.timezone, v.misfirePolicy, iso(v.next), v.backoff ? 1 : 0],
+     (schedule_id, network_id, created_by, created_by_node_id, name, target_node_id, target_alias, task_content, priority, schedule_type, schedule_json, timezone, overlap_policy, misfire_policy, next_run_at, no_change_backoff, requirement_wake_json, requirement_wake_cursor)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'skip', ?13, ?14, ?15, ?16, ?17)`,
+    [scheduleId, networkId, createdBy, createdByNodeId, v.name, v.target.node_id, v.target.alias, v.content, v.priority, v.spec.type, JSON.stringify(v.spec), v.timezone, v.misfirePolicy, iso(v.next), v.backoff ? 1 : 0, wakeJson, wakeJson ? requirementWakeHead(networkId) : 0],
   );
   return getScheduleRow(scheduleId)!;
 }
@@ -263,7 +274,7 @@ export function scheduleRuns(row: ScheduledRow, limit: number): Record<string, u
 }
 
 /** Shared PATCH semantics (REST PATCH and MCP schedule_update). Throws ScheduleInputError. */
-export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>): ScheduledRow {
+export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>, actorUserId: string | null = null): ScheduledRow {
   // Cancellation/completion are terminal states. Editing must never become
   // an implicit resurrection path (including by supplying status=active).
   if (row.status === "cancelled") throw new ScheduleInputError("schedule_cancelled", 409);
@@ -292,6 +303,9 @@ export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>):
     const scheduleJson = JSON.stringify(parsed.spec);
     const backoff = parseBackoffPolicy(body.no_change_backoff, parsed.spec.type, row.no_change_backoff === 1);
     if (backoff && row.overlap_policy !== "skip") throw new Error("no_change_backoff_requires_skip_overlap");
+    const rawWake = (body.schedule as Record<string, unknown> | undefined)?.requirement_wake;
+    const wake = parseRequirementWake(rawWake, backoff ? row.requirement_wake_json : null);
+    const wakeJson = bindRequirementWake({ ...row, target_node_id: target.node_id }, wake, backoff, parsed.spec.type, actorUserId);
     // Every edit creates a new reporting generation. Reset opted-in cadence
     // too, so the visible state never describes an older target/revision.
     const schedulingChanged = scheduleJson !== row.schedule_json || parsed.timezone !== row.timezone;
@@ -311,8 +325,8 @@ export function patchSchedule(row: ScheduledRow, body: Record<string, unknown>):
       `UPDATE scheduled_tasks SET name = ?1, target_node_id = ?2, target_alias = ?3, task_content = ?4,
        priority = ?5, schedule_type = ?6, schedule_json = ?7, timezone = ?8, status = ?9,
        next_run_at = CASE WHEN ?14 = 1 AND next_run_at IS NOT NULL THEN next_run_at ELSE ?10 END,
-       misfire_policy = ?11, no_change_backoff = ?15, backoff_streak = 0, backoff_effective_seconds = NULL, backoff_last_run_id = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
-      [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext, backoff ? 1 : 0],
+       misfire_policy = ?11, no_change_backoff = ?15, requirement_wake_json = ?16, requirement_wake_cursor = ?17, requirement_wake_last_event_id = NULL, backoff_streak = 0, backoff_effective_seconds = NULL, backoff_last_run_id = NULL, revision = revision + 1, updated_at = datetime('now') WHERE schedule_id = ?12 AND revision = ?13`,
+      [name, target.node_id, target.alias, content, priority, parsed.spec.type, scheduleJson, parsed.timezone, requestedStatus, next ? iso(next) : null, misfirePolicy, row.schedule_id, row.revision, keepStoredNext, backoff ? 1 : 0, wakeJson, wakeJson ? requirementWakeHead(row.network_id) : 0],
     );
     if (updated.changes !== 1) throw new ScheduleInputError("revision_conflict", 409);
     return getScheduleRow(row.schedule_id)!;
@@ -402,9 +416,10 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
       const base = JSON.parse(row.schedule_json).every_seconds;
       db.run(`UPDATE scheduled_tasks SET revision = revision + 1, backoff_streak = 0,
         backoff_effective_seconds = NULL, backoff_last_run_id = NULL,
+        requirement_wake_cursor = ?4, requirement_wake_last_event_id = NULL,
         next_run_at = CASE WHEN status = 'active' THEN ?1 ELSE next_run_at END,
         updated_at = datetime('now') WHERE schedule_id = ?2 AND revision = ?3`,
-        [new Date(advanceAfter.getTime() + base * 1000).toISOString(), row.schedule_id, row.revision]);
+        [new Date(advanceAfter.getTime() + base * 1000).toISOString(), row.schedule_id, row.revision, requirementWakeHead(row.network_id)]);
       row = getScheduleRow(row.schedule_id)!;
     }
     db.run("UPDATE scheduled_task_runs SET schedule_revision = ?1 WHERE run_id = ?2", [row.revision, runId]);
@@ -661,6 +676,7 @@ function skipScheduledMisfire(row: ScheduledRow, scheduledFor: string, now: Date
 }
 
 export function runDueScheduledTasks(now = new Date(), limit = 100): { processed: number; failed: number } {
+  pollRequirementWakes(now);
   const due = db.all<ScheduledRow>(
     `SELECT ${SCHEDULED_TASK_STORAGE_SELECT} FROM scheduled_tasks WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?1 ORDER BY next_run_at LIMIT ?2`,
     iso(now), limit,
@@ -789,7 +805,7 @@ export async function handleScheduledTaskRequest(ctx: ScheduledRequestContext): 
     let body: Record<string, unknown>;
     try { body = await bodyObject(req); } catch { return jsonError("invalid_json", 400); }
     try {
-      return Response.json({ ok: true, schedule: decodeRow(patchSchedule(row, body)) });
+      return Response.json({ ok: true, schedule: decodeRow(patchSchedule(row, body, ctx.auth?.userId ?? null)) });
     } catch (e: any) {
       if (e instanceof ScheduleInputError) return jsonError(e.code, e.status, e.extra);
       throw e;

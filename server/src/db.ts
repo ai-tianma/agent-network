@@ -1717,6 +1717,10 @@ try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_streak INTEGER NOT
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_effective_seconds INTEGER"); } catch {}
 try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN backoff_last_run_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN backoff_excluded INTEGER NOT NULL DEFAULT 0"); } catch {}
+// #1279 — opt-in requirement event policy/cursor; old plans stay disabled.
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN requirement_wake_json TEXT"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN requirement_wake_cursor INTEGER NOT NULL DEFAULT 0"); } catch {}
+try { db.exec("ALTER TABLE scheduled_tasks ADD COLUMN requirement_wake_last_event_id INTEGER"); } catch {}
 // #1274 — explicit successful-work signal and dispatch revision, separate
 // from lifecycle. NULL is unknown for legacy runs; rollback ignores columns.
 try { db.exec("ALTER TABLE scheduled_task_runs ADD COLUMN work_outcome TEXT"); } catch {}

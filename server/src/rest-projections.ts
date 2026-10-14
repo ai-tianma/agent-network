@@ -54,6 +54,7 @@ export const SCHEDULED_TASK_STORAGE_COLUMNS = [
   "timezone", "overlap_policy", "misfire_policy", "status", "next_run_at",
   "last_run_at", "revision", "created_at", "updated_at",
   "no_change_backoff", "backoff_streak", "backoff_effective_seconds", "backoff_last_run_id",
+  "requirement_wake_json", "requirement_wake_cursor", "requirement_wake_last_event_id",
 ] as const;
 
 export function sqlColumns(columns: readonly string[], qualifier?: string): string {
