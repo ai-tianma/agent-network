@@ -5,6 +5,14 @@ owned-to-borrowed persistent-directory review plan. Keep its refusal. An empty
 checkpoint or a successful native import cannot qualify a directory change,
 original history recovery or writer exclusion.
 
+This is a cutover admission decision, not a claim that every possible API
+invocation throws. The current proposal API has one directory coordinate. A
+caller selecting the native temporary path when config omits `workdir` may
+satisfy its readonly checks; that proposal still cannot admit default-node
+migration. The independently selected requested project and native directory
+must become separate explicit inputs before any future commit. Neither may be
+inferred from the other or from a checkpoint alone.
+
 The actual wrapper is `openOpenCodeCopresenceRuntime` in runtime.ts. Its
 `buildOpencodeChildEnv` allocates fresh external launch roots, redirects SAFE
 native cwd to that root's workspace, and gives native fresh HOME/XDG writable
