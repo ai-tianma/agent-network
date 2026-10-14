@@ -5,6 +5,11 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const BORROWED_LAUNCH_HEALTH = "opencode-borrowed-v1-launch.json";
+export function hasBorrowedV1Intent(dir: string, config: any) {
+  if (config?.opencodeBorrowedV1 !== undefined) return true;
+  try { lstatSync(join(dir,"opencode-borrowed-v1-selection.json")); return true; }
+  catch (error: any) { return error?.code !== "ENOENT"; }
+}
 function refuse(): never { throw new Error("borrowed V1 launch evidence unavailable or mismatched"); }
 function privateRead(path: string, max = 1024 * 1024) {
   if (process.platform !== "linux" || realpathSync(path) !== path) refuse();
@@ -39,7 +44,7 @@ export function readBorrowedLaunchConfig(configPath: string, cwd?: string) {
     || typeof c.alias !== "string" || !c.alias || typeof c.model !== "string"
     || c.model.split("/").length !== 2 || c.model.split("/").some((v: string) => !v)
     || s.schema !== 1 || typeof s.hostRoot !== "string" || !s.hostRoot.startsWith("/")
-    || !["1.18.1","1.18.34"].includes(h.version) || s.selectedCohortId !== h.cohortId
+    || typeof h.version !== "string" || !/^1\.\d+\.\d+$/.test(h.version) || s.selectedCohortId !== h.cohortId
     || [h.hostId,h.instanceId,h.cohortId,c.node_id,c.network_id,b.directory,b.sessionId].some(v => typeof v !== "string" || !v)
     || b.nodeId !== c.node_id || b.networkId !== c.network_id || b.sessionId !== c.session
     || b.serverIdentity !== `${h.hostId}:${h.instanceId}` || !/^ses_[A-Za-z0-9]+$/.test(b.sessionId)

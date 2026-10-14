@@ -2,7 +2,7 @@
 // get_start_request is the authenticated envelope. Before spawning we bind
 // that envelope to the daemon-owned local config and the pinned anet binary.
 
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { getAnetBinAbs, minimalEnv } from "./create-node-daemon.js";
@@ -14,6 +14,7 @@ import type { AdoptDaemonDeps } from "./adopt-daemon.js";
 import { resolveChildDirName } from "./child-dir-name.js";
 import { completeCodexStart } from "./codex-start-completion.js";
 import { completeOpenCodeStart } from "./opencode-start-completion.js";
+import { hasBorrowedV1Intent } from "../shared/opencode-borrowed-launch-health";
 import type { inspectLaunchHealth } from "./opencode-copresence/launcher-health.js";
 
 
@@ -154,8 +155,7 @@ export async function handleStartDoorbell(
     codexCopresence = config?.codexCopresence === true;
     runtime = config?.runtime;
     opencodeCopresence = runtime === "opencode-cli" && config?.opencodeMode === "copresence"
-      && (config?.opencodeGeneration === "v2" || config?.opencodeBorrowedV1 !== undefined
-        || existsSync(join(verifiedChildDir, "opencode-borrowed-v1-selection.json")));
+      && (config?.opencodeGeneration === "v2" || hasBorrowedV1Intent(verifiedChildDir,config));
   } catch (e: any) {
     const error = `local_identity: ${e?.message || e}`;
     deps.warn(`[start-daemon] ${error}`);

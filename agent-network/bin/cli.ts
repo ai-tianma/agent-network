@@ -11,7 +11,7 @@
  */
 
 import { constants, openSync, closeSync, fstatSync, chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
-import { readBorrowedLaunchConfig, waitForBorrowedLaunchHealth } from "../src/shared/opencode-borrowed-launch-health";
+import { hasBorrowedV1Intent, readBorrowedLaunchConfig, waitForBorrowedLaunchHealth } from "../src/shared/opencode-borrowed-launch-health";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
@@ -8634,8 +8634,7 @@ async function startCommand() {
     process.exit(1);
   }
   if (resolvedForCopresence
-    && ((resolvedForCopresence.profile as any).opencodeBorrowedV1 !== undefined
-      || existsSync(join(nodesDir(),resolvedForCopresence.id,"opencode-borrowed-v1-selection.json")))) {
+    && hasBorrowedV1Intent(join(nodesDir(),resolvedForCopresence.id),resolvedForCopresence.profile)) {
     if (process.env.ANET_BORROWED_V1_BRIDGE !== "1") {
       await startBorrowedV1Bridge(resolvedForCopresence,opts);
       return;
@@ -13008,8 +13007,7 @@ Stop a running agent node.
  */
 async function stopResolvedNode(resolved: { id: string; profile: Profile }, stopInvokedAt: number = Date.now()) {
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
-  const borrowedHostSelected = (resolved.profile as any).opencodeBorrowedV1 !== undefined
-    || existsSync(join(nodesDir(),resolved.id,"opencode-borrowed-v1-selection.json"));
+  const borrowedHostSelected = hasBorrowedV1Intent(join(nodesDir(),resolved.id),resolved.profile);
   let stopGeneration = "";
   let stopProcesses: LifecycleProcessIdentity[] = [];
   try {
@@ -13227,9 +13225,9 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
   // A marker-bearing generation was already handled above by exact identity;
   // name matching after that point would re-open #466's same-name kill race.
   const copresenceSessions = copresenceTmuxSessions(displayName);
-  const tmuxTuiKilled = allowLegacyTmuxNameSweep && !borrowedHostSelected && tmuxSessionRunning(copresenceSessions.tui);
-  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && !borrowedHostSelected && tmuxSessionRunning(copresenceSessions.appsrv);
-  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && !borrowedHostSelected && tmuxSessionRunning(copresenceSessions.bridge);
+  const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui) && !borrowedHostSelected;
+  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv) && !borrowedHostSelected;
+  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge) && !borrowedHostSelected;
   // The three flags above say a session WAS running, which is the condition for
   // trying. Whether the kill landed is a second question, and reporting the
   // first as if it answered the second is how "Stopped X (tmux(tui) killed)"
