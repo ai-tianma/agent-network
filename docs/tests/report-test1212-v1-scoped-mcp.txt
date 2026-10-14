@@ -1,0 +1,19 @@
+#1212 — Directory-bound V1 MCP capability/config primitive
+
+Validation pending: two pinned exact V1 packages in non-root/network-none Docker.
+Source: v1-scoped-mcp.ts; explicit Host scopedCommhubMcp option/default unchanged;
+versioned CLI flag and recovery boundaries: deploy/node/opencode-v1-host/README.md.
+
+Acceptance: unique canonical directory/full saved binding/current admitted Host,
+ephemeral loopback capability/original Hub credential and sender, private project
+config retaining provider/model/other MCP, actual scoped native MCP add and model
+tools, wrong capability/network/binding/Host and native foreign-session refusal,
+edited config preserved with revoked capability/private recovery files, exact
+restore leaves sibling MCP/native session/Host live, retained Host policy mismatch.
+
+The synthetic model exercises real native MCP tools. No real Hub/vendor/account,
+running Node/thread/model/login/credentials or public package release. MCP does
+not supply trusted session/turn identity; this is cooperative unique-directory
+binding, not tenant security or proof of human/network turn ownership. Project
+file installation alone is not native readiness. Full borrowed Node integration,
+native MCP reconciliation/disconnect/ready-turn and migration remain #1195/#1196.
