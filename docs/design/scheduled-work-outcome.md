@@ -51,6 +51,10 @@ event contract excludes this iteration's own bookkeeping; further domains must
 also avoid self-wake loops. Failed/expired/skipped/usage-limit
 results must never be converted into successful empty runs.
 
+The following [producer guidance slice](scheduled-outcome-guidance.md) explains
+explicit self-reporting in opted-in dispatched tasks. Its synthetic producer
+fixture does not establish real model classification or current-software adoption.
+
 The existing transactional SQLite qualification applies. The new annotation
 refuses unsupported transactional backends; this is not a PostgreSQL scheduler
 support claim. API schema descriptions and old no-field reply response shapes
