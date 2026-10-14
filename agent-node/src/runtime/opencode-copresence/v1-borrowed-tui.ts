@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { inspectBorrowedLaunchHealth, readBorrowedLaunchConfig, BORROWED_LAUNCH_HEALTH } from "../../shared/opencode-borrowed-launch-health";
-import { selectV1BorrowedCli, borrowedV1CliAdmission } from "./v1-borrowed-cli";
-import { loadV1HostRegistry, readPrivateV1HostFile } from "./v1-host-registry";
-import { createV1SharedReadClient, validateV1SharedBinding } from "./v1-shared-read";
+import { selectV1BorrowedCli, borrowedV1CliAdmission, V1BorrowedCliError } from "./v1-borrowed-cli";
+import { loadV1HostRegistry, readPrivateV1HostFile, V1HostAdmissionError } from "./v1-host-registry";
+import { createV1SharedReadClient, validateV1SharedBinding, V1SharedBindingError } from "./v1-shared-read";
 import { fetchOpenCodeJson } from "./http";
 import { OPENCODE_DEFAULT_DISABLED_TOOLS } from "../../shared/opencode-preset";
 import { OPENCODE_V1_BACKEND } from "../opencode-backend";
@@ -17,7 +17,8 @@ export const BORROWED_TUI_RECORD = "opencode-borrowed-v1-tui.json";
 class BorrowedV1TuiError extends Error {}
 function refuse(reason: string): never { throw new BorrowedV1TuiError(`OpenCode V1 borrowed TUI refused: ${reason}`); }
 export function borrowedTuiFailure(error: unknown): string {
-  return error instanceof BorrowedV1TuiError ? error.message : "OpenCode V1 borrowed TUI refused: inspect original bridge/Host/session/model/lease or TUI ownership; no fallback";
+  return error instanceof BorrowedV1TuiError || error instanceof V1BorrowedCliError || error instanceof V1HostAdmissionError || error instanceof V1SharedBindingError
+    ? error.message : "OpenCode V1 borrowed TUI refused: inspect original bridge/Host/session/model/lease or TUI ownership; no fallback";
 }
 
 /** Read-only admission to the already-live node's cooperative lease. No second
