@@ -12,7 +12,9 @@ export interface V1HostExpectation {
   readonly cohortId: string;
 }
 
-const ROOT_NAMES = ["home", "config", "data", "cache", "state", "managed", "runtime"] as const;
+const ROOT_NAMES = Object.freeze(["home", "config", "data", "cache", "state", "managed", "runtime"] as const);
+export const V1_HOST_ROOT_NAMES = ROOT_NAMES;
+export { privateDirectory as validatePrivateV1HostDirectory, privateFile as readPrivateV1HostFile };
 export interface V1HostRecord extends V1HostExpectation {
   readonly schema: 1;
   readonly generation: "v1";
