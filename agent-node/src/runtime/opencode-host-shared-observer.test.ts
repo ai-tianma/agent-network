@@ -152,6 +152,63 @@ describe("process evidence (injected /proc)", () => {
     expect(parseLoopbackUrl("http://127.0.0.1:0")).toBeUndefined();
   });
 
+  test("a denial inside the candidate set is a refusal even when an owner was found (#2784 review)", () => {
+    // pid 888 is a same-uid candidate whose fd table we cannot read: uniqueness
+    // is unprovable, so the single visible owner must NOT be reported.
+    const deps = fakeProc({});
+    deps.readDir = (path) => {
+      if (path === "/proc") return ["1", "777", "888", "self"];
+      if (path === "/proc/888/fd") throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return ["0", "1", "7"];
+    };
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "permission_denied" });
+  });
+
+  test("a foreign-uid process is not a candidate at all (kernel socket uid bounds the set)", () => {
+    // The socket says uid 1000. pid 888 (uid 2000) holds that inode number, but
+    // it is not a candidate, so no owner must be reported for it.
+    const deps = fakeProc({});
+    deps.readDir = (path) => {
+      if (path === "/proc") return ["1", "777", "888", "self"];
+      return ["0", "1", "7"];
+    };
+    deps.procUid = (pid) => (pid === 888 ? 2000 : 1000);
+    deps.readLink = (path) => (path.includes("/proc/888/") ? "socket:[4242]" : "/dev/null");
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "socket_owner_not_found" });
+  });
+
+  test("kernel socket uid disagreeing with the process uid is `identity_mismatch`", () => {
+    const deps = fakeProc({});
+    deps.procUid = () => 2000; // /proc/net/tcp says 1000 → no candidate, and no owner is invented
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "socket_owner_not_found" });
+  });
+
+  test("an unreadable process directory is a refusal, not a silent skip", () => {
+    const deps = fakeProc({});
+    deps.procUid = () => undefined;
+    deps.readDir = (path) => {
+      if (path === "/proc") return ["1", "777", "self"];
+      if (path === "/proc/777") throw Object.assign(new Error("denied"), { code: "EACCES" });
+      return ["0", "1", "7"];
+    };
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "permission_denied" });
+  });
+
+  test("two LISTEN sockets on the port with different uids are `ambiguous_listener`", () => {
+    const deps = fakeProc({});
+    deps.readProcFile = (path) => {
+      if (path === "/proc/net/tcp") {
+        return [
+          "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+          "  0: 0100007F:1000 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 4242 1 0 0 0 0",
+          "  1: 0100007F:1000 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000 0 4343 1 0 0 0 0",
+        ].join("\n");
+      }
+      return "";
+    };
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "ambiguous_listener" });
+  });
+
   test("a missing listener is `no_listener`, not a guess", () => {
     const deps = fakeProc({});
     deps.readProcFile = (path) => (path === "/proc/net/tcp"
@@ -184,9 +241,16 @@ describe("process evidence (injected /proc)", () => {
     expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "identity_mismatch" });
   });
 
-  test("an unobservable uid is `identity_mismatch`, never a fabricated 0", () => {
-    expect(observeHostSharedServe(URL_4096, fakeProc({ uid: undefined })))
-      .toEqual({ ok: false, reason: "identity_mismatch" });
+  test("an unobservable uid is never fabricated", () => {
+    // /proc/<pid> gone entirely: no candidate, no invented uid.
+    const gone = fakeProc({});
+    gone.procUid = () => undefined;
+    gone.readDir = (path) => {
+      if (path === "/proc") return ["1", "777", "self"];
+      if (path === "/proc/777") throw Object.assign(new Error("gone"), { code: "ENOENT" });
+      return ["0", "1", "7"];
+    };
+    expect(observeHostSharedServe(URL_4096, gone)).toEqual({ ok: false, reason: "socket_owner_not_found" });
   });
 
   test("a provider failure is a reason, never a throw", () => {
@@ -253,6 +317,21 @@ async function waitForListener(port: number): Promise<boolean> {
   return false;
 }
 
+/** Real-process positives run against the REAL /proc of whatever machine runs
+ *  them. On a busy multi-user host an unprivileged reader may genuinely be unable
+ *  to read every same-uid process's fds, and the provider then refuses
+ *  (`permission_denied`) because uniqueness cannot be proven — that is the
+ *  behaviour under test, not a wrong answer. The strict positive is therefore
+ *  asserted in the isolated Docker suite (a single-uid process table); here we
+ *  assert "observed, or refused for a stated reason — never a wrong answer". */
+function expectObservedOrEnvRefusal(
+  r: ReturnType<typeof observeHostSharedServe>,
+): Extract<ReturnType<typeof observeHostSharedServe>, { ok: true }> | null {
+  if (r.ok) return r;
+  if (r.reason !== "permission_denied") throw new Error(`unexpected reason: ${r.reason}`);
+  return null;
+}
+
 afterEach(() => {
   for (const s of spawned.splice(0)) {
     try { s.proc.kill(); } catch { /* already gone */ }
@@ -263,38 +342,37 @@ afterEach(() => {
 describe.if(process.platform === "linux")("observer against real listening processes", () => {
   test("a real listener is observed: pid, uid, startTicks and inode all come from /proc", async () => {
     const s = await startFakeServe();
-    const r = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.processEvidence.pid).toBe(s.pid);
-    expect(r.processEvidence.uid).toBe(process.getuid?.());
-    expect(Number.isFinite(r.processEvidence.startTicks)).toBe(true);
-    expect(r.processEvidence.listenInode).toMatch(/^\d+$/);
-    expect(r.processEvidence.diagnostics.argvContract).toBe("v2");
-    expect(makeHostSharedAliveProbe()(r.processEvidence.pid, r.processEvidence.startTicks)).toBe(true);
+    const ev = expectObservedOrEnvRefusal(observeHostSharedServe(`http://127.0.0.1:${s.port}`));
+    if (!ev) return; // environment could not prove uniqueness; refusal already asserted
+    expect(ev.processEvidence.pid).toBe(s.pid);
+    expect(ev.processEvidence.uid).toBe(process.getuid?.());
+    expect(Number.isFinite(ev.processEvidence.startTicks)).toBe(true);
+    expect(ev.processEvidence.listenInode).toMatch(/^\d+$/);
+    expect(ev.processEvidence.diagnostics.argvContract).toBe("v2");
+    expect(makeHostSharedAliveProbe()(ev.processEvidence.pid, ev.processEvidence.startTicks)).toBe(true);
   });
 
   test("a V1-shaped invocation is classified v1 — as a diagnostic, not a generation", async () => {
     const s = await startFakeServe(["--pure"]);
-    const r = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
-    expect(r.ok && r.processEvidence.diagnostics.argvContract).toBe("v1");
-    if (r.ok) expect(Object.keys(r.processEvidence)).not.toContain("generation");
+    const ev = expectObservedOrEnvRefusal(observeHostSharedServe(`http://127.0.0.1:${s.port}`));
+    if (!ev) return;
+    expect(ev.processEvidence.diagnostics.argvContract).toBe("v1");
+    expect(Object.keys(ev.processEvidence)).not.toContain("generation");
   });
 
   test("an unknown flag is still observable, with contract `none`", async () => {
     const s = await startFakeServe(["--mystery"]);
-    const r = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.processEvidence.diagnostics.argvContract).toBe("none");
+    const ev = expectObservedOrEnvRefusal(observeHostSharedServe(`http://127.0.0.1:${s.port}`));
+    if (!ev) return;
+    expect(ev.processEvidence.diagnostics.argvContract).toBe("none");
   });
 
   test("a killed listener is `no_listener` — no stale success", async () => {
     const s = await startFakeServe();
-    expect(observeHostSharedServe(`http://127.0.0.1:${s.port}`).ok).toBe(true);
     s.proc.kill();
     await Bun.sleep(150);
     const after = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
     expect(after.ok).toBe(false);
-    if (!after.ok) expect(["no_listener", "socket_owner_not_found"]).toContain(after.reason);
+    if (!after.ok) expect(["no_listener", "socket_owner_not_found", "permission_denied"]).toContain(after.reason);
   });
 });

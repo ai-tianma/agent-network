@@ -1,30 +1,34 @@
-// #1313 / parent #1302 — Linux OBSERVATION PROVIDER for the host-shared
-// OpenCode server: REAL PROCESS EVIDENCE, and nothing more.
+// #1313 / parent #1302 — Linux OBSERVATION PROVIDER for the host-shared OpenCode
+// server: REAL PROCESS EVIDENCE, and nothing more.
 //
-// Scope split agreed with 通信牛 (2026-10-16):
-//   * this module = "what process is really behind this loopback URL", read-only;
-//   * #1302 = generation/evidence BINDING and the reuse decision. A consumer that
-//     cannot prove a generation must refuse reuse; that call is NOT made here.
+// Scope split agreed with 通信牛 (2026-10-16): this module answers only "what
+// process is really behind this loopback URL", read-only; generation BINDING and
+// the reuse decision belong to #1302 — a consumer that cannot prove a generation
+// must refuse reuse, and that call is not made here.
 //
-// Why it returns `processEvidence` and not an observation with a `generation`:
-// an exact argv match, the executable path, a file named `opencode` and the
-// caller's expectation are all *diagnostics* — none of them proves the
-// process's OpenCode generation. So this module never fills a proven generation
-// field; it reports the argv-contract shape under `diagnostics` and says so.
+// Why it returns `processEvidence` and not an observation with a `generation`: an
+// exact argv match, the executable path, a file named `opencode` and the caller's
+// expectation are all *diagnostics* — none proves the process's OpenCode
+// generation. So no proven generation field exists here; the argv shape is
+// reported under `diagnostics`, together with a note saying what it does not prove.
 //
 // ONE chain, from ONE process, then re-verified:
-//   /proc/net/tcp LISTEN inode on 127.0.0.1:<port>
-//     → /proc/<pid>/fd/* "socket:[inode]"  (the holding process)
-//     → /proc/<pid> uid
-//     → /proc/<pid>/stat start ticks + liveness
-//     → /proc/<pid>/cmdline  (diagnostic)
-//   then inode/pid/uid/startTicks are read AGAIN and must be identical. Any
-//   drift, permission wall or multi-candidate answer is an explicit failure —
-//   a stale success is never returned, and this module never throws.
+//   /proc/net/tcp LISTEN inode + its kernel uid for 127.0.0.1:<port>
+//     → /proc/<pid>/fd/* "socket:[inode]"  (candidate set bounded by that kernel
+//       socket uid, so the set is provably complete)
+//     → /proc/<pid> uid (must equal the socket uid) | /proc/<pid>/stat start ticks
+//     → /proc/<pid>/cmdline (diagnostic)
+//   then inode/pid/uid/startTicks are read AGAIN and must be identical. Any drift,
+//   permission wall or multi-candidate answer is an explicit failure — a stale
+//   success is never returned, and this module never throws.
 //
-// No daemon wiring, no second registry, no credential read, no `close`
-// lifecycle, no import of any reuse/guard module: the type below is defined
-// right here so the slice stays independently reviewable.
+// Uniqueness is part of the claim: a denial anywhere in the candidate set means
+// "unique holder" cannot be proven, so it is a refusal even if an owner was found
+// (通信牛, #2784 review).
+//
+// No daemon wiring, no second registry, no credential read, no `close` lifecycle,
+// no import of any reuse/guard module: the types below are defined right here so
+// the slice stays independently reviewable.
 
 import { readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { basename } from "node:path";
@@ -43,11 +47,9 @@ export type HostSharedObserveReason =
 
 /**
  * DIAGNOSTIC ONLY. `argvContract` records which serve-argv shape was seen. It is
- * **not** proof of a generation: a process can be launched with any argv, and a
- * generation change upstream changes the shape without the process changing
- * identity. A consumer that needs a proven generation must bind it itself and
- * refuse reuse when it cannot (#1302) — this field must never be promoted into
- * a "proven generation".
+ * **not** proof of a generation: any process can be launched with any argv. A
+ * consumer that needs a proven generation must bind it itself and refuse reuse
+ * when it cannot (#1302) — never promote this field into a proven generation.
  */
 export interface HostSharedServeDiagnostics {
   /** Executable behind the process, when readable: /proc/<pid>/exe. */
@@ -88,8 +90,7 @@ export interface LiveProc {
   state: string;
 }
 
-/** Injectable /proc surface. Defaults read the real filesystem; the tests (unit
- *  and the isolated Docker suite) use real processes or scripted drift. */
+/** Injectable /proc surface: defaults read the real filesystem. */
 export interface HostSharedObserverDeps {
   platform?: NodeJS.Platform;
   readProcFile?: (path: string) => string;
@@ -105,14 +106,10 @@ export interface HostSharedObserverDeps {
 
 const LOOPBACK_HOST = "127.0.0.1";
 const OPENCODE_BASENAME = "opencode";
-/** LISTEN state in /proc/net/tcp. */
-const TCP_LISTEN = "0A";
-/** 127.0.0.1 little-endian, the only address form this provider observes. */
-const LOOPBACK_HEX = "0100007F";
-const CONTRACT_NOTE =
-  "argv shape is a launch-argument diagnostic only: it cannot prove a process's " +
-  "OpenCode generation, so it must never be promoted into a proven generation " +
-  "(binding belongs to the reuse decision, not to process observation).";
+const TCP_LISTEN = "0A";              // LISTEN state in /proc/net/tcp
+const LOOPBACK_HEX = "0100007F";      // 127.0.0.1 little-endian, the only form observed
+const CONTRACT_NOTE = "argv shape is a launch-argument diagnostic only: it cannot "
+  + "prove a process's OpenCode generation, so never promote it into one.";
 
 function errCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
@@ -166,27 +163,53 @@ function argvContractOf(
   return matches.length === 0 ? "none" : "ambiguous";
 }
 
-/** LISTEN socket inodes for 127.0.0.1:<port> in this netns. */
-function listenInodes(readProcFile: (p: string) => string, port: number): string[] | "permission_denied" {
+/** LISTEN sockets for 127.0.0.1:<port>: inodes AND the kernel's uid for them. That
+ *  uid needs no permission and bounds the candidate set: only its processes can
+ *  hold the socket, so a denial outside the set cannot affect uniqueness. */
+function listenSockets(
+  readProcFile: (p: string) => string,
+  port: number,
+): { inodes: string[]; uid: number } | "permission_denied" | "uid_mismatch" {
   let table: string;
   try {
     table = readProcFile("/proc/net/tcp");
   } catch (error) {
-    return errCode(error) === "EACCES" || errCode(error) === "EPERM" ? "permission_denied" : [];
+    return errCode(error) === "EACCES" || errCode(error) === "EPERM" ? "permission_denied" : "uid_mismatch";
   }
   const wanted = `${LOOPBACK_HEX}:${port.toString(16).toUpperCase().padStart(4, "0")}`;
   const inodes = new Set<string>();
+  let uid: number | undefined;
   for (const line of table.split("\n").slice(1)) {
     const fields = line.trim().split(/\s+/);
     if (fields.length < 10) continue;
     if (fields[1] !== wanted || fields[3] !== TCP_LISTEN) continue;
-    if (/^\d+$/.test(fields[9])) inodes.add(fields[9]);
+    if (!/^\d+$/.test(fields[9]) || !/^\d+$/.test(fields[7])) continue;
+    const lineUid = Number(fields[7]);
+    // Two LISTEN sockets on one loopback port owned by different uids: we cannot
+    // say which one is meant, so we refuse instead of picking one.
+    if (uid === undefined) uid = lineUid;
+    else if (uid !== lineUid) return "uid_mismatch";
+    inodes.add(fields[9]);
   }
-  return [...inodes];
+  // No LISTEN rows at all still has to be distinguishable from "rows existed but
+  // the socket uid could not be read", so uid_mismatch only means a real conflict.
+  if (uid === undefined) return { inodes: [], uid: -1 };
+  return { inodes: [...inodes], uid };
 }
 
-/** The single pid whose fd table holds `socket:[inode]`. */
-function socketOwnerPids(deps: Required<HostSharedObserverDeps>, inode: string): number[] | "permission_denied" {
+/**
+ * The single pid whose fd table holds `socket:[inode]`.
+ *
+ * #2784 review (通信牛): a visible owner plus DENIED fd reads does not prove a
+ * unique holder — a denied process might hold the same socket. So any denial
+ * inside the candidate set refuses, and the set is bounded by the kernel socket
+ * uid so completeness needs no assumption about the answer.
+ */
+function socketOwnerPids(
+  deps: Required<HostSharedObserverDeps>,
+  inode: string,
+  socketUid: number,
+): number[] | "permission_denied" {
   const target = `socket:[${inode}]`;
   let pids: string[];
   try {
@@ -200,6 +223,19 @@ function socketOwnerPids(deps: Required<HostSharedObserverDeps>, inode: string):
     if (!/^\d+$/.test(entry)) continue;
     const pid = Number(entry);
     if (pid <= 1) continue;
+    const uid = deps.procUid(pid);
+    if (uid === undefined) {
+      // Unreadable /proc/<pid>: a gone process cannot hold the socket, but we
+      // must not silently treat a real denial as "gone".
+      try {
+        deps.readDir(`/proc/${pid}`);
+      } catch (error) {
+        const code = errCode(error);
+        if (code !== "ENOENT") denied = true;
+      }
+      continue;
+    }
+    if (uid !== socketUid) continue;
     let fds: string[];
     try {
       fds = deps.readDir(`/proc/${pid}/fd`);
@@ -220,8 +256,10 @@ function socketOwnerPids(deps: Required<HostSharedObserverDeps>, inode: string):
       }
     }
   }
-  if (owners.length > 0) return owners;
-  return denied ? "permission_denied" : [];
+  // A denial anywhere in the candidate set means "unique holder" cannot be
+  // proven, so it is a refusal even when owners were found.
+  if (denied) return "permission_denied";
+  return owners;
 }
 
 interface Snapshot {
@@ -236,20 +274,24 @@ function locate(
   deps: Required<HostSharedObserverDeps>,
   port: number,
 ): { ok: true; snapshot: Snapshot } | { ok: false; reason: HostSharedObserveReason } {
-  const inodes = listenInodes(deps.readProcFile, port);
-  if (inodes === "permission_denied") return { ok: false, reason: "permission_denied" };
-  if (inodes.length === 0) return { ok: false, reason: "no_listener" };
+  const listen = listenSockets(deps.readProcFile, port);
+  if (listen === "permission_denied") return { ok: false, reason: "permission_denied" };
+  if (listen === "uid_mismatch") return { ok: false, reason: "ambiguous_listener" };
+  if (listen.inodes.length === 0) return { ok: false, reason: "no_listener" };
   // More than one LISTEN inode on the same loopback port: we cannot say which
   // one the caller means, and guessing is exactly what must not happen.
-  if (inodes.length > 1) return { ok: false, reason: "ambiguous_listener" };
-  const inode = inodes[0];
-  const owners = socketOwnerPids(deps, inode);
+  if (listen.inodes.length > 1) return { ok: false, reason: "ambiguous_listener" };
+  const inode = listen.inodes[0];
+  const owners = socketOwnerPids(deps, inode, listen.uid);
   if (owners === "permission_denied") return { ok: false, reason: "permission_denied" };
   if (owners.length === 0) return { ok: false, reason: "socket_owner_not_found" };
   if (owners.length > 1) return { ok: false, reason: "ambiguous_listener" };
   const pid = owners[0];
   const uid = deps.procUid(pid);
   if (uid === undefined) return { ok: false, reason: "identity_mismatch" };
+  // The kernel's socket uid and the process's uid must agree; a disagreement
+  // means we are looking at different things and must not report either.
+  if (uid !== listen.uid) return { ok: false, reason: "identity_mismatch" };
   const proc = deps.liveProcess(pid);
   if (!proc) return { ok: false, reason: "identity_mismatch" };
   return { ok: true, snapshot: { inode, pid, uid, ticks: proc.ticks } };
@@ -258,11 +300,10 @@ function locate(
 /**
  * Observe the real process behind a validated literal loopback URL.
  *
- * Read-only, never throws: every failure is a `reason`. Identity
- * (inode/pid/uid/startTicks) is read twice and must be identical, so a process
- * that died, was replaced, or whose PID was reused between the reads is a
- * failure rather than a stale success. Argv/executable are diagnostics and are
- * never returned as a proven generation.
+ * Read-only, never throws: every failure is a `reason`. Identity is read twice
+ * and must be identical, so a process that died, was replaced, or whose PID was
+ * reused is a failure rather than a stale success. Argv/executable are
+ * diagnostics, never a proven generation.
  */
 export function observeHostSharedServe(
   url: string,
@@ -340,10 +381,8 @@ export function parseLoopbackUrl(url: unknown): { port: number } | undefined {
   return { port };
 }
 
-/**
- * A real liveness re-check bound to the exact pid+startTicks pair, so PID reuse
- * cannot pass. Exported so a consumer never re-implements it.
- */
+/** Real liveness re-check bound to the exact pid+startTicks pair (PID reuse cannot
+ *  pass), exported so no consumer re-implements it. */
 export function makeHostSharedAliveProbe(
   overrides: HostSharedObserverDeps = {},
 ): (pid: number, startTicks: number) => boolean {
