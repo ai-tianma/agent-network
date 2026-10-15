@@ -1,6 +1,18 @@
 name: OpenCode V2 shared candidate
 
 on:
+  pull_request:
+    paths:
+      - 'agent-node/**'
+      - 'agent-network/**'
+      - 'server/src/create-node-tool-schema.test.ts'
+      - 'server/src/create-node-validate*'
+      - 'server/src/tools.ts'
+      - 'tests/test543-opencode-v2-copresence/**'
+      - 'tests/Dockerfile'
+      - 'tests/test-all.sh'
+      - 'tests/lib/**'
+      - '.github/workflows/opencode-v2-shared-candidate.yml'
   push:
     branches:
       - feat/opencode-v2-server-reuse
