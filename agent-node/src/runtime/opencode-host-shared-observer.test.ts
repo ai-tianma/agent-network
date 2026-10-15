@@ -144,24 +144,57 @@ describe("process evidence (injected /proc)", () => {
       .toEqual({ ok: false, reason: "unsupported_platform" });
   });
 
-  test("only the literal 127.0.0.1 form is observable", () => {
-    for (const url of ["http://localhost:4096", "http://[::1]:4096", "http://10.0.0.5:4096", "https://127.0.0.1:4096", "http://a:b@127.0.0.1:4096", "nope"]) {
+  test("only the literal 127.0.0.1 form is observable — raw string, not a normalized URL", () => {
+    // Every one of these normalizes to 127.0.0.1 under `new URL()`; the provider
+    // must still refuse them (#2784 review).
+    const refused = [
+      "http://localhost:4096",
+      "http://[::1]:4096",
+      "http://10.0.0.5:4096",
+      "https://127.0.0.1:4096",
+      "http://a:b@127.0.0.1:4096",
+      "http://127.1:4096",
+      "http://2130706433:4096",
+      "http://0x7f000001:4096",
+      "http://127.0.0.1:4096/",
+      "http://127.0.0.1:4096/path",
+      "http://127.0.0.1:4096?x=1",
+      "http://127.0.0.1:4096#frag",
+      "http://127.0.0.1:04096",
+      "http://127.0.0.1:0",
+      "http://127.0.0.1:65536",
+      "http://127.0.0.1",
+      "HTTP://127.0.0.1:4096",
+      "http://127.0.0.1:4096 ",
+      "http://127.0.0.01:4096",
+      "nope",
+    ];
+    for (const url of refused) {
+      expect(parseLoopbackUrl(url)).toBeUndefined();
       expect(observeHostSharedServe(url, fakeProc({}))).toEqual({ ok: false, reason: "url_not_supported" });
     }
     expect(parseLoopbackUrl(URL_4096)).toEqual({ port: 4096 });
-    expect(parseLoopbackUrl("http://127.0.0.1:0")).toBeUndefined();
+    expect(parseLoopbackUrl("http://127.0.0.1:65535")).toEqual({ port: 65535 });
   });
 
   test("a denial inside the candidate set is a refusal even when an owner was found (#2784 review)", () => {
-    // pid 888 is a same-uid candidate whose fd table we cannot read: uniqueness
-    // is unprovable, so the single visible owner must NOT be reported.
-    const deps = fakeProc({});
-    deps.readDir = (path) => {
+    // Mixed permissions: pid 777 is readable and holds the socket, pid 888 is a
+    // same-uid candidate whose fd table we cannot read. Uniqueness is therefore
+    // unprovable, so the visible owner must NOT be reported — while the very same
+    // tree without the unreadable candidate IS observable (the denial is what
+    // changes the answer, not something else).
+    const withDenied = fakeProc({});
+    withDenied.readDir = (path) => {
       if (path === "/proc") return ["1", "777", "888", "self"];
       if (path === "/proc/888/fd") throw Object.assign(new Error("denied"), { code: "EACCES" });
       return ["0", "1", "7"];
     };
-    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "permission_denied" });
+    expect(observeHostSharedServe(URL_4096, withDenied)).toEqual({ ok: false, reason: "permission_denied" });
+
+    const withoutDenied = fakeProc({});
+    withoutDenied.readDir = (path) => (path === "/proc" ? ["1", "777", "self"] : ["0", "1", "7"]);
+    const ok = observeHostSharedServe(URL_4096, withoutDenied);
+    expect(ok.ok).toBe(true);
   });
 
   test("a foreign-uid process is not a candidate at all (kernel socket uid bounds the set)", () => {

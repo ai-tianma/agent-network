@@ -23,19 +23,16 @@
 //   success is never returned, and this module never throws.
 //
 // Uniqueness is part of the claim: a denial anywhere in the candidate set means
-// "unique holder" cannot be proven, so it is a refusal even if an owner was found
-// (通信牛, #2784 review).
-//
-// No daemon wiring, no second registry, no credential read, no `close` lifecycle,
-// no import of any reuse/guard module: the types below are defined right here so
-// the slice stays independently reviewable.
+// "unique holder" cannot be proven, so it refuses even if an owner was found.
+// No daemon wiring, no second registry, no credential read, no `close`
+// lifecycle, no reuse/guard import: the types below are local to this slice.
 
 import { readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { opencodeBackendFor } from "./opencode-backend.js";
 import { readLiveProcess } from "./opencode-copresence/launcher-health.js";
 
-/** Why a process observation could not be produced. Every value is a refusal. */
+/** Why an observation could not be produced. Every value is a refusal. */
 export type HostSharedObserveReason =
   | "unsupported_platform"
   | "url_not_supported"
@@ -62,7 +59,7 @@ export interface HostSharedServeDiagnostics {
   argvContractNote: string;
 }
 
-/** What the OS can actually prove about the process behind a loopback URL. */
+/** What the OS can prove about the process behind a loopback URL. */
 export interface HostSharedProcessEvidence {
   /** The validated literal loopback URL this evidence is about. */
   url: string;
@@ -109,7 +106,7 @@ const OPENCODE_BASENAME = "opencode";
 const TCP_LISTEN = "0A";              // LISTEN state in /proc/net/tcp
 const LOOPBACK_HEX = "0100007F";      // 127.0.0.1 little-endian, the only form observed
 const CONTRACT_NOTE = "argv shape is a launch-argument diagnostic only: it cannot "
-  + "prove a process's OpenCode generation, so never promote it into one.";
+  + "prove a process's OpenCode generation — never promote it into one.";
 
 function errCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
@@ -134,7 +131,6 @@ function defaultDeps(): Required<HostSharedObserverDeps> {
   };
 }
 
-/** Classify the serve argv shape. Diagnostics only — see CONTRACT_NOTE. */
 function argvTailOf(argv: readonly string[]): string[] {
   const serveIndex = argv.lastIndexOf("serve");
   if (serveIndex < 0) return [];
@@ -158,14 +154,14 @@ function argvContractOf(
     }
   }
   if (matches.length === 1) return matches[0];
-  // 0 matches: an unknown shape. 2 matches: the upstream contract itself no
-  // longer distinguishes them — either way this is a diagnostic, not a verdict.
+  // 0 matches: unknown shape. 2: the upstream contract no longer distinguishes
+  // them. Either way it is a diagnostic, never a verdict.
   return matches.length === 0 ? "none" : "ambiguous";
 }
 
-/** LISTEN sockets for 127.0.0.1:<port>: inodes AND the kernel's uid for them. That
- *  uid needs no permission and bounds the candidate set: only its processes can
- *  hold the socket, so a denial outside the set cannot affect uniqueness. */
+/** LISTEN sockets on 127.0.0.1:<port>: inodes AND the kernel uid. That uid needs no
+ *  permission and bounds the candidate set, so a denial outside it cannot affect
+ *  uniqueness (only its processes can hold the socket). */
 function listenSockets(
   readProcFile: (p: string) => string,
   port: number,
@@ -191,8 +187,7 @@ function listenSockets(
     else if (uid !== lineUid) return "uid_mismatch";
     inodes.add(fields[9]);
   }
-  // No LISTEN rows at all still has to be distinguishable from "rows existed but
-  // the socket uid could not be read", so uid_mismatch only means a real conflict.
+  // uid_mismatch means a real uid conflict on the port, not "no rows at all".
   if (uid === undefined) return { inodes: [], uid: -1 };
   return { inodes: [...inodes], uid };
 }
@@ -225,8 +220,7 @@ function socketOwnerPids(
     if (pid <= 1) continue;
     const uid = deps.procUid(pid);
     if (uid === undefined) {
-      // Unreadable /proc/<pid>: a gone process cannot hold the socket, but we
-      // must not silently treat a real denial as "gone".
+      // Gone process => skip; a real denial must not be silently treated as gone.
       try {
         deps.readDir(`/proc/${pid}`);
       } catch (error) {
@@ -368,15 +362,21 @@ export function observeHostSharedServe(
   }
 }
 
-/** Literal `http://127.0.0.1:<port>` only — the sole shape this provider observes. */
+/** Literal `http://127.0.0.1:<port>` only — the sole shape this provider observes.
+ *
+ * Matching the RAW string is deliberate (#2784 review, 通信牛): `new URL()` would
+ * normalize `http://127.1:4096`, integer/hex addresses and trailing
+ * path/query/fragment into `127.0.0.1`, so a parsed-host check would accept
+ * spellings the host registry never writes. The regex also refuses a leading-zero
+ * port and anything beyond 65535, and it pins the scheme to lowercase http.
+ */
+const LOOPBACK_URL_RE = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/;
+
 export function parseLoopbackUrl(url: unknown): { port: number } | undefined {
   if (typeof url !== "string") return undefined;
-  let parsed: URL;
-  try { parsed = new URL(url); } catch { return undefined; }
-  if (parsed.protocol !== "http:") return undefined;
-  if (parsed.hostname !== LOOPBACK_HOST) return undefined;
-  if (parsed.username || parsed.password) return undefined;
-  const port = Number(parsed.port);
+  const match = LOOPBACK_URL_RE.exec(url);
+  if (!match) return undefined;
+  const port = Number(match[1]);
   if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) return undefined;
   return { port };
 }
