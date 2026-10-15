@@ -280,6 +280,38 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(ownedCfg.opencodeSharedServerUrl).toBeUndefined();
   });
 
+  test.each(["malformed", "missing-password"])("explicit V2 new Server survives a %s shared registry", async (fault) => {
+    plantOpencode("opencode v2.0.22");
+    plantMachineModel({ model: "stub/model" });
+    mkdirSync(join(home, ".anet"), { mode: 0o700 });
+    writeFileSync(join(home, ".anet", "opencode-shared-server.json"), fault === "malformed"
+      ? "{broken"
+      : JSON.stringify({ url: "http://127.0.0.1:4097", passwordFile: join(home, "missing-password") }),
+    { mode: 0o600 });
+    const spec = { name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true } };
+
+    // Default reuse must still reject the broken registration before writing
+    // a child or spawning anything. Explicit new-Server takes the owned path.
+    const shared = await runCreate(spec, "cr_brokenshared");
+    expect(shared.acks[0].status).toBe("rejected");
+    expect(shared.acks[0].error).toStartWith("shared_opencode_registry:");
+    expect(shared.spawned).toHaveLength(0);
+    const dir = join(workDir, ".anet", "nodes", "owned-v2");
+    expect(existsSync(dir)).toBe(false);
+
+    const owned = await runCreate({ ...spec, flags: { ...spec.flags, opencodeNewServer: true } }, "cr_ownedfallback");
+    // sleep proves config wiring only and must still fail native readiness.
+    expect(owned.acks[0].status).toBe("runtime_capability_check_failed");
+    expect(owned.spawned).toHaveLength(1);
+    const cfg = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+    expect(cfg.opencodeGeneration).toBe("v2");
+    expect(cfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(cfg.opencodeSharedServerPasswordFile).toBeUndefined();
+    expect(cfg.flags.opencodeUnsafeTools).toBe(true);
+    expect(cfg.flags.opencodeNewServer).toBeUndefined();
+  });
+
   test("#829 unsafe opt-in is required before write or spawn; existing config unchanged", async () => {
     const dir = join(workDir, ".anet", "nodes", "v2-child");
     mkdirSync(dir, { recursive: true });

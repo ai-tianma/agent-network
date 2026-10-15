@@ -1100,9 +1100,15 @@ export async function handleCreateNodeDoorbell(
         resolveChildHome(process.env, process.platform), ".anet", "opencode-shared-server.json"));
     }
   } catch (error: any) {
-    await deps.callCommHub("ack_create_request", { request_id, status: "rejected",
-      error: `shared_opencode_registry: ${error?.message || error}` }).catch(() => {});
-    return;
+    if (req.node_spec.flags?.opencodeNewServer !== true) {
+      await deps.callCommHub("ack_create_request", { request_id, status: "rejected",
+        error: `shared_opencode_registry: ${error?.message || error}` }).catch(() => {});
+      return;
+    }
+    // An explicit node-owned Server does not depend on the shared service.
+    // Keep using the registered client when valid; otherwise the ordinary
+    // CLI/version gates below must independently qualify the local binary.
+    deps.warn("[create-node] ignoring invalid shared OpenCode registry for explicit new Server");
   }
   const childEnvForCli = withHostOpenCodeV2ClientPath(
     minimalEnv() as Record<string, string | undefined>, sharedOpenCodeServerForCreate);
