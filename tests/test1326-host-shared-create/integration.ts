@@ -2,7 +2,7 @@
 // is a fixture; spawnChild deliberately stops BEFORE child launch. This proves
 // config selection, not a CLI/Hub/TUI turn or successful node startup.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, chownSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, chownSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { createConnection } from "node:net";
 import { handleCreateNodeDoorbell } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/create-node-daemon.ts";
@@ -67,7 +67,7 @@ function start(binary: string, port: number, v1 = false) {
   children.push(proc);
   return proc;
 }
-async function create(alias: string, flags: Record<string, unknown> = { opencodeGeneration: "v2", opencodeUnsafeTools: true }) {
+async function create(alias: string, flags: Record<string, unknown> = { opencodeGeneration: "v2", opencodeUnsafeTools: true }, expectedRejected = false) {
   const logs: string[] = [], acks: any[] = [];
   let config: any;
   await handleCreateNodeDoorbell({ request_id: `cr_${alias}` }, {
@@ -86,6 +86,13 @@ async function create(alias: string, flags: Record<string, unknown> = { opencode
       throw new Error("test1326_stop_before_child_launch");
     },
   });
+  if (expectedRejected) {
+    check(`${alias}: rejected before config write or spawn`, config === undefined
+      && !existsSync(join(project, ".anet/nodes", alias, "config.json")));
+    check(`${alias}: bad registry remains a rejection`, acks.length === 1 && acks[0].status === "rejected"
+      && acks[0].error.startsWith("shared_opencode_registry:"));
+    return { config, logs };
+  }
   check(`${alias}: real handler reached the child-launch boundary`, !!config, config ? "" : JSON.stringify({ acks, logs }));
   check(`${alias}: fixture never acknowledges a started node`, acks.length === 1 && acks[0].status === "failed"
     && acks[0].error === "fork_start: test1326_stop_before_child_launch");
@@ -112,6 +119,13 @@ try {
   const fresh = await create("explicitNew", { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true });
   noShared("explicit new-server never inherits shared fields", fresh.config);
   check("explicit new-server audit is distinct", fresh.logs.some(line => line.includes("reason=explicit_new_server")));
+  // PR2778 is now in the base: the default still refuses a malformed registry,
+  // while explicit new-server must remain usable without shared credentials.
+  writeFileSync(registry, "{", { mode: 0o600 });
+  await create("badRegistryDefault", undefined, true);
+  const brokenNew = await create("brokenRegistryNew", { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true });
+  noShared("explicit new-server escapes a broken registry without shared fields", brokenNew.config);
+  register(13260);
   const v1Child = await create("legacyV1", {});
   noShared("legacy V1 never inherits the V2 registry", v1Child.config);
   check("legacy V1 generation remains V1", v1Child.config.opencodeGeneration === "v1");

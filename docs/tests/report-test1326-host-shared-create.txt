@@ -58,3 +58,13 @@ replay: 27 pass / 0 fail (172 expects); combined four-file replay: 180 pass /
 The separate real-client failure at 8bddb085 was npm ci ECONNRESET during image
 build (job 116638379593); it did not execute client assertions. Record the
 rebased head's actual CI results separately; neither failure is erased.
+
+Main rebase validation (base ebc3fa5917ea73df3890bfdfbcbbf13bb9b16efa):
+PR2787 generation binding and PR2778 explicit-new registry escape are now
+in main. Four-file source replay: 182 pass / 0 fail, 550 expects (2.40s);
+the base added two unit cases. Real handler layer: 58 named checks, PASS.
+Added composition controls: malformed registry rejects default creation before
+config/spawn, while explicit new-server reaches launch without shared fields.
+Both non-blocking review clarifications are now source comments: preparation
+writes private node/probe directories; only bound generation enters the guard.
+This remains configuration evidence, not a full launched Hub/CLI/TUI result.
