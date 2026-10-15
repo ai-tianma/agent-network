@@ -19,6 +19,8 @@ export type HostSharedCreateSelection =
   | { decision: "admit"; reason: string; fields: ConnectionFields; pid: number; port: number }
   | { decision: "fallback"; reason: string; fields?: never; pid?: number; port?: number };
 
+/** Prepares private node directories and a disposable probe root; selection
+ * therefore has filesystem side effects, even if admission later falls back. */
 export function selectHostSharedOpenCodeForCreate(opts: {
   candidate?: HostSharedOpenCodeServer;
   nodeDir: string;
@@ -64,6 +66,8 @@ export function selectHostSharedOpenCodeForCreate(opts: {
     if (!bound.ok) return fallback(`generation_${bound.reason}`);
     const admission = decideHostSharedServerAdmission({
       uid, generation: "v2",
+      // The binder proves this generation from attestation/version/exe identity
+      // and re-observation; never replace it with the requested generation.
       observations: [{ ...evidence, generation: bound.generation }],
       probeAlive: makeHostSharedAliveProbe(),
     });
