@@ -358,6 +358,10 @@ L1_TESTS=(
   # sendCount:2；CommHub reply 只发一次；orphan reply 明确日志+ack，不回落默认会话。
   "test1241-feishu-commhub-routing"
   "test1362-create-node-pending"
+  # #1627/#1309 —— 单条测试余量仪表自己的回归:钉死的 bun 1.3.14 上**实测**
+  # 隐式默认(5000ms)、显式 500ms 声明、钩子撞满它声明的超时,以及 qa.sh
+  # 启动清日志。跑的是 `scripts/check-test-margin.py` 本体,含其内嵌夹具。
+  "test1627-test-margin"
   # 2026-08-13 扫出三个从没进 CI 的完整 Docker 门(test224 / test597 / test679),
   # 一度想加在这里,但 L1 是「~16s 并行」的快层、job 预算 5 分钟,实测在 CI 上
   # 已经用掉 141–148s;而 qa.sh 的 build 是**串行**的(只有 docker run 并行),
@@ -399,6 +403,13 @@ fi
 
 START=$(date +%s)
 FAILED=0
+
+# 🔴 启动时清掉**上一轮**的日志。复用的 runner 上,`/tmp/qa-l0-*.log` 与
+#    `/tmp/qa-l1-*-run.log` 会留在原地,而 `check-test-margin.py` 的 hook 按
+#    glob 读它们 ⇒ 报告里的 `tests=`/`near=`/`slowest=` 会描述**本次没跑**的
+#    套件(比如 `QA_L1_ONLY` 只跑 docs-only 子集时),跨 run 对照就没意义了。
+#    在这里清一次,那行 glob 就是本轮的(顺序:必须早于下面的 hook)。
+rm -f /tmp/qa-l0-*.log /tmp/qa-l1-*-run.log
 
 if [[ $RUN_L0 -eq 1 ]]; then
   sec "L0 — bun test (代码视角，单测)"
