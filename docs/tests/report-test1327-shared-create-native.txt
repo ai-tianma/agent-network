@@ -48,3 +48,16 @@ it used alias nodeB1327 literally, while #652 correctly writes nodeb1327.
 Correction: reuse product childDirNameForCreate for config/receipt/log paths.
 No product path rule or startup assertion is changed; subsequent session/task/
 close/fallback assertions remain unexecuted. The new head needs its own run.
+
+Native acceptance PASS on exact head86a85c7de22ce40f1bb85446c59cb3fc839fe113:
+Actions run38808221819 / job116674522963, completed21:24:11Z. The artifact
+source pin matches that head. All named runtime assertions passed: B/C really
+borrow A's pid/ticks, distinct session/Hub identities, exact network replies,
+CLI stop B preserves A and C still replies, explicit-new owns another listener,
+dead candidate starts an owned server and completes a network task.
+
+A separate required qa-trigger-coverage check failed: despite the dedicated
+workflow paths, repository policy also requires CI-run test directories in
+qa.yml's push/PR path lists. Added the test1327 path to both lists; the native
+workflow/harness are unchanged, and no gate is relaxed or duplicated in matrix.
+The next head must pass its own required checks and native run before merge.
