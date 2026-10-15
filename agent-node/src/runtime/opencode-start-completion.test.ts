@@ -41,6 +41,41 @@ test("V2 waits for launcher completion, shares replay, and records real bridge n
   expect(f.acks.at(-1)).toMatchObject({ status: "started", child_pid: 4343 });
   expect(getChildrenSnapshot()[0].pid).toBe(4343);
 });
+test("shared V2 restart uses its host-registered client directory", async () => {
+  const f = fixture();
+  const childDir = join(root, "child");
+  const passwordFile = join(root, "password");
+  const clientBinDir = join(root, "v2-bin");
+  writeFileSync(passwordFile, "test-only", { mode: 0o600 });
+  mkdirSync(clientBinDir, { mode: 0o700 });
+  mkdirSync(join(root, ".anet"), { mode: 0o700 });
+  writeFileSync(join(root, ".anet", "opencode-shared-server.json"), JSON.stringify({
+    url: "http://127.0.0.1:4097", passwordFile, clientBinDir,
+  }), { mode: 0o600 });
+  const configPath = join(childDir, "config.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  config.opencodeSharedServerUrl = "http://127.0.0.1:4097";
+  config.opencodeSharedServerPasswordFile = passwordFile;
+  writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  let launchPath: string | undefined;
+  f.deps.spawnChild = (_bin: string, _args: string[], opts: any) => {
+    launchPath = opts.env.PATH;
+    return f.child;
+  };
+  try {
+    const run = handleStartDoorbell({ request_id: "str_shared_client" }, f.deps);
+    await tick();
+    f.child.emit("exit", 0, null);
+    await run;
+    expect(launchPath?.split(":")[0]).toBe(clientBinDir);
+    expect(f.acks.at(-1).status).toBe("started");
+  } finally {
+    if (oldHome === undefined) delete process.env.HOME;
+    else process.env.HOME = oldHome;
+  }
+});
 test.each([[1, null], [null, "SIGTERM"]])("launcher exit %s / %s rejects without health success", async (code, signal) => {
   const f = fixture(); const run = handleStartDoorbell({ request_id: "str_failure" }, f.deps);
   await tick(); f.child.emit("exit", code, signal); await run;

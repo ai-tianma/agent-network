@@ -93,6 +93,7 @@ import {
 } from "../src/opencode-generation-create";
 import { opencodeGenerationOfConfig, opencodeGenerationSupport } from "../src/opencode-versions";
 import { planOpencodeV2Create } from "../src/opencode-v2-create-align";
+import { resolveSharedOpenCodeServer } from "../src/opencode-shared-server-create";
 import { OpenCodeV2AlignError } from "../src/opencode-v2-configured-model";
 import { parseAndValidateTools, validateModel } from "../src/tool-allowlist";
 import { createConnection as netCreateConnection, createServer as netCreateServer } from "net";
@@ -2368,6 +2369,20 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
     console.error(`[anet] ❌ ${generationRefusal}`);
     process.exit(1);
   }
+  if (resolved.profile.opencodeSharedServerUrl || resolved.profile.opencodeSharedServerPasswordFile) {
+    const url = resolved.profile.opencodeSharedServerUrl;
+    const passwordFile = resolved.profile.opencodeSharedServerPasswordFile;
+    if (resolved.profile.opencodeGeneration !== "v2" || !url || !/^http:\/\/127\.0\.0\.1:\d+$/.test(url)
+      || !passwordFile || !isAbsolute(passwordFile) || !existsSync(passwordFile)) {
+      console.error("[anet] ❌ Shared OpenCode Server config requires V2, loopback URL and existing absolute password file; no sessions were stopped.");
+      process.exit(1);
+    }
+    const passwordStat = statSync(passwordFile);
+    if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
+      console.error("[anet] ❌ Shared OpenCode Server password file must be a private regular file; no sessions were stopped.");
+      process.exit(1);
+    }
+  }
   if (!tmuxAvailable()) {
     console.error(`[anet] ❌ OpenCode --copresence requires tmux.`);
     process.exit(1);
@@ -2458,7 +2473,7 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   console.log(`[anet]    attach:  tmux attach -t ${shellQuote(`=${displayName}`)}`);
   console.log(`[anet]    stop:    anet node stop ${shellQuote(displayName)}`);
   console.log(`[anet]    bridge:  ${bridgeSession}`);
-  console.log(`[anet]    mode:    opencode-cli copresence (native serve + full attach TUI)`);
+  console.log(`[anet]    mode:    opencode-cli copresence (${profile.opencodeSharedServerUrl ? "existing shared server" : "node-owned server"} + full attach TUI)`);
 }
 
 // Borrow an existing Host/session; this launcher owns only its detached bridge.
@@ -2871,6 +2886,8 @@ interface Profile {
   opencodeMode?: "headless" | "copresence";
   /** #542/#543 — OpenCode generation ("v1" when absent; "v2" = preview). */
   opencodeGeneration?: string;
+  opencodeSharedServerUrl?: string;
+  opencodeSharedServerPasswordFile?: string;
   model?: string;
   channels: string[];
   env: Record<string, string>;
@@ -5238,6 +5255,18 @@ function createProfileFromOpts(id: string, opts: ReturnType<typeof parseOpts>): 
   const generationApplied = applyOpencodeGenerationCreateOption(profile, opts);
   if (!generationApplied.ok) {
     console.error(`[anet] ❌ ${generationApplied.refusal}`);
+    process.exit(1);
+  }
+  if (opts["opencode-generation"] === "v2") {
+    try {
+      const shared = resolveSharedOpenCodeServer(opts, join(home, ".anet", "opencode-shared-server.json"));
+      if (shared) return { ...generationApplied.profile, opencodeSharedServerUrl: shared.url, opencodeSharedServerPasswordFile: shared.passwordFile };
+    } catch (error) {
+      console.error(`[anet] ❌ ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+  } else if (opts["opencode-shared-server-url"] !== undefined || opts["opencode-shared-server-password-file"] !== undefined || opts["opencode-new-server"] !== undefined) {
+    console.error("[anet] ❌ Shared OpenCode Server options require --opencode-generation v2.");
     process.exit(1);
   }
   return generationApplied.profile;
