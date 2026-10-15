@@ -548,6 +548,10 @@ Attach this terminal to a grok co-presence node (Ctrl-] detaches).`,
 Switch a grok node's model; works while attached.`,
 
   // ── opencode ──
+  "opencode attach": `Usage: anet opencode attach <node>
+
+Attach the existing ready borrowed V1 session from its original directory in
+this terminal. Closing this TUI leaves its node bridge and shared Host running.`,
   "opencode upgrade-pin": `Usage: anet opencode upgrade-pin <version>
 
 Reinstall and smoke-test the exact pinned opencode-ai release.`,

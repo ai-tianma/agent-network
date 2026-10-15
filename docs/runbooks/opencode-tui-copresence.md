@@ -205,6 +205,41 @@ TUI 不存在，可重新执行 `anet node start <alias> --copresence` 重建桥
 
 ### V1 重启与软件升级：当前不恢复原 session
 
+#### #1120 V1 登录态持久化（CLI174 / runtime140 已公开，原机另验）
+
+源码 PR2693/main `299cd2273033c33026de397c206843440b7ba96c`；正式构建源
+PR2694/main `b4cd36f7a31385af0765533b1a8edf397841d19a`，两 package 源码树相同。
+runtime140 正式发行与完整 npm 包已核；CLI174 四门通过、npm publish 步骤成功，
+原 formal 因 registry 核验等待超时而 FAILURE，已有同一原门控包的
+[官方固定下载](https://github.com/sleep2agi/agent-network/releases/download/cli-v2.3.0-preview.174/sleep2agi-agent-network-2.3.0-preview.174.tgz)。
+15:47:34+08 的迟到 npm 回读也已核对完整原包 byte/SRI，相同公开包的
+npm 与固定下载均可用；原 formal 超时 FAILURE 保留，不补写 green。
+完整来源、摘要及原失败见 [发布记录](../tests/report-test1120-publication.txt)。
+
+V1 共存 runtime 的 `persistAuth` 路径将节点私有
+`.local/share/opencode/auth.json` 中的 Auth.Info 数据暂存到本次隔离运行目录，
+覆盖 API、OAuth（含 accountId/enterpriseUrl）和 wellknown 登录数据。
+数据结构按 [上游 V1 Auth.Info](https://github.com/anomalyco/opencode/blob/v1.18.1/packages/opencode/src/auth/index.ts)
+筛选；不复制 MCP、插件、任意配置字段或数据库。普通 headless ACP 继续使用
+原 API-only 暂存，版本探针既不读入此登录数据也不回写。
+
+正常停止时，先停止 attach TUI/server，并确认没有存活进程引用该运行目录，
+再把本次 TUI 登录、OAuth 刷新或退出产生的 auth 变动原子回写到同一节点的
+0600 文件，随后清理本次目录。持久文件在启动后被另一维护入口修改时，
+拒绝覆盖并保留运行目录供原 Owner 检查；损坏 JSON、symlink/hardlink、
+身份变化同样不写回，错误不输出 credential 值。启动前未获准执行的探针或
+discard 路径不会保存 auth。
+
+此片只涵盖正常停止/重启，不能找回已经删除的登录数据，尚未证明崩溃/
+强制 SIGKILL 后保存本次更新。会话历史仍走下方已有快照合同，不能用 auth
+回写代签历史恢复。真实账号「登录→正常重启→仍登录」需用合入 main 并正式
+公开的配对在原节点另验；本轮不读现场 auth 内容，不重启现役节点。
+
+没有新增服务、端口、反代、环境变量或凭据来源；原节点 owner-only auth
+文件是运行数据，需原受控加密备份恢复，不能从 Git 重建账号。软件回滚仍
+保留旧私有配对和当前配置；旧版共存不带回写能力，回滚不能保证在 TUI 中
+新登录/刷新后的数据继续保存。
+
 截至正式 CLI `2.3.0-preview.171` / runtime `2.5.0-preview.137`，
 V1 共存每次启动通过 `POST /session` 新建会话。配置中的 `session` 虽然会
 写回，但不会作为恢复参数传入共存启动；`node resume --session` 也不能改变

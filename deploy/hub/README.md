@@ -164,6 +164,184 @@ curl -s localhost:9200/health          # version 与 sessions_count
 
 把 `RUNTIME_DIR` 指回上一个目录,`pm2 restart`。**旧目录一律不删。**
 
+### `.137` 部署（2026-10-13 已激活）
+
+#1109 MCP/REST Daemon 列表按权威 node_id 核有效凭据与心跳；旧兼容验证保留，
+旋转去重、三次 scope 批量读取，不修改 schema/节点生命周期。
+源码PR2696/main `36ed82249f661eb593375e72e375e59472bd41c7` 与实际 Docker 测试完整树一致；
+38368490408 SQLite123/PG123正常与6次断言反证、10required通过。
+正式main运行38368892713全部四门/上传/registry成功；16:29:45+08匿名NPM整包
+1253469B/SHA256 `6349cc906aa7d8c5ef603beea69117073d769703d2ec29fa4d9354c57720219a`
+及SHA1/SRI与原gated相同，preview137/latest30已核。
+部署PR2697/main `62edb5e34b9958ff5443b728202cb456aca4cb96` 的profile/lock已合，
+Docker profile38369437748、身份38369437789和10required通过；350安装文件匹配公开包。
+私有一致性备份integrity ok、network-none离线预检保留快照行数后，16:34:49+08
+仅 `commhub-hub` secured137生效，PID828760/restart95；实际入口 `runtime-v120-preview137`。
+profile等于deployment main，hub.env元数据/base不变，不带 `--update-env`。
+MCP现役列表7唯一daemon（4online/3offline），原task绑定未变；16:36:28+08
+113自然心跳/128SSE、2真实回复/2投递，新增关键错误0、PID/restart不变。
+这些是有界观察，非全节点/长期健康证明。
+回退保留 `runtime-v119-preview136` 和main `1a5b1a69e07902eef489342ca573fd7851889a55`
+的136 profile/lock；数据库/原密钥依既有私有来源，完整恢复仍NOT_COVERED。
+完整坐标/备份/预检/范围见 `report-test1109-hub137-publication.txt`；
+Node139自然活动与OpenCode原账号正常重启验收仍分别保持未结。
+
+### `.136` 部署（2026-10-13 已激活）
+
+源码PR2687/main `8c2dcb3a16cbd78581d783e7ae1b2e87b9d82e3b` 与实际测试树一致；SQLite24/PG24
+HTTP回归、8次断言反证、会话令牌兼容和10required通过。
+改密码可显式撤销本人具名网络令牌，默认列出脱敏保留清单，节点令牌和其他用户保留。
+正式main运行38351821700构建、四门、publish与registry元数据回读全部成功；
+npm tarball独立GET曾404；2026-10-13 14:03:47+08晚回读已可下载且完整byte/SRI一致，
+#1123分发差额已具备结案证据。继续使用经核验的同字节GitHub原包lock，无需再次切换现役：
+精确main tag `commhub-server-v0.9.0-preview.136`，匿名完整byte/SRI与gated一致。
+公开包SHA256 `47449d1e6163e4ec7595d3124676ad655845ead7e22d0184777c2dade3dd7e81`，348安装文件一致。
+
+准备profile PR2688/main `b51ae1574be397ca618fe2e32eacec164774cf94`；同字节下载源PR2690/main
+`1a5b1a69e07902eef489342ca573fd7851889a55` 均通过专用Docker/10required。
+lock只替换包resolved到GitHub原包，SRI/version/transitive保持。
+私有一致DB备份完整性ok，Bun1.4.0隔离离线schema预检保留快照行数后，
+于 `2026-10-13T05:52:53.308633+00:00` 仅选定Hub升级为secured136，PID712535/restart94。
+实际入口 `runtime-v119-preview136`；profile与deployment main一致，base/env文件元数据不变。
+保留 `runtime-v118-preview135` 回退；恢复该历史版本时使用deployment main
+`6109c69773069eb0adc8035326ebc887a6d3b7cb` 的135 profile/lock。
+生产数据与原值密钥来自既有私有来源，完整密钥恢复仍NOT_COVERED。
+CLI173的正式main-gated GitHub下载和14:03:48+08 npm完整包均已核验；
+原npm运行超时仍保留FAILURE，真实原客户端139活动验收仍独立未结。
+来源/SRI、backup/预检、自然流量及剩余CLI173/Node139差额见
+`report-test717-hub136-publication.txt`；公开包/Hub激活不代签原客户端139实际活动。
+
+### `.135` 部署（2026-10-13 已激活）
+
+#1113 按精确任务/node/network/原thread/turn上报活动，续租空闲预算，保留
+派发总cap；重复消费、ACK及节点heartbeat不续租，terminal不复活。
+源码 PR2683/main `47816a61095f196cf726f194f482739bc09f6a82`；SQLite130/PG121/runtime+pair52及
+11次断言反证、既有caller/sender/pair及10个必需门通过。
+Hub135/Node139正式运行 `38345772164` / `38345774136` 的四门与
+preview发布/registry回读成功。Node139可用且字节验证后才派CLI173。
+CLI首跑38346683979因文档preview172版本断言失败，未发布；文档PR2685/main
+`064ed34c9eba20f852a32dbe42b98389c3c2ce63` 修戳后以该精确main重新构建CLI173，正式运行
+`38347806170` 四门成功及npm publish成功，但registry900秒回读失败；CLI173仍未核实公开，preview仍172。保留该失败，不重发173，出现后只读核byte/SRI。各包源码目录保持相同，完整来源SHA
+分别记录，不把文档修正后的CLI仓库SHA称作既有Hub/Node的发布SHA。
+
+部署 PR2684/main `6109c69773069eb0adc8035326ebc887a6d3b7cb`，profile/lock选择
+`runtime-v118-preview135`，保留 `runtime-v117-preview134` 回退，传递依赖不变。
+公开Hub与main gated字节一致，SHA256 `4bf1d5bb25065cf7dbd52b6834a0b1563c7a6575c20b0a1346d92674ad20c29a`；347安装文件一致。
+私有一致备份及离线schema预检通过后于 `2026-10-13T04:29:38.150364+00:00` 确认
+secured135、真实v118入口、PID650734/restart93。
+原base/env保持，端口/代理/环境来源沿用下方runbook。
+
+具体三包制品、快照、自然流量和恢复边界见
+`docs/tests/report-test1113-hub135-activation.txt`。原通信牛仍控制器153/Node121，
+未中断本原turn，也没有以Hub135冒充已采用Node139。#1113/#1105保持2/3，
+待正常升级入口、原vendor thread保持及真实139活动pulse验收。私有数据仍靠
+备份，完整key DR仍NOT_COVERED；短观察不代签全舰模型链路。
+
+### `.134` 部署（2026-10-13 已激活）
+
+#1112 修复排队占用调度执行预算：消费时间优先，旧节点回落开始时间，未执行
+回落派发时间；执行预算及派发总上限仍有界。持续精确任务活动续租留在 #1113，
+母卡 #1105 不提前结案。源码 PR2680/main `c641a82626d16c1ad627fb977011f14835ec9b2c`；
+专用 Docker CI38341909946 和10个必需门通过，SQLite38/PG29及4次断言反证通过。
+正式 main 发布 `38342053049` 构建、四道门、preview发布及registry回读成功。
+公开包与该 main gated 制品逐字节一致，SHA256 `14cd606f422f098b97d4003f51d53803231b90bf83c693d67323aa966fc1d61f`。
+
+部署 PR2681/main `875137cbe333fd83da97a8f008d1c84186ad8c26`；profile 与 managed lock 选择
+`runtime-v117-preview134`，保留 `runtime-v116-preview133` 回滚，全部传递依赖
+保持原 lock。专用 launcher Docker 和10个必需门通过；346安装文件与公开包一致。
+原私有一致备份及离线schema迁移预检成功后，于 `2026-10-13T03:36:09.412881+00:00` 确认现役
+secured134、真实v117入口、PID607441/restart92。
+原base及环境文件保持，业务节点不切runtime/thread/model/provider/login。
+
+有界自然观察、快照计数和备份证据见
+`docs/tests/report-test1112-hub134-activation.txt`。常驻启动/PM2、端口/反代、
+环境来源、升级验证、回滚及数据恢复边界沿用下方runbook。私有数据仍须独立
+备份，密钥来源仍为 NOT_COVERED；短观察不等于全舰执行或完整灾难恢复。
+
+### `.133` 部署（2026-10-13 已激活）
+
+源码 PR2677 已正常合入 main `65923509c55f54e14082ac3804ae883d37723f44`。
+Daemon 就绪的凭据和心跳、删除请求的凭据冻结/旧请求兜底、改名凭据标签
+均按权威节点身份处理，保留合法旧 unbound 及唯一 null-ID 心跳兼容；
+改名遇到多条同名节点记录时拒绝。真实 HTTP108、34次断言变异、103项
+ACK/权限/收编/stop-delete 回归、发送方核心与旧 .110/.121 兼容均通过。
+正式 main 发布运行 `38338523163` 的构建、四道门、preview 发布及 registry
+回读全部成功。公开包与该 main gated 制品逐字节一致，SHA256
+`70b0b96fb95ec68ddfb55eafb6f2715a948fac0b9b7b36e026a82f3bfdd93ad6`。
+
+`provider906/package*.json` 钉 `.133` 和该 main 制品 SRI，全部传递依赖
+保持原 lock；profile 选择 `runtime-v116-preview133`，回滚保留
+`runtime-v115-preview132`。部署 main `446fa719a0e6542396ca5f66079d03c7028f5ec2`
+于2026-10-13 11:04:28+08确认生效，证据：
+`docs/tests/report-test690-hub133-activation.txt`。
+
+权威 base launcher、PM2、Bun1.4.0、数据库、端口/反代及 owner-only 密钥
+来源沿用本 runbook。先取私有 VACUUM INTO 一致性备份，运行
+`tests/test906-hub-upgrade-preflight` 的隔离离线预检；仅在公开全包验证及
+预检成功后安装本目录 profile，重启选定 `commhub-hub`，保留 base、环境
+文件、旧 runtime 与业务节点身份。验证真实进程入口、secured health、
+稳定重启计数及自然心跳/任务事件；失败恢复旧 profile，私有数据和原值密钥
+仍从独立备份/安全来源恢复，短观察不代签全舰执行或灾难恢复。
+
+### `.132` 部署（2026-10-13 已激活）
+
+源码 PR2674 已正常合入 main `c49e9316826a064f1db715319fcc7adbde12527a`，MCP/REST 任务发送方
+使用凭据解析出的节点 ID；改名同时核对节点与会话注册表。核心 HTTP、断言
+变异、ACK/权限回归及旧 agent-node .110/.121 兼容均通过。
+正式 main 发布运行 `38335516515` 的构建、四道门、preview 发布及 registry
+回读全部成功。公开包与该 main gated 包逐字节一致，
+SHA256 `c2e3503a7819032c2e89ef73cfdf6235f0e48573ef5e4a268dc00775f9edf145`。
+
+`provider906/package*.json` 钉 `.132` 及该 main 制品 SRI，传递依赖保持
+原 lock；profile 选择 `runtime-v115-preview132`，回滚保留
+`runtime-v114-preview131`。部署权威 main `53e23e7421138967e0f6534aa6e1ad1fb8d66c42`
+于2026-10-13 10:17:29+08激活；证据见
+`docs/tests/report-test691-hub132-activation.txt`。
+
+权威启动脚本、PM2、Bun1.4.0、数据库路径、端口/反代和 owner-only 密钥
+来源沿用本 runbook。先以私有 `VACUUM INTO` 备份运行
+`tests/test906-hub-upgrade-preflight` 离线预检；原子安装本目录 profile 后仅
+重启 `commhub-hub`，保留原 base launcher、环境文件和旧 runtime。
+核新进程真实入口、secured health、重启计数与自然心跳/任务事件；失败恢复
+原 profile，不把短观察当全舰收发或数据灾难恢复验收。私有数据及密钥不入 Git。
+
+### `.131` 部署（2026-10-13 已激活）
+
+软件实现 main `9fc79fab1d697f665bf3e95d7c420a27e284a4dd`（PR2671），
+HTTP/MCP 任务署名按认证身份记录，人类署名与节点回填、隐式父任务保持
+分离；SQLite/PostgreSQL 核心和既有传输回归已通过。正式公开/部署
+main `e81debac14db091da41ea02272dd2184b3b1744f`（PR2672），运行
+`38331511688` 的构建、四道门、preview 发布与 registry 回读全部成功。
+`provider906/package*.json` 钉 `.131`，公开包与正式 gated 包
+逐字节一致，SHA256
+`5384ecb96e40954d2a6d749ab05c5ca2e38827b70e079542cda6e308b26e4dba`。
+传递依赖保持精确原 lock，不重新解析。
+
+profile 选择 `runtime-v114-preview131`，回滚保留 `runtime-v113-preview130`。
+启动权威仍为本目录 base launcher/profile/ecosystem；Bun1.4.0、PM2
+`commhub-hub`、9200 及既有反代/隧道保持。密钥仍由管理员从原
+owner-only `~/.commhub/hub.env` 安全供给，不改值或生成新 vault key。
+
+先做 owner-only 一致性 SQLite 备份和完整性核对，在现有 Docker 离线
+预检中用实际 Bun1.4 与公开包确认行数/Provider 状态保留。精确 lock
+复制到 inactive sibling，用 `npm ci --ignore-scripts --no-audit --no-fund`
+安装并核包文件。profile 必须通过 Actions Docker 目录/显式回滚检查，
+正常合入 main 后才原子安装为 PM2 入口；只重启 `commhub-hub`，不加
+`--update-env`。核真实 PID/入口、health `.131`、自然心跳和追加错误日志。
+失败则恢复 `.130` profile，仅重启 Hub；保留两个 runtime 和原 DB。
+账号、业务数据、vault key 依赖私有备份/原认证来源，Git 不提供这些
+业务状态。灾难恢复、全网 ACK、长期稳定性及真实模型未由此验收。
+
+2026-10-13 09:32:15（东八区）已按上述步骤激活；完整证据见
+`docs/tests/report-test696-hub131-activation.txt`。345 个安装包文件
+与匿名公开/gated 包相同；一致性备份完整性为 ok，实际 Bun1.4 离线
+预检保留 331 sessions / 81384 tasks / 302 nodes 等全部所检表行数。
+真实 PID515557、入口 v114-preview131、health131/secured，PM2 restart
+88→89；env 元数据及 base launcher 保持，profile 与精确 main 相同。
+短窗已见自然心跳、投递和回复，追加日志没有新 vault key 缺失或崩溃
+标记。少量投递 stale warning 和既有调度 stuck timeout 另按元数据记账，
+不把服务恢复说明成全网任务已经完成。
+
 ### #689 `.130` 部署（2026-10-13 已激活）
 
 精确软件 main `7f12230b7eb064aa56131bbc17fc21c944f9a6d0`（PR2668），

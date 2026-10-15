@@ -1,5 +1,21 @@
 # 更新日志
 
+## 2026-10-14 Windows native TUI health alpha
+
+Published software alpha CLI2.3.0-preview.179 / Node2.5.0-preview.145: ongoing Windows co-presence health verifies the exact launch generation and owned loopback connection. Missing evidence remains unknown; proven exit or lost connection uses the existing Hub degradation guard. Source/native fake-Codex CI and exact-main formal publication are recorded in `report-test1175-windows-tui-health.txt` and `report-test1175-public.txt`. Both full npm and official GitHub archives are verified; the initial CLI registry-timeout workflow failure remains recorded. Original-device/model acceptance remains pending.
+
+## 软件 alpha 已公开：Windows 共存健康探针对齐原生进程（2026-10-14）
+
+- 配套 CLI 2.3.0-preview.178 / Node 2.5.0-preview.144，沿用 Hub 0.9.0-preview.139。两包从精确 main 通过四道发布门，官方 GitHub 完整包已匿名核对；两包 npm 完整包也已匹配；CLI 首次传播核验超时失败保留，随后完整回下载确认。原机采用另验。
+- Windows 共存节点不再用 tmux 会话缺失判断原生 TUI。持续原生 TUI 健康仍为未知；App Server 断连和登录失效仍由原健康门拒绝投递。
+- Windows CI 在 PID/出生时间/连接归属及 Hub 新鲜健康快照后，验证普通和高优先级消息接续同一回合。CI 不代替原机反馈或现役采用。
+
+## 软件配套已公开：深层人类收件与已有回合接续（2026-10-14）
+
+- 配套版本：CLI 2.3.0-preview.177 / Node 2.5.0-preview.143 / Hub 0.9.0-preview.139。Node/Hub 的 npm 完整包与四门通过包匹配；CLI 四门通过的同一 tarball 已在官方 GitHub 下载页公开，npm 完整包传播后验也已匹配；首次超时失败保留。软件公开不代表现役采用。
+- 人类 Dashboard 消息可越过前 20 条未 ACK 积压进入接续仲裁。Hub 全深度分页扫描类型和元数据，单次正文仍最多 20 条；节点保留总 20 槽位、已领任务和去重。旧 Hub 保持原取件行为，节点提示其全深度能力尚不可用。
+- 纳入已合入的 owned follow-up 控制器：验证当前已归属回合后只注入一次，持久化 nonce/hash；独立回答属于原任务，未知接纳、取消、恢复和容量失败不重新执行动作。源码/协议测试通过不代表现役节点或原机已采用。
+
 ## 未发布：单文件 anet 可执行文件（只构建，不发布）（2026-10-11）
 
 - 新增统一入口 `agent-network/bin/anet-bin.ts`。`bun build --compile` 把它打成一个可执行文件：默认走 CLI，`__hub` 走内嵌的 Hub，`__node` 走内嵌的 agent-node。npm 的 `bin` 仍是 `dist/bin/anet.cjs`。`release.yml` 的 npm 发布没有改。

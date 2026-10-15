@@ -203,13 +203,49 @@ async function postDashboardTask(priority, suffix) {
 }
 
 env.ANET_TEST751_LONG_TURN = "1";
+// Exercise health reporting during this turn, rather than winning the race
+// against the first monitor snapshot on a fast runner.
+env.ANET_CODEX_HEALTH_INTERVAL_MS = "1000";
+env.ANET_STATUS_HEARTBEAT_MS = "1000";
 let driven = false;
 let drivePromise;
 let turnStartCountBeforeDashboard = -1;
 const longTurnOutput = await terminal(["node", "start", "windows-picker", "--no-inherit-codex-home"], (_child, output) => {
-  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")) return;
+  if (driven || !output.includes("FAKE_CODEX_TUI_LONG_TURN_READY")
+    || !output.includes("client-health role=tui codex_home=exact remote=exact thread=exact connection=pid-attributed")) return;
   driven = true;
   drivePromise = (async () => {
+    let observedHealth;
+    let observedIdentity;
+    await waitUntil("Hub app-server health after native TUI PID attribution", async () => {
+      const receiptPath = join(project, ".anet", "nodes", "windows-picker", "windows-tui-health.json");
+      const recordPath = join(project, ".anet", "nodes", "windows-picker", "windows-copresence.json");
+      if (!existsSync(receiptPath) || !existsSync(recordPath)) return false;
+      const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+      const record = JSON.parse(readFileSync(recordPath, "utf8"));
+      const currentConfig = JSON.parse(readFileSync(configPath, "utf8"));
+      observedIdentity = { marker: receipt.marker === record.marker, node: receipt.nodeId === currentConfig.node_id, remote: receipt.remote === currentConfig.codexAppServerUrl };
+      // The directory alias is deliberately different from immutable config.node_id.
+      // Wait for this generation's atomic receipt; never accept the stopped one.
+      if (!observedIdentity.marker) return false;
+      if (!observedIdentity.node || !observedIdentity.remote) throw new Error(`native TUI receipt identity mismatch: ${JSON.stringify(observedIdentity)}`);
+      const res = await fetch(`http://127.0.0.1:19351/api/status?network_id=${encodeURIComponent(networkId)}&alias=windows-picker`, {
+        headers: { Authorization: `Bearer ${userToken}` },
+      });
+      if (!res.ok) throw new Error(`Hub status failed ${res.status}`);
+      const payload = await res.json();
+      const row = payload.sessions?.find((s) => s.alias === "windows-picker" && s.network_id === networkId);
+      observedHealth = row?.health;
+      if (!observedHealth) return false;
+      return observedHealth.bridge === "ok" && observedHealth.app_server?.ok === true
+        && observedHealth.tui?.ok === true && observedHealth.tui?.reason === "running"
+        && !["revoked", "expired"].includes(observedHealth.model_auth)
+        && Number.isFinite(row.health_observed_ms_ago) && row.health_observed_ms_ago < 5000;
+    }).catch((error) => {
+      console.error(`native-health evidence at failure: ${JSON.stringify({ observedIdentity, observedHealth })}`);
+      throw error;
+    });
+    console.log(`PASS Hub current health before Dashboard: app_server=ok; native TUI PID attributed; ongoing tui=running; model_auth=${observedHealth.model_auth}`);
     const beforeWire = readFileSync(rpcLog, "utf8");
     turnStartCountBeforeDashboard = (beforeWire.match(/^rpc:turn\/start(?::|$)/gm) || []).length;
     const normalTask = await postDashboardTask("normal", "a");

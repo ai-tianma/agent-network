@@ -1,4 +1,8 @@
+import { parseScheduledWorkOutcome, qualifyScheduledWorkOutcome, saveScheduledWorkOutcome } from "./scheduled-work-outcome.js";
+import { selectHumanInboxIds } from "./human-inbox.js";
+import { hostSupervisorIdentityRows } from "./host-supervisor-identity.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { markTaskActivity } from "./task-activity.js";
 import { requestProviderSnapshot, requestProviderWrite, requestProviderCollection, requestProviderApplication, requestProviderLogin, getProviderSnapshot, pullProviderSnapshots, ackProviderSnapshot } from "./daemon-provider-snapshots.js";
 import { readHubProviders, putHubProvider, bindHubProvider } from './hub-provider-config.js';
 import { requestScopedSecrets, getScopedSecrets, pullScopedSecrets, ackScopedSecrets, requestNodeSecrets, pullNodeSecrets, ackNodeSecrets } from './scoped-secrets.js';
@@ -15,6 +19,7 @@ import { assertNodeHealthy } from "./node-health-guard.js";
 import { noteModelAuthHealth } from "./model-auth-notify.js";
 import { numberedAliasInClause, parseAliasFilter } from "./alias-filter.js";
 import { createHash } from "node:crypto";
+import { activeNodeTokenIds, revokeNodeTokens } from "./node-token-identity.js";
 import { db, uuidv4, logTaskEvent, chainReplyToParent, hashToken, generateId, generateNetworkToken, syncScheduledRunForTask } from "./db.js";
 import { sessionTaskOnDispatch } from "./session-task-on-dispatch.js";
 import { TASK_CONTENT_MAX, sessionTaskPreview } from "./shared/task-content-limit.js";
@@ -23,6 +28,7 @@ import { deferOfflineIfAnotherCopyConnected } from "./node-identity-conflict.js"
 import { assertNodeActive } from "./lifecycle-guard.js";
 import { pendingInboxCount } from "./inbox-count.js";
 import { resolveInboxCaller } from "./inbox-caller.js";
+import { resolveUserTaskFromSession } from "./rest-identity.js";
 import { getUserNetworkRole, createNetworkTokenForNode } from "./auth.js";
 import { addAgentNetworkScope, addAgentTimelineScope, addNetworkScope, canRestWriteNetwork, canRestWriteNetworkAsHuman, getUserNetworkIds, resolveRestNetworkScope, singleNetworkId, type RestNetworkScope } from "./network-scope.js";
 import { canMessageAgent, restrictedNetworkIds, RESTRICTED_MEMBER_TOOLS, type AgentRef } from "./agent-access.js";
@@ -57,6 +63,7 @@ import {
   auditCreateNode,
   auditCreateNodeStrict,
   resolveCallerDaemonTokenBound as _resolveCallerDaemonTokenBound,
+  resolveNodeCaller,
 } from "./create-node.js";
 import { decideClone, factsFromRows, parseWorkdirPolicy } from "./clone-node.js";
 import {
@@ -1422,13 +1429,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "get_inbox",
-    "Read your inbox.",
+    "Read inbox.",
     {
-      alias: z.string().min(1).max(200).describe("Alias"),
+      alias: z.string().min(1).max(200),
       limit: z.number().min(1).max(100).optional().default(10),
       network_id: z.string().max(200).optional(),
+      human_first: z.boolean().optional(),
     },
-    async ({ alias, limit, network_id: netId }) => {
+    async ({ alias, limit, network_id: netId, human_first }) => {
       const effectiveNetId = getNetworkId(netId);
       const recipient = resolveInboxCaller(alias, { tokenId: callerTokenId, userId: enforceUserId, networkId: effectiveNetId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected });
       if (!recipient.ok) return { content: [{ type: "text" as const, text: JSON.stringify(recipient) }] };
@@ -1440,13 +1448,20 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       countSql = addReadScope(countSql, countParams, readScope);
       const rows0 = db.get<{ cnt: number }>(countSql, ...countParams);
       console.log(`[${ts()}] ${alias} → get_inbox: ${rows0?.cnt ?? 0} pending messages`);
+      const scanParams: any[] = [alias];
+      const scanWhere = addReadScope("FROM inbox WHERE session_name = ?1 AND acked = 0", scanParams, readScope);
+      const human = human_first ? selectHumanInboxIds(scanWhere, scanParams, limit) : undefined;
       const rowsParams: any[] = [alias];
       let rowsSql = `SELECT id, type, priority, content, context, from_session, created_at, network_id, meta_json,
          CASE WHEN EXISTS(SELECT 1 FROM task_late_replies lr WHERE lr.inbox_id=inbox.id) THEN 1 ELSE 0 END AS late,
          CASE WHEN type = 'task' THEN COALESCE(task_id, id) ELSE task_id END AS task_id
          FROM inbox WHERE session_name = ?1 AND acked = 0`;
       rowsSql = addReadScope(rowsSql, rowsParams, readScope);
-      rowsSql += ` ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at
+      if (human?.ids.length) {
+        const placeholders = human.ids.map((id) => { rowsParams.push(id); return `?${rowsParams.length}`; });
+        rowsSql += ` ORDER BY CASE WHEN id IN (${placeholders.join(",")}) THEN 0 ELSE 1 END,`;
+      } else rowsSql += " ORDER BY";
+      rowsSql += ` CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, created_at, rowid
          LIMIT ?${rowsParams.length + 1}`;
       rowsParams.push(limit);
       const rows = db.all(rowsSql, ...rowsParams).map((row: any) => {
@@ -1456,7 +1471,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       });
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows }) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ ok: true, messages: rows, ...(human ? { human_inbox: { version: 1, mode: "metadata-keyset", examined: human.examined } } : {}) }) }],
       };
     }
   );
@@ -1693,9 +1708,11 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "mark_tasks_consumed",
-    "Internal agent-node signal: exact tasks produced attributable turn-start/activity evidence in this token-bound node's runtime.",
-    taskRuntimeEvidenceSchema,
-    async ({ task_ids, task_contexts }) => markTaskRuntimeEvidence(task_ids, "consumed", task_contexts),
+    "Internal token-bound task consumption; activity_only reports original-turn activity.",
+    { ...taskRuntimeEvidenceSchema, activity_only: z.boolean().optional() },
+    async ({ task_ids, task_contexts, activity_only }) => activity_only
+      ? { content: [{ type: "text" as const, text: JSON.stringify(markTaskActivity({ tokenId: callerTokenId, networkId: enforceNetworkId, nodeToken: callerTokenIsNetwork, identityRejected: callerIdentityRejected, taskIds: task_ids, contexts: task_contexts ?? [] })) }] }
+      : markTaskRuntimeEvidence(task_ids, "consumed", task_contexts),
   );
 
   // ═══════════════════════════════════════════
@@ -1829,7 +1846,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
-    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => { const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
+    async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => {
+      const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch;
+      const humanSender = !callerTokenIsNetwork && !!enforceUserId;
+      const userIdentity = humanSender ? resolveUserTaskFromSession(callerAlias, _fromIn) : null;
+      if (userIdentity && !userIdentity.ok) {
+        return { content: [{ type: "text" as const, text: JSON.stringify({
+          ok: false, error: userIdentity.error, message: userIdentity.message,
+          token_alias: userIdentity.tokenAlias, requested_from_session: userIdentity.requestedFromSession,
+        }) }] };
+      }
+      const from_session = userIdentity?.ok ? userIdentity.fromSession : defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       const authOrigin: TaskAuthOrigin = callerTokenIsNetwork
         ? "node"
@@ -1865,7 +1892,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // network A dispatch and chain-reply into the wrong tenant. The
       // explicit-parent path is verified below in F2.
       let parentTaskId: string | null = parentIn ?? null;
-      if (!parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
+      if (!humanSender && !parentTaskId && from_session && from_session !== "hub" && from_session !== "api") {
         try {
           const recentParams: any[] = [from_session];
           let recentSql = "SELECT task_id FROM tasks WHERE to_name = ?1 AND status IN ('delivered')"; // board668-parent-delivered-only
@@ -1996,7 +2023,10 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       }
 
       console.log(`[${ts()}] ${from_session} → send_task → ${targetAlias}: ${task.slice(0, 60)}${priority === "high" ? " [HIGH]" : ""}${canonical.renamed ? ` [renamed from ${alias}]` : ""}`);
-      const fromNodeId = resolveNodeIdForAlias(from_session, effectiveNetId);
+      const senderIdentity = callerTokenIsNetwork ? resolveNodeCaller(callerTokenId) : null;
+      const fromNodeId = humanSender ? null : callerTokenIsNetwork
+        ? (senderIdentity?.ok && senderIdentity.kind === "node" && senderIdentity.networkId === effectiveNetId ? senderIdentity.nodeId : null)
+        : resolveNodeIdForAlias(from_session, effectiveNetId);
       const targetNodeId = target.session?.node_id ?? null;
       const resolvedActualTo = actualTo(target, effectiveNetId);
       // #500 step 2 — what is already queued on the target, read BEFORE this task is written (advice only, never blocks).
@@ -2021,7 +2051,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         touchSql = addScope(touchSql, touchParams, effectiveNetId);
         db.run(touchSql, touchParams);
         // #1548 —— 能派活的发送方不可能真的 blocked;此处出 blocked → idle。
-        releaseBlockedSession(from_session, effectiveNetId);
+        if (!humanSender) releaseBlockedSession(from_session, effectiveNetId);
       });
       logTaskEvent(id, null, "delivered", from_session, parentTaskId ? `→ ${targetAlias} (parent=${parentTaskId.slice(0,8)})` : `→ ${targetAlias}`);
       // Only stamp the dedup index after the inbox/tasks transaction
@@ -2183,6 +2213,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     };
   const handleReply = async (args: any, peerCapabilityRequired: boolean) => {
       const { alias, text, in_reply_to, status: replyStatus = "replied", from_session: _fromIn, network_id: netId, attachments, meta, thread_id: threadId, turn_id: turnId } = args;
+      const workSignal = parseScheduledWorkOutcome(meta, replyStatus);
+      if (!workSignal.ok) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: workSignal.error, reply_queued: false }) }] };
+      if (workSignal.outcome && !in_reply_to) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_task_required", reply_queued: false }) }] };
       const fromMismatch = fromIdentityMismatchReply(_fromIn); if (fromMismatch) return fromMismatch; const from_session = defaultFrom(_fromIn);
       const effectiveNetId = getNetworkId(netId);
       if (!canWrite(effectiveNetId)) return writeDeniedReply(effectiveNetId);
@@ -2268,6 +2301,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         lateSql = addScope(lateSql, lateParams, effectiveNetId);
         const lateCandidate = db.get<LateTask>(lateSql, ...lateParams) ?? null;
         if (lateCandidate && !["created", "delivered", "acked", "running"].includes(lateCandidate.status)) {
+          if (workSignal.outcome) return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: "scheduled_work_outcome_terminal", reply_queued: false }) }] };
           // Old runtimes do not send turn identity and retain the old result.
           if (!threadId || !turnId) {
             return { content: [{ type: "text" as const, text: JSON.stringify({
@@ -2431,6 +2465,17 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
         }
 
+        let workBinding: Extract<ReturnType<typeof qualifyScheduledWorkOutcome>, { ok: true }> | undefined;
+        if (workSignal.outcome) {
+          if (!in_reply_to || !callerTokenIsNetwork || !callerTokenId || !enforceNetworkId || effectiveNetId !== enforceNetworkId)
+            return { ok: false as const, error: "scheduled_work_outcome_bound_node_required" };
+          const token = db.get<{ bound_node_id: string | null }>(
+            "SELECT bound_node_id FROM api_tokens WHERE token_id = ?1 AND network_id = ?2", callerTokenId, enforceNetworkId);
+          const qualified = qualifyScheduledWorkOutcome(in_reply_to, enforceNetworkId, token?.bound_node_id ?? null);
+          if (!qualified.ok) return qualified;
+          workBinding = qualified;
+        }
+
         // #507 — write meta_json on inbox insert (parity with send_task L952).
         // Prior to this the attachments field on a send_reply call was
         // silently stripped by MCP Zod, leaving `ok:true` with no persisted
@@ -2485,11 +2530,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           if (result.changes === 0) {
             throw new Error(`reply_atomic_cas_failed:${in_reply_to}`);
           }
+          if (workBinding && workSignal.outcome) saveScheduledWorkOutcome(workBinding.binding, workSignal.outcome);
           syncScheduledRunForTask(in_reply_to, effectiveNetId);
           // #1548 —— 终态回复是最强的活性证据:一个还标着 blocked 的发送方在此回到 idle。
           //   只出 blocked;working 可能真在忙别的任务,不碰。
           releaseBlockedSession(from_session, effectiveNetId);
-          return { ok: true as const, replyLogged: true };
+          return { ok: true as const, replyLogged: true, ...(workSignal.outcome ? { workOutcome: workSignal.outcome } : {}) };
         }
         return { ok: true as const, replyLogged: false };
       });
@@ -2603,6 +2649,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           text: JSON.stringify({
             ok: true,
             message_id: id,
+            ...("workOutcome" in replyOutcome ? { scheduled_work_outcome: replyOutcome.workOutcome } : {}),
             session_status: session?.status ?? "unknown",
             ...(warning ? { warning } : {}),
             ...(attachmentsSaved !== null ? { attachments_saved: attachmentsSaved } : {}),
@@ -4258,35 +4305,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // (already gate-locked by enforceNetworkId path of resolveReadScope).
       const isPrivileged = callerRole === "admin" || callerRole === "owner" || (!enforceUserId);
 
-      // Pull candidate daemons. Active-token EXISTS subquery handles BOTH
-      // revoked daemon ntoks (revoked_at set) AND DELETEd token rows
-      // (the standard revokeToken path deletes the row, not flagging
-      // revoked_at — PR2 v1 SHOULD-FIX per 通信龙 audit). EXISTS naturally
-      // dedupes if a daemon ever had multiple tokens (e.g. rotation; nit ⚪).
-      let sql = `
-        SELECT
-          n.node_id, n.alias, n.hostname, n.network_id,
+      // Scope first; batch immutable credential + heartbeat identity for both list entry points.
+      let sql = `SELECT n.node_id, n.alias, n.hostname, n.network_id, n.owner_user_id,
           n.runtimes_supported, n.allowed_secret_keys,
-          n.created_at, n.updated_at,
-          s.last_seen_at AS session_last_seen,
-          s.status AS session_status,
-          s.cpu_cores AS session_cpu_cores,
-          s.mem_total_gb AS session_mem_total_gb,
-          s.ip AS session_ip,
-          n.config_snapshot
-        FROM nodes n
-        LEFT JOIN sessions s ON s.alias = n.alias AND (s.network_id = n.network_id OR s.network_id IS NULL)
-        WHERE EXISTS (
-          SELECT 1 FROM api_tokens t
-          WHERE t.network_id = n.network_id
-            AND t.name = 'node:' || n.alias
-            AND t.revoked_at IS NULL
-        )
-      `;
+          n.created_at, n.updated_at, n.config_snapshot FROM nodes n WHERE 1=1`;
       const sqlParams: any[] = [];
       sql = addReadScope(sql, sqlParams, readScope, "n.network_id");
       sql += ` ORDER BY n.updated_at DESC`;
-      const rows = db.all<Record<string, any>>(sql, ...sqlParams);
+      const rows = hostSupervisorIdentityRows(sql, sqlParams);
 
       // Filter to role=host_supervisor (read from config_snapshot;
       // schema-promoted columns runtimes_supported/allowed_secret_keys
@@ -5386,12 +5412,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     // #1448 finding-5 — 记下该 child **当前活着的** ntok 的 token_id,让 ack 精确按
     // token_id 撤销,而非按 name='node:<alias>' 广撤。后者会在「同 alias 节点在这次
     // delete 未收敛的窗口内被重建(拿到同名新 token)」时,把新 token 一并误撤。这里
-    // 在派发时刻定住身份;若此刻没有活 token(异常),存 null,ack 退回按 name 撤(旧语义)。
-    const childTokenRow = db.get<{ token_id: string }>(
-      `SELECT token_id FROM api_tokens WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-      node.network_id, `node:${node.alias}`,
-    );
-    const childTokenId = childTokenRow?.token_id ?? null;
+    // 在派发时刻定住经解析器验证的节点身份；旧请求也不按名字广撤。
+    const childTokenId = activeNodeTokenIds(node.node_id, node.network_id)[0] ?? null;
 
     // §4.5 D8 — lifecycle UPDATE + audit INSERTs + request INSERT atomic.
     // PR1.1: use db.transaction() (SQLiteAdapter wraps better-sqlite3's
@@ -5629,24 +5651,9 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
             });
           } else if (status === "stopped" && row.action === "delete") {
             // Revoke the child's ntok, then DELETE the nodes row.
-            // #1448 finding-5 — 精确按派发时定住的 child_token_id 撤(镜像
-            // ack_create_request 的 token_id 精撤)。旧行(升级前派发,child_token_id
-            // 为 NULL)fallback 回按 name='node:<alias>' 撤——旧语义,不引入回归。
-            // 按 token_id 撤避免了「同 alias 在本次 delete 窗口内被重建、拿到同名新
-            // token」时把新 token 一并误撤。
-            if (row.child_token_id) {
-              db.run(
-                `UPDATE api_tokens SET revoked_at = datetime('now')
-                   WHERE token_id = ?1 AND revoked_at IS NULL`,
-                [row.child_token_id],
-              );
-            } else {
-              db.run(
-                `UPDATE api_tokens SET revoked_at = datetime('now')
-                   WHERE network_id = ?1 AND name = ?2 AND revoked_at IS NULL`,
-                [row.network_id, `node:${row.child_alias}`],
-              );
-            }
+            // Validate the frozen token's immutable identity; legacy requests
+            // resolve only credentials belonging to this node before deleting it.
+            revokeNodeTokens(row.child_node_id, row.network_id, row.child_token_id);
             db.run(`DELETE FROM nodes WHERE node_id = ?1`, [row.child_node_id]);
             // Same as REST DELETE /api/nodes/:id: without this the sessions row
             // stays "offline" and /api/status lists the deleted node forever.
@@ -6803,16 +6810,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
   const schedId = z.string();
   const schedFields = {
     name: z.string(), task: z.string(), target_node_id: z.string().optional(),
-    schedule: z.any().describe("once{run_at}|interval{every_seconds>=60}|daily{time}|weekly{time,weekdays}"),
-    timezone: z.string().optional(), priority: z.string().optional(),
+    schedule: z.any().describe("once|interval|daily|weekly"),
+    timezone: z.string().optional(), priority: z.string().optional(), no_change_backoff: z.boolean().optional(),
   };
   server.tool("schedule_list", "Hub schedules for or by you.", { status: z.string().optional() },
     async ({ status }) => scheduleCall(id => agentListSchedules(id, status)));
   server.tool("schedule_get", "One schedule.", { schedule_id: schedId },
     async ({ schedule_id }) => scheduleCall(id => agentGetSchedule(id, schedule_id)));
-  server.tool("schedule_create", "Schedule a task to target_node_id (default you).", schedFields,
+  server.tool("schedule_create", "Create your schedule.", schedFields,
     async (args) => scheduleCall((id, w) => agentCreateSchedule(id, w, args as Record<string, unknown>)));
-  server.tool("schedule_update", "Edit your schedule; status=paused|active.",
+  server.tool("schedule_update", "Edit yours.",
     { ...schedFields, schedule_id: schedId, base_revision: z.number().int().min(0).optional().describe("Reject if current revision differs."), name: z.string().optional(), task: z.string().optional(), schedule: z.any().optional(), status: z.string().optional() },
     async ({ schedule_id, ...rest }) => scheduleCall((id, w) => agentUpdateSchedule(id, w, schedule_id, rest as Record<string, unknown>)));
   server.tool("schedule_batch_interval", "Batch interval edit; per-ID results.",

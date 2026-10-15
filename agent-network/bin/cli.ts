@@ -10,7 +10,8 @@
  * anet run                     独立 SSE Agent
  */
 
-import { chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
+import { constants, openSync, closeSync, fstatSync, chmodSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, lstatSync, renameSync, rmSync, cpSync, copyFileSync, unlinkSync, realpathSync, symlinkSync } from "fs";
+import { hasBorrowedV1Intent, readBorrowedLaunchConfig, waitForBorrowedLaunchHealth } from "../src/shared/opencode-borrowed-launch-health";
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
@@ -1385,6 +1386,10 @@ async function startWindowsCodexCopresence(
     //    ⚠️ `connection=pid-attributed` 这个子串**不能动**:
     //    windows-codex-copresence.test.ts 用 indexOf 钉它的出现顺序。追加在其后是安全的。
     console.log(`[anet] client-health role=tui codex_home=exact remote=exact thread=${freshDeferred ? "pending-user-thread" : "exact"} connection=pid-attributed probes=${tuiProbes} probeMsLast=${probeMsLast} probeMsMax=${probeMsMax}`);
+    atomicWritePrivateJson(join(nodesDir(), resolved.id, "windows-tui-health.json"), {
+      version: 1, nodeId: rawCfg.node_id, marker, remote: wsUrl,
+      pid: tui.pid, creationDate: tuiCreationDate,
+    });
     recoveryAdmission.release();
     recoveryAdmission = undefined;
     const code = await new Promise<number>((resolve, reject) => {
@@ -2469,6 +2474,47 @@ async function startOpencodeCopresenceOrchestration(nodeId: string, hubOverride?
   console.log(`[anet]    stop:    anet node stop ${shellQuote(displayName)}`);
   console.log(`[anet]    bridge:  ${bridgeSession}`);
   console.log(`[anet]    mode:    opencode-cli copresence (${profile.opencodeSharedServerUrl ? "existing shared server" : "node-owned server"} + full attach TUI)`);
+}
+
+// Borrow an existing Host/session; this launcher owns only its detached bridge.
+// It never creates, replaces, attaches or tears down the Owner's human TUI.
+async function startBorrowedV1Bridge(resolved: {id: string; profile: Profile}, opts: Record<string,string>) {
+  const nodeDir = join(nodesDir(),resolved.id), configPath = join(nodeDir,"config.json");
+  const selected = readBorrowedLaunchConfig(configPath,process.cwd());
+  if (opts["new-session"] || opts.hub || opts["accept-dev-channels"] || opts.tmux
+    || selected.selection.binding.nodeId !== resolved.profile.node_id
+    || selected.alias !== nodeDisplayName(resolved.id,resolved.profile)) {
+    throw new Error("borrowed V1 start requires the original config, directory and existing session");
+  }
+  if (liveNodePidFromPidfile(resolved.id) !== null) throw new Error("borrowed V1 node already running; retain its existing bridge");
+  resolveStartProfile(resolved.id,resolved.profile);
+  checkRuntimeDependency("opencode-cli","start");
+  assertStartCompatibility("opencode-cli",resolved.profile,resolved.id);
+  if (opencodeLaunchIdentity?.version !== selected.selection.expectedHost.version) throw new Error("borrowed V1 launch version differs from selected Host");
+  const logPath = join(nodeDir,"opencode-borrowed-v1-bridge.log");
+  const fd = openSync(logPath,constants.O_WRONLY|constants.O_CREAT|constants.O_APPEND|constants.O_NOFOLLOW|constants.O_NONBLOCK,0o600);
+  let child: ReturnType<typeof spawn>;
+  const nonce = randomUUID(), launchedAt = Date.now();
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.uid !== process.getuid?.() || st.nlink !== 1 || (st.mode & 0o7777) !== 0o600) throw new Error("unsafe borrowed bridge log");
+    child = spawn(process.execPath,reinvokeArgv(["node","start",resolved.id],true),{
+      cwd:process.cwd(),env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
+        ANET_BORROWED_V1_BRIDGE:"1",ANET_BORROWED_V1_LAUNCH_ID:nonce},
+      detached:true,stdio:["ignore",fd,fd],
+    });
+  } finally { closeSync(fd); }
+  let failed = false;
+  child.on("error",() => { failed = true; });
+  child.unref();
+  const health = await waitForBorrowedLaunchHealth(configPath,launchedAt,launchedAt+30_000,nonce);
+  if (failed || child.exitCode !== null || child.signalCode !== null || !health.ok) {
+    // An uncertain admission can retain a lease. A timeout never authorizes
+    // automatic close/reopen, Host signals or cleanup of recovery state.
+    throw new Error(`borrowed V1 start not proven; retain binding/recovery and inspect ${logPath}`);
+  }
+  console.log(`[anet] ✅ borrowed V1 bridge ready: ${selected.alias} (pid ${health.bridgePid})`);
+  console.log(`[anet]    human TUI remains with its Owner; log: ${logPath}`);
 }
 
 // Minimum commhub-server this CLI is known to work with (#511: a FLOOR, not
@@ -7646,6 +7692,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
       : runtime === "grok-build-cli"
       ? buildGrokAgentNodeEnv(env)
       : { ...env, ANET_CONFIG_UPDATE_CAPABLE: "1" };
+    if (runtime === "opencode-cli" && (profile as any).opencodeBorrowedV1 !== undefined) {
+      // Profile env must not replace the caller's one-shot launch nonce.
+      (childEnv as NodeJS.ProcessEnv).ANET_BORROWED_V1_LAUNCH_ID = process.env.ANET_BORROWED_V1_LAUNCH_ID;
+      childEnv.ANET_CONFIG_UPDATE_CAPABLE = "0";
+    }
 
     // #1353 —— 把 daemon 的 anet 二进制 pin 传给子进程。
     //
@@ -7776,6 +7827,11 @@ async function launchAgent(id: string, forceNewSession = false, hubOverride?: st
         try { rmSync(pidFile, { force: true }); } catch {}
 
         if (exitInfo.code === RESTART_SENTINEL) {
+          if ((profile as any).opencodeBorrowedV1 !== undefined) {
+            console.error("[anet] borrowed V1 restart requires explicit Owner migration; original binding/recovery retained");
+            lastNonRestartCode = 1;
+            return;
+          }
           console.log(
             `[anet] agent-node requested restart (exit ${RESTART_SENTINEL}); re-spawning`,
           );
@@ -8608,6 +8664,17 @@ async function startCommand() {
   if (copresenceFlagPassed && !resolvedForCopresence) {
     console.error(`Node "${id}" not found. Create it first: anet node create ${id}`);
     process.exit(1);
+  }
+  if (resolvedForCopresence
+    && hasBorrowedV1Intent(join(nodesDir(),resolvedForCopresence.id),resolvedForCopresence.profile)) {
+    if (process.env.ANET_BORROWED_V1_BRIDGE !== "1") {
+      await startBorrowedV1Bridge(resolvedForCopresence,opts);
+      return;
+    }
+    readBorrowedLaunchConfig(join(nodesDir(),resolvedForCopresence.id,"config.json"),process.cwd());
+    if (forceNewSession || copresenceFlagPassed || opts.hub || opts.tmux || opts["accept-dev-channels"]) {
+      throw new Error("borrowed V1 bridge requires the original config and existing session");
+    }
   }
   if (resolvedForCopresence) {
     try { startGeneration = await admitNodeStart(resolvedForCopresence.id, startInvokedAt); }
@@ -12972,6 +13039,7 @@ Stop a running agent node.
  */
 async function stopResolvedNode(resolved: { id: string; profile: Profile }, stopInvokedAt: number = Date.now()) {
   const displayName = nodeDisplayName(resolved.id, resolved.profile);
+  const borrowedHostSelected = hasBorrowedV1Intent(join(nodesDir(),resolved.id),resolved.profile);
   let stopGeneration = "";
   let stopProcesses: LifecycleProcessIdentity[] = [];
   try {
@@ -12995,6 +13063,7 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
       // while holding stop-intent, then freeze exact identities. Reaping never
       // rescans by alias, so a later same-name generation cannot be adopted.
       if (roots.length === 0) {
+        if (borrowedHostSelected) throw new Error("BORROWED_V1_STOP_OWNER_UNAVAILABLE; no alias or Host/TUI adoption");
         // #1438 — findNodeStopCandidates captures (pid, discoveredBirth) in
         // ONE `ps` snapshot; the (pid, birth) pair has no TOCTOU window
         // between the two fields. resolveOwnedRoots then verifies via
@@ -13188,9 +13257,9 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
   // A marker-bearing generation was already handled above by exact identity;
   // name matching after that point would re-open #466's same-name kill race.
   const copresenceSessions = copresenceTmuxSessions(displayName);
-  const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui);
-  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv);
-  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge);
+  const tmuxTuiKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.tui) && !borrowedHostSelected;
+  const tmuxAppsrvKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.appsrv) && !borrowedHostSelected;
+  const tmuxBridgeKilled = allowLegacyTmuxNameSweep && tmuxSessionRunning(copresenceSessions.bridge) && !borrowedHostSelected;
   // The three flags above say a session WAS running, which is the condition for
   // trying. Whether the kill landed is a second question, and reporting the
   // first as if it answered the second is how "Stopped X (tmux(tui) killed)"
@@ -14620,12 +14689,46 @@ function printUpgradePlan(plan: UpgradePlanRow[]) {
 }
 
 // RFC-029 — OpenCode lifecycle and pin-management commands.
+async function opencodeBorrowedAttachCommand(ref?: string) {
+  if (!ref) throw new Error("Usage: anet opencode attach <node>");
+  // The ordinary profile resolver can repair permissions and normalize from
+  // global defaults. This entry only reads explicit private selections; no repair or
+  // global profile/token fallback, and ambiguous names never select first.
+  const ids=listProfileIds(), candidates=ids.includes(ref) ? [ref] : ids;
+  const matches=candidates.flatMap(id=>{
+    try {
+      const cfg=join(nodesDir(),id,"config.json"), selected=readBorrowedLaunchConfig(cfg,process.cwd());
+      return ref===id || ref===selected.alias || ref===selected.selection.binding.nodeId ? [{id,cfg,selected}] : [];
+    } catch { return []; }
+  });
+  if(matches.length!==1)throw new Error("borrowed V1 TUI requires one exact existing private node selection");
+  const {cfg,selected}=matches[0];
+  checkRuntimeDependency("opencode-cli","start");
+  assertStartCompatibility("opencode-cli",{runtime:"opencode-cli",opencodeGeneration:"v1",opencodeMode:"copresence"} as Profile,matches[0].id);
+  const plan=revalidateOpencodeAgentNodeLaunchPlan(resolveOpencodeAgentNodeLaunchPlan());
+  if (!agentNodeHelp(plan).includes("ANET_CAPABILITY_OPENCODE_BORROWED_TUI_V1")) {
+    throw new Error("exact agent-node lacks borrowed V1 TUI capability; upgrade both precise source builds before attaching");
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("borrowed V1 TUI requires an interactive terminal");
+  const child=spawn(plan.command,[...plan.argsPrefix,"--opencode-borrowed-attach",cfg],{
+    cwd:process.cwd(),stdio:"inherit",env:{...hardenOpencodeAgentNodeEnv(process.env,process.env.PATH),
+      ANET_OPENCODE_BIN:opencodeLaunchIdentity!.binary,ANET_OPENCODE_VERSION:opencodeLaunchIdentity!.version},
+  });
+  const stop=()=>{try{child.kill("SIGTERM");}catch{}};
+  const signals=["SIGINT","SIGTERM","SIGHUP"] as const;
+  for(const s of signals)process.on(s,stop);
+  const code=await new Promise<number>(resolve=>{child.once("error",()=>resolve(1));child.once("exit",code=>resolve(code??1));});
+  for(const s of signals)process.off(s,stop);
+  if(code!==0)process.exit(code);
+}
+
 async function opencodeCommand() {
   const sub = args[1];
   if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
     console.log(`Usage: anet opencode <sub>
 
 Subcommands:
+  attach <node>          Attach the exact ready borrowed V1 session in this terminal.
   upgrade-pin <version>   Reinstall and smoke the exact release pin.
                           Different versions remain rejected until a new
                           maintainer-vetted agent-network preview bumps it.
@@ -14643,6 +14746,11 @@ Examples:
   }
   if (sub === "upgrade-pin") {
     await opencodeUpgradePinCommand(args[2]);
+    return;
+  }
+  if (sub === "attach") {
+    if (args.length!==3) throw new Error("Usage: anet opencode attach <node>");
+    await opencodeBorrowedAttachCommand(args[2]);
     return;
   }
   if (sub === "auth-login") {
