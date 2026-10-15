@@ -479,17 +479,17 @@ Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销
 
 ### OpenCode V2 共享 Server：创建时的复用与逃生门
 
-创建 `opencode-cli` **V2** 节点时，除代际与 unsafe 授权外，还有三个与「主机共享 Server」相关的开关（细节与运维边界见仓库运行手册 `docs/runbooks/opencode-tui-copresence.md`，含本页刻意不展开的凭据与迁移边界）：
+创建 `opencode-cli` **V2** 节点时，除代际与 unsafe 授权外，还有三个与「主机共享 Server」相关的源码选项；对应版本须实际发布后才可使用。细节、凭据与迁移边界见[运行手册](https://github.com/sleep2agi/agent-network/blob/main/docs/runbooks/opencode-tui-copresence.md)：
 
 | 开关 | 作用 |
 |---|---|
 | `--opencode-shared-server-url <字面量 http://127.0.0.1:<port>>` | 显式指定复用哪个 loopback Server（与下面那项必须成对） |
-| `--opencode-shared-server-password-file <绝对路径>` | 该 Server 的私有密码文件（须为私有普通文件，不得写进命令行/URL/日志） |
+| `--opencode-shared-server-password-file <绝对路径>` | 该 Server 的私有密码文件路径；文件须为私有普通文件，**密码值**不得写进命令行/URL/日志 |
 | `--opencode-new-server` | 显式让新节点**自建** Server，不用共享；可与 `clientBinDir` 并用，但不会继承共享 URL/密码文件 |
 
 主机用户也可以在私有 `~/.anet/opencode-shared-server.json` 里登记 `{ "url": ..., "passwordFile": ..., "clientBinDir": ... }`，此后新建 V2 节点**默认复用**它。
 
-⚠️ **当前状态（限定为 main 源码层）**：登记默认复用已生效；运行时的**准入守卫**与**进程观察提供者**（以及待合的代际绑定适配器）**已入库但创建路径尚未消费它们**（`#1302`）。因此**现在必须把该登记当作受信输入** —— 登记指向陈旧、已死或他人 uid 的 Server 时，子节点配置里仍会写入该 URL/密码文件。接线完成后才会变成「证得到才复用、证不到回退自建」。上面这些开关是否可用，以 `anet -v` 的实际版本为准；**不因源码已实现就当作已发布**。
+**源码状态快照（main `5d316e19`）**：daemon 创建 V2 节点时已默认选择登记的共享连接；准入守卫与进程观察提供者已合入 main，代际绑定与创建消费仍由 `#1324` / `#1302` 跟踪，尚未在上述 main 创建路径生效。因此登记仍须当作受信输入：指向陈旧、已死或他人 uid 的 Server 时，该源码路径仍会写入共享 URL/密码文件路径。后续 daemon 接线以对应主干提交与验收为准；CLI 直接创建/显式连接也须单独核对，不能用 daemon 接线代替其验收。命令可用性应结合本机 `anet -v`、`anet node create --help` 与对应发布说明确认；源码实现不代表 npm 发布或现役采用。
 
 **开发中、尚未发布（#906）**：`anet daemon provider list <daemon>` 回读该 daemon 的脱敏
 Provider → Runtime → 认证方式 → 模型配置；`anet daemon provider put <daemon> --revision N`
@@ -514,11 +514,11 @@ token**，且改完要重启该 daemon 才生效）。
 比别人少。`anet daemon list` 发现这种情况时会直接打出缺哪几个和回填命令。
 :::
 
-`--copresence` 只适用于 `runtime=codex-app-server`。默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
+Codex 的 `--copresence` 用于 `runtime=codex-app-server`。其默认沙箱为只读；开启完整文件系统和网络访问需要 `--dangerously-allow-full-access`。TTY 会要求输入 `yes`，非 TTY 还必须同时提供 `--yes-danger-full-access`。
 
 恢复共存节点时仍应使用 `anet node start <name> --copresence`，不能改用普通 `node start`。
 
-`opencode-cli` 当前是由 agent-node 管理的任务 runtime，不是可 attach 的共享 OpenCode TUI。`grok-build-cli` 共享 Grok TUI 也未进入当前 preview 包；当前可用的 `grok-build-acp` 不支持 attach。
+`opencode-cli` 的 V2 TUI 共存与共享 Server 是上文说明的独立预览路径，要求显式 unsafe 授权；不能套用 Codex 的只读沙箱说明，发布状态须按实际版本核对。`grok-build-cli` 共享 Grok TUI 也未进入当前 preview 包；当前可用的 `grok-build-acp` 不支持 attach。
 
 <a id="其他"></a>
 
