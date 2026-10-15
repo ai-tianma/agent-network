@@ -1,22 +1,24 @@
 // #1293 — decide whether a newly created/started opencode-cli node may REUSE an
 // already-running OpenCode server on this machine instead of spawning a new one.
 //
-// Decision + candidate registry only. It never spawns, never signals a process,
-// and never reads credentials: the caller still owns the attach/serve lifecycle.
-// Every path here FAILS CLOSED — an unreadable, stale, cross-identity, or
+// PURE DECISION ONLY. This module never spawns, never signals a process, never
+// reads credentials, and — deliberately — never reads a file: the candidates it
+// decides over are supplied by the caller. The host shared-server registration
+// is owned and read by the existing shared-registry reader (private-file
+// discipline: canonical path, single-link regular file, owner-uid and 0600 mode
+// checks), so this decision module introduces NO second registry and no second
+// file-trust surface. See PR #2776 for the authoritative `host shared registry →
+// create default-selects shared → shared runtime` path this helper feeds.
+//
+// Every path FAILS CLOSED — an unreadable, stale, cross-identity, or
 // non-loopback candidate is a fallback, never a reuse.
 //
 // Identity rule (mirrors writeCreatedOpencodeProfile): a server bound to node A
 // is reusable ONLY by an exact (nodeId, alias) retry, AND only when a live
 // pid+startTicks probe confirms the recorded process still exists. A different
 // node id or alias, a missing node binding, a missing startTicks, an absent or
-// throwing probe, or an unreadable record all fall back to a fresh server so
+// throwing probe, or a malformed record all fall back to a fresh server so
 // credentials are never silently shared across identities.
-import { readFileSync } from "node:fs";
-import { hostname } from "node:os";
-import { join } from "node:path";
-
-export const OPENCODE_SERVER_REUSE_REGISTRY_FILE = "opencode-server-reuse.json";
 
 /** One running server this daemon started and may consider for reuse. */
 export interface OpencodeServerReuseCandidate {
@@ -48,7 +50,12 @@ export interface OpencodeServerReuseInput {
   uid: number;
   /** Generation the target node requires; mismatch is refused. */
   generation: "v1" | "v2";
-  /** Records read from the machine registry. */
+  /**
+   * Candidate records. The caller must obtain these from the authoritative
+   * host shared-server registry reader, which enforces the private-file
+   * (canonical path / single link / owner uid / 0600) discipline. This module
+   * does not read or trust files itself.
+   */
   candidates: readonly (OpencodeServerReuseCandidate | null | undefined)[];
   /** opt-in flag: "off" preserves today's always-spawn behaviour verbatim. */
   mode?: "same-identity" | "off";
@@ -91,7 +98,8 @@ function normalizeUid(value: unknown): number | null {
 
 /**
  * Pure decision. Never throws: any malformed input is a fallback with a
- * reason, so a broken registry can never turn into an unsafe reuse.
+ * reason, so a broken or hostile candidate list can never turn into an unsafe
+ * reuse.
  */
 export function decideOpencodeServerReuse(input: OpencodeServerReuseInput): OpencodeServerReuseDecision {
   if ((input.mode ?? "same-identity") === "off") {
@@ -148,32 +156,4 @@ function refuseCandidate(
   }
   if (alive !== true) return "not_live";
   return null;
-}
-
-/** Machine registry path under the daemon's managed root (0600, never credentials). */
-export function opencodeServerReuseRegistryPath(root: string): string {
-  return join(root, OPENCODE_SERVER_REUSE_REGISTRY_FILE);
-}
-
-/** Returns [] on any read/parse failure — a broken registry means "reuse nothing". */
-export function readServerReuseCandidates(root: string): OpencodeServerReuseCandidate[] {
-  try {
-    const raw = readFileSync(opencodeServerReuseRegistryPath(root), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    let list: unknown[] = [];
-    if (Array.isArray(parsed)) {
-      list = parsed;
-    } else if (parsed !== null && typeof parsed === "object"
-      && Array.isArray((parsed as { servers?: unknown }).servers)) {
-      list = (parsed as { servers: unknown[] }).servers;
-    }
-    return list.filter((c): c is OpencodeServerReuseCandidate => !!c && typeof c === "object");
-  } catch {
-    return [];
-  }
-}
-
-/** Host label for evidence; never carries a path or credential. */
-export function reuseEvidenceHost(): string {
-  try { return hostname(); } catch { return "unknown"; }
 }

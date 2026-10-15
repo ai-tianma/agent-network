@@ -1,0 +1,74 @@
+#1293 / test1293 — OpenCode server reuse decision (fail-closed negative controls)
+
+Runtime: Docker, `--network none` (no network, no credentials, no spawn).
+Date: 2026-10-15 (UTC)
+Code under test: agent-node/src/runtime/opencode-server-reuse.ts @ bbc6c29d
+                  + tests/test1293-opencode-server-reuse/ (this suite)
+
+Commands
+  sg docker -c 'docker build -f tests/test1293-opencode-server-reuse/Dockerfile -t anet-test1293 .'
+  sg docker -c 'docker run --rm --network none -e SOURCE_COMMIT=bbc6c29d \
+      -v "$PWD/docs/tests:/artifacts" anet-test1293'
+
+Image inputs (pinned, same digests other suites use)
+  oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4
+  node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
+  bun test v1.3.14 (0d9b296a)
+
+Property proven
+  Reuse of an already-running host OpenCode server is approved ONLY for an exact
+  live (nodeId, alias) binding. Every other path is a fallback: cross-identity /
+  alias mismatch / missing binding / missing startTicks / absent probe /
+  throwing probe (never throws) / dead pid / foreign uid / non-loopback url /
+  directory mismatch / generation mismatch / malformed records.
+  The module has no file-reading surface: candidates are supplied by the caller
+  (the authoritative host shared-server registry reader), so it introduces no
+  second registry and no second file-trust surface (asserted by an in-suite grep
+  guard over the module source).
+
+Captured container log
+--------------------------------------------------------------------------------
+test1293 opencode server reuse decision source=bbc6c29d date=2026-10-15T14:07:29+00:00
+L0 unit: reuse is approved ONLY for an exact live (nodeId, alias) binding;
+         cross-identity / alias mismatch / missing startTicks / absent or throwing
+         probe / foreign uid / non-loopback / dead pid all fall back.
+bun test v1.3.14 (0d9b296a)
+
+(pass) opencode server reuse decision > exact same identity reuses only with a live pid+startTicks probe
+(pass) opencode server reuse decision > off mode preserves today's always-spawn behaviour
+(pass) opencode server reuse decision > absent probe never approves reuse (no reuse on on-disk record alone)
+(pass) opencode server reuse decision > a throwing probe falls back and never escapes as a throw
+(pass) opencode server reuse decision > missing startTicks is refused (PID reuse would be undetectable)
+(pass) opencode server reuse decision > cross-identity reuse is refused (credentials never shared)
+(pass) opencode server reuse decision > same nodeId but a different alias is refused
+(pass) opencode server reuse decision > missing binding is refused (fail-closed)
+(pass) opencode server reuse decision > missing alias in the record is refused (fail-closed)
+(pass) opencode server reuse decision > non-loopback url is refused
+(pass) opencode server reuse decision > dead server (pid not live) falls back, never reuses stale record
+(pass) opencode server reuse decision > foreign uid is refused
+(pass) opencode server reuse decision > directory outside managed root is refused
+(pass) opencode server reuse decision > generation mismatch is refused
+(pass) opencode server reuse decision > empty candidates fall back
+(pass) opencode server reuse decision > malformed record degrades to fallback, not throw
+(pass) opencode server reuse decision > first valid candidate wins over earlier refusals
+(pass) loopback url guard > http://127.0.0.1:4096 -> %s
+(pass) loopback url guard > http://localhost:4096 -> %s
+(pass) loopback url guard > http://[::1]:4096 -> %s
+(pass) loopback url guard > http://192.168.1.5:4096 -> %s
+(pass) loopback url guard > https://127.0.0.1:4096 -> %s
+(pass) loopback url guard > http://user:pass@127.0.0.1:4096 -> %s
+(pass) loopback url guard > not-a-url -> %s
+
+ 24 pass
+ 0 fail
+ 40 expect() calls
+Ran 24 tests across 1 file. [26.00ms]
+guard: the decision module must not read or trust any file (no second registry)
+PASS: opencode server reuse decision suite
+--------------------------------------------------------------------------------
+
+Limits
+  Covers the DECISION only. It does not prove the wired create/start path,
+  native V2 startup, real server sharing, TUI, or lifecycle cleanup. Production
+  wiring/qualification lives with the host shared-registry path (PR #2776) and
+  is tracked by #1302. Not a release; no credentials or production changes.
