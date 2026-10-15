@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
-import { readWindowsTuiIdentity, probeWindowsTuiHealth } from "./windows-tui-health";
+import { readWindowsTuiIdentity, probeWindowsTuiHealth, runPowerShell } from "./windows-tui-health";
+import {
+  describePreCheck,
+  diagnosingRunPowerShell,
+  measureFixtureBirthQuery,
+  windowsTuiDiagnosticsEnabled,
+} from "./windows-tui-health-diagnostics";
 import { createCodexHealthMonitor, ModelAuthTracker } from "./codex-health";
 
 const identity = { version: 1 as const, nodeId: "n_test", marker: "generation-a", remote: "ws://127.0.0.1:9000", pid: 42, creationDate: "1234" };
@@ -70,18 +76,36 @@ describe.skipIf(process.platform !== "win32")("native Windows generation and TCP
     const sibling = spawn(process.execPath, ["-e", "console.log('READY');setInterval(()=>{},1000)"], { stdio: ["ignore", "pipe", "pipe"] });
     try {
       await Promise.all([once(child.stdout!, "data"), once(sibling.stdout!, "data")]);
-      const creationDate = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${child.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
+      // #1321 — opt-in diagnostics only; the fixture value and every assertion
+      // below are unchanged whether or not they are enabled.
+      const diag = windowsTuiDiagnosticsEnabled();
+      let capturedBirth = "";
+      const birthQuery = () => {
+        capturedBirth = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${child.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
+        return capturedBirth;
+      };
+      // Exactly one PowerShell invocation either way: the diagnostics call the
+      // same query and report its duration/validity, and the probe receives the
+      // identical value it would have received without diagnostics.
+      const creationDate = diag ? (measureFixtureBirthQuery(birthQuery), capturedBirth) : birthQuery();
       const live = { ...identity, pid: child.pid!, creationDate, remote: `ws://127.0.0.1:${port}` };
-      expect(await probeWindowsTuiHealth(live)).toEqual({ ok: true, reason: "running" });
-      const siblingBirth = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${sibling.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
+      if (diag) console.error(`[diag-1321] ${describePreCheck(live)}`);
+      const run = diag ? diagnosingRunPowerShell(runPowerShell) : undefined;
+      expect(await probeWindowsTuiHealth(live, run)).toEqual({ ok: true, reason: "running" });
+      let capturedSiblingBirth = "";
+      const siblingQuery = () => {
+        capturedSiblingBirth = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `[Diagnostics.Process]::GetProcessById(${sibling.pid}).StartTime.ToUniversalTime().Ticks`], { encoding: "utf8", timeout: 10_000 }).trim();
+        return capturedSiblingBirth;
+      };
+      const siblingBirth = diag ? (measureFixtureBirthQuery(siblingQuery), capturedSiblingBirth) : siblingQuery();
       // A live sibling has no owned connection even while this foreign client is connected.
-      expect(await probeWindowsTuiHealth({ ...live, pid: sibling.pid!, creationDate: siblingBirth })).toEqual({ ok: false, reason: "session-missing" });
-      expect(await probeWindowsTuiHealth({ ...live, remote: `ws://127.0.0.1:${port === 65535 ? port - 1 : port + 1}` })).toEqual({ ok: false, reason: "session-missing" });
-      expect(await probeWindowsTuiHealth({ ...live, creationDate: "1" })).toEqual({ ok: false, reason: "pane-dead" });
+      expect(await probeWindowsTuiHealth({ ...live, pid: sibling.pid!, creationDate: siblingBirth }, run)).toEqual({ ok: false, reason: "session-missing" });
+      expect(await probeWindowsTuiHealth({ ...live, remote: `ws://127.0.0.1:${port === 65535 ? port - 1 : port + 1}` }, run)).toEqual({ ok: false, reason: "session-missing" });
+      expect(await probeWindowsTuiHealth({ ...live, creationDate: "1" }, run)).toEqual({ ok: false, reason: "pane-dead" });
       const exited = once(child, "exit");
       child.kill();
       await exited;
-      expect(await probeWindowsTuiHealth(live)).toEqual({ ok: false, reason: "pane-dead" });
+      expect(await probeWindowsTuiHealth(live, run)).toEqual({ ok: false, reason: "pane-dead" });
     } finally { child.kill(); sibling.kill(); server.close(); }
   }, 90_000);
 });

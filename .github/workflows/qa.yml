@@ -2284,6 +2284,11 @@ jobs:
     name: Windows Codex co-presence native smoke
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      # #1321 diagnostics are opt-in and default OFF in code; this line is what
+      # makes the native run emit the distinguishable sample. It is TEMPORARY and
+      # is reverted (keeping the code default-off) once the sample is captured.
+      ANET_DIAG_WINDOWS_TUI_HEALTH: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Verify protected real-Codex gate trust boundary
