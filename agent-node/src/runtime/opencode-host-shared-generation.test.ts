@@ -112,6 +112,16 @@ describe("#1324 generation binding: fail-closed reasons", () => {
     expect(r).toEqual({ ok: false, reason: "file_changed_since_attestation" });
   });
 
+  test("an exec behind the same pid/startTicks is caught by the second exe read", () => {
+    // A process can exec a different binary without changing pid or startTicks:
+    // only the re-read of /proc/<pid>/exe (dev/ino/size) can see that.
+    let calls = 0;
+    const r = bindHostSharedServeGeneration(evidence, "v2", deps({
+      procExeIdentity: () => (calls++ === 0 ? attestedExe : { ...attestedExe, path: "/usr/lib/opencode/bin/opencode-v2b", ino: "424299" }),
+    }));
+    expect(r).toEqual({ ok: false, reason: "observation_drift" });
+  });
+
   test("pid/startTicks drift between the two checks refuses (PID reuse cannot pass)", () => {
     let ticks = 0;
     const driftTicks = bindHostSharedServeGeneration(evidence, "v2", deps({

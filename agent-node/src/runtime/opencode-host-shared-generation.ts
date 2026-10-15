@@ -10,8 +10,13 @@
 //   1. the running process's executable:      /proc/<pid>/exe → {dev, ino, size}
 //   2. the attested package entrypoint:       resolvePinnedOpencodeBinaryAttestation
 //                                             → binaryFile {dev, ino, size, sha256}
-// plus a re-count before returning (revalidate) and a pid/startTicks re-check, so
-// a swap or a PID reuse between the two reads cannot pass.
+// plus a re-count before returning (revalidate), a pid/startTicks re-check **and a
+// second /proc/<pid>/exe read**, so a file swap, a PID reuse, or an `exec` that
+// keeps the same PID/startTicks cannot pass.
+//
+// `attest()` must come from the existing credential-isolated package probe with
+// an EXPLICIT probe env/cwd supplied by the caller (the resolver's `probeEnv` /
+// `probeCwd`); this module constructs no environment of its own.
 //
 // NEVER generation evidence (they may only be reported as diagnostics elsewhere):
 // a path spelling, `clientBinDir`, a file named `opencode`, `argvContract`, an
@@ -99,9 +104,11 @@ function defaultProcExeIdentity(pid: number): ExeIdentity | "permission_denied" 
     // resolved path (so an interpreter/wrapper is recognised by its own name) and
     // the file identity that the attestation equality is built on.
     const resolved = readlinkSync(`/proc/${pid}/exe`);
-    const st = statSync(`/proc/${pid}/exe`);
+    // bigint stat: dev/ino can exceed 2^53 on some filesystems, and the identity
+    // comparison must be exact — never a float round-trip.
+    const st = statSync(`/proc/${pid}/exe`, { bigint: true });
     if (!st.isFile()) return undefined;
-    return { path: resolved, dev: String(st.dev), ino: String(st.ino), size: st.size };
+    return { path: resolved, dev: st.dev.toString(), ino: st.ino.toString(), size: Number(st.size) };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     return code === "EACCES" || code === "EPERM" ? "permission_denied" : undefined;

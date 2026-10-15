@@ -77,3 +77,16 @@ the same file run inside the image.
 - The V2 positive is a real supported install started for the test; it is not a
   production shared server, and a passing adapter test is not "the create path is
   wired".
+
+## Review additions (通信牛, 2026-10-15 19:18) — all three落地
+
+1. **Isolated version-probe env/cwd**: the suite now calls the existing resolver
+   with an EXPLICIT `probeEnv` (minimal PATH) and `probeCwd` (`/tmp/gen1324-probe`).
+   The adapter itself constructs no environment and never probes a version: the
+   attestation must arrive from the credential-isolated package path.
+2. **Exact file identity**: `/proc/<pid>/exe` is stat'ed with `{ bigint: true }`
+   and `dev/ino` are compared as **strings** (no float round-trip), matching the
+   attestation's own `dev`/`ino` strings.
+3. **exec behind the same pid/startTicks**: the second `/proc/<pid>/exe` read
+   (dev/ino/size) is what catches it; a dedicated unit case asserts
+   `observation_drift` for an exec that keeps pid and startTicks unchanged.

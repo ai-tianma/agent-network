@@ -1,7 +1,7 @@
 // #1324 real-evidence run: a REAL supported V2 serve must bind, and the shapes
 // that only look similar must not.
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, statSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { copyFileSync, statSync, mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readlinkSync } from "node:fs";
@@ -37,8 +37,15 @@ const v2Bin = execFileSync("cat", ["/v2-bin"], { encoding: "utf8" }).trim();
 const v1Bin = execFileSync("cat", ["/v1-bin"], { encoding: "utf8" }).trim();
 // The adapter takes the attestation/revalidation as REQUIRED caller inputs (it
 // never guesses a PATH): here they come from the real installed packages.
+// The version probe runs with an EXPLICITLY isolated env + cwd, supplied here by
+// the caller (the adapter itself never builds an environment).
+mkdirSync("/tmp/gen1324-probe", { recursive: true });
+const probeEnv = { PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin" };
+const probeCwd = "/tmp/gen1324-probe";
 const attest = (generation: "v1" | "v2") =>
-  resolvePinnedOpencodeBinaryAttestation({ generation, requestedBinary: generation === "v2" ? v2Bin : v1Bin });
+  resolvePinnedOpencodeBinaryAttestation({
+    generation, requestedBinary: generation === "v2" ? v2Bin : v1Bin, probeEnv, probeCwd,
+  });
 const revalidate = (attestation: any) => { revalidatePinnedOpencodeBinary(attestation); };
 const v2Attestation = attest("v2");
 console.log(`v2 attested binary=${v2Attestation.binary} version=${v2Attestation.expectedVersion} sha256=${v2Attestation.binaryFile.sha256.slice(0, 12)}…`);
