@@ -5,8 +5,9 @@
 // rather than throw.
 import { describe, expect, test } from "bun:test";
 import {
+  classifyServeUrl,
   decideHostSharedServerAdmission,
-  isLoopbackServeUrl,
+  isSupportedServeUrl,
   type HostSharedServerAdmissionInput,
   type HostSharedServerObservation,
 } from "./opencode-server-reuse.js";
@@ -83,6 +84,27 @@ describe("host-shared server admission", () => {
     expect(d.reason).toBe("not_loopback");
   });
 
+  // #2777 review (通信牛): only the production-supported `127.0.0.1` form may be
+  // admitted. `localhost` and `[::1]` are loopback but are shapes the host
+  // registry never writes, so they are refused with their own audit reason.
+  test.each([
+    ["http://localhost:4096"],
+    ["http://[::1]:4096"],
+    ["http://127.0.0.2:4096"],
+  ])("loopback-but-unsupported url %s is refused as host_not_127_0_0_1", (url) => {
+    const d = decideHostSharedServerAdmission(input({ observations: [{ ...base, url }] }));
+    expect(d.decision).toBe("fallback");
+    expect(d.reason).toBe("host_not_127_0_0_1");
+  });
+
+  test("an unsupported-loopback url never masks a later supported one", () => {
+    const d = decideHostSharedServerAdmission(input({
+      observations: [{ ...base, url: "http://localhost:4096" }, { ...base, pid: 5151 }],
+    }));
+    expect(d.decision).toBe("admit");
+    expect(d.server?.url).toBe("http://127.0.0.1:4096");
+  });
+
   test("dead server (pid not live) falls back, never reuses a stale record", () => {
     const d = decideHostSharedServerAdmission(input({ probeAlive: () => false }));
     expect(d.decision).toBe("fallback");
@@ -119,16 +141,24 @@ describe("host-shared server admission", () => {
   });
 });
 
-describe("loopback url guard", () => {
+describe("supported serve url guard", () => {
   test.each([
-    ["http://127.0.0.1:4096", true],
-    ["http://localhost:4096", true],
-    ["http://[::1]:4096", true],
-    ["http://192.168.1.5:4096", false],
-    ["https://127.0.0.1:4096", false],
-    ["http://user:pass@127.0.0.1:4096", false],
-    ["not-a-url", false],
-  ])("%s -> %s", (url, expected) => {
-    expect(isLoopbackServeUrl(url)).toBe(expected);
+    ["http://127.0.0.1:4096", "supported"],
+    ["http://localhost:4096", "unsupported_loopback"],
+    ["http://[::1]:4096", "unsupported_loopback"],
+    ["http://127.0.0.2:4096", "unsupported_loopback"],
+    ["https://127.0.0.1:4096", "unsupported_loopback"],
+    ["http://user:pass@127.0.0.1:4096", "unsupported_loopback"],
+    ["http://192.168.1.5:4096", "not_loopback"],
+    ["https://anet.sh", "not_loopback"],
+    ["not-a-url", "not_loopback"],
+  ] as const)("%s -> %s", (url, expected) => {
+    expect(classifyServeUrl(url)).toBe(expected);
+    expect(isSupportedServeUrl(url)).toBe(expected === "supported");
+  });
+
+  test("non-strings are never supported", () => {
+    expect(classifyServeUrl(undefined)).toBe("not_loopback");
+    expect(classifyServeUrl(4096)).toBe("not_loopback");
   });
 });

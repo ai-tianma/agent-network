@@ -78,3 +78,33 @@ Limits
   native V2 startup, real server sharing, TUI, or lifecycle cleanup. Production
   wiring/qualification lives with the host shared-registry path (PR #2776) and
   is tracked by #1302. Not a release; no credentials or production changes.
+
+--------------------------------------------------------------------------------
+ADDENDUM — #2777 review (通信牛, 2026-10-16): admit ONLY `127.0.0.1`
+
+The run above is @498fed1e and its url table is SUPERSEDED. 通信牛's review of
+#2777 requires the guard to accept only the production-supported literal the host
+registry actually writes (`http://127.0.0.1:<port>`), and to add the matching
+negative controls — `localhost` (resolver/hosts dependent) and `[::1]` are
+loopback but not shapes the host can produce, so they must be refused.
+
+Behaviour now (head on the branch, unit-verified locally):
+  http://127.0.0.1:4096                  -> supported  (admitted when the rest of
+                                                        the observations hold)
+  http://localhost:4096                  -> refused, reason `host_not_127_0_0_1`
+  http://[::1]:4096                      -> refused, reason `host_not_127_0_0_1`
+  http://127.0.0.2:4096                  -> refused, reason `host_not_127_0_0_1`
+  https://127.0.0.1:4096                 -> refused, reason `host_not_127_0_0_1`
+  http://user:pass@127.0.0.1:4096        -> refused, reason `host_not_127_0_0_1`
+  http://192.168.1.5:4096 / https://…    -> refused, reason `not_loopback`
+
+`isLoopbackServeUrl` became `classifyServeUrl` + `isSupportedServeUrl` so the
+refusal reason distinguishes "loopback but unsupported shape" from "routable".
+
+Evidence for this revision: the suite's own `bun test
+src/runtime/opencode-server-reuse.test.ts` (28 pass / 0 fail alongside the new
+`host_not_127_0_0_1` and "unsupported shape does not mask a later supported
+observation" controls) plus the PR's L1 job Docker run of this same suite. A full
+Docker artifact for the new head will be attached when the L1 job for the new
+commit completes; this addendum does not claim that run has happened.
+

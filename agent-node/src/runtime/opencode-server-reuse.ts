@@ -18,7 +18,9 @@
 // and no second file-trust surface.
 //
 // The admitted facts (loopback url, same uid, live pid + startTicks, generation)
-// must come from ACTUAL observation. The shared registry does NOT carry pid,
+// must come from ACTUAL observation. The admitted url shape is exactly
+// `http://127.0.0.1:<port>` — the only form the host registry writes.
+// The shared registry does NOT carry pid,
 // startTicks, uid or generation, so a caller must not fabricate them from the
 // registry record: a missing/unobservable required fact falls back to spawning a
 // fresh server. Reuse is never approved on the strength of an on-disk record.
@@ -80,14 +82,32 @@ export interface HostSharedServerAdmission {
   server?: HostSharedServer;
 }
 
-/** Loopback only: borrowing must never target a routable address. */
-export function isLoopbackServeUrl(url: unknown): url is string {
-  if (typeof url !== "string") return false;
+/** Loopback only: borrowing must never target a routable address.
+ *
+ * Only the production-supported literal `http://127.0.0.1:<port>` is admitted
+ * (通信牛, #2777 review: the registry itself only ever writes that form, so
+ * accepting `localhost` / `[::1]` would widen the guard past anything the host
+ * can produce — `localhost` additionally depends on resolver/hosts state).
+ * A loopback host in any other shape is reported separately so the audit reason
+ * says what was actually wrong. */
+export type ServeUrlClass = "supported" | "unsupported_loopback" | "not_loopback";
+
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+
+export function classifyServeUrl(url: unknown): ServeUrlClass {
+  if (typeof url !== "string") return "not_loopback";
   let parsed: URL;
-  try { parsed = new URL(url); } catch { return false; }
-  return parsed.protocol === "http:"
-    && ["127.0.0.1", "[::1]", "localhost"].includes(parsed.hostname)
+  try { parsed = new URL(url); } catch { return "not_loopback"; }
+  const isLoopbackHost = LOOPBACK_HOSTNAMES.has(parsed.hostname) || /^127\./.test(parsed.hostname);
+  if (!isLoopbackHost) return "not_loopback";
+  const supported = parsed.protocol === "http:"
+    && parsed.hostname === "127.0.0.1"
     && !parsed.username && !parsed.password;
+  return supported ? "supported" : "unsupported_loopback";
+}
+
+export function isSupportedServeUrl(url: unknown): url is string {
+  return classifyServeUrl(url) === "supported";
 }
 
 function normalizeUid(value: unknown): number | null {
@@ -130,7 +150,14 @@ function refuseObservation(
   observed: HostSharedServerObservation,
   probe: (pid: number, startTicks: number) => boolean,
 ): string | HostSharedServer {
-  if (!isLoopbackServeUrl(observed.url)) return "not_loopback";
+  // Only `http://127.0.0.1:<port>` is admitted. Loopback in an unsupported shape
+  // (localhost / [::1] / 127.x / credentials / https) gets its own reason so the
+  // audit field says what was actually wrong, not lumped in with a routable
+  // address (#2777 review).
+  if (!isSupportedServeUrl(observed.url)) {
+    return classifyServeUrl(observed.url) === "unsupported_loopback"
+      ? "host_not_127_0_0_1" : "not_loopback";
+  }
   if (observed.generation !== input.generation) return "generation_mismatch";
   const uid = normalizeUid(observed.uid);
   if (uid === null || uid !== input.uid) return "foreign_uid";
