@@ -99,6 +99,31 @@ Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Do
 - The matrix + strategy live in [docs/qa/](./docs/qa/) — see [docs/qa/README.md](./docs/qa/README.md) for adding new tests (6-step flow).
 - v0 ship-readiness snapshot: [docs/qa/v0-summary.md](./docs/qa/v0-summary.md). Roadmap (which way the gate is going next): [docs/qa/v1-roadmap.md](./docs/qa/v1-roadmap.md).
 
+### Don't leave a test sitting near its own timeout (`TEST-MARGIN v1`, #1627/#1309)
+
+bun's default per-test timeout is **20000ms** and that number appears **nowhere in
+test source** — so grepping for `timeout` finds nothing, and when a slow runner
+pushes a near-limit test over, the failure reads exactly like a real defect
+(`[20832.89ms]`, with `^ this test timed out after 20000ms.` only on the next
+line). 2026-08-31 produced three batches of red this way, one of them on a PR
+that changed two `.md` files. `L1-TIMING v1` records durations at **suite**
+granularity; this failure mode lives at the **single test**.
+
+- `python3 scripts/check-test-margin.py --logs '/tmp/qa-l0-*.log' '/tmp/qa-l1-*-run.log'`
+  prints `TEST-MARGIN v1 tests=… hooks=… threshold=50% near=… slowest=<slug>=<pct>%,…`
+  and lists offenders as `duration / effective timeout / pct / source:line`.
+  **Effective** timeout = the test's own, else its `describe`'s, else the
+  20000ms default — measuring against the default instead would report a test
+  that already declares `}, 60_000)` as 90% dangerous (its real margin is 3.3x).
+  It is **report-only** (exit 0; `--pct`/`TEST_MARGIN_PCT` sets the threshold,
+  `--fail` is opt-in) and `scripts/qa.sh` calls it next to `L1-TIMING`.
+- So: when a test is genuinely slow, **declare** a timeout with headroom over the
+  observed duration (own or `describe`-level) and say why in a comment. Do not
+  rely on the implicit default for anything slow, and do not leave a test within
+  ~2× of whichever timeout actually applies to it.
+- Promoting this to a ratchet gate (fail the job) is a separate decision with its
+  own threshold; it is deliberately not taken here.
+
 ### tmux in tests: always `-L`/`-S` and `env -u TMUX`; never `kill-server` (#505)
 
 A test or script running inside a tmux pane inherits `$TMUX`, and `$TMUX` beats
