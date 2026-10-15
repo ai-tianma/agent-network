@@ -307,13 +307,13 @@ describe("process evidence (injected /proc)", () => {
     expect(observeHostSharedServe(URL_4096, both)).toEqual({ ok: false, reason: "ambiguous_listener" });
   });
 
-  test("probeAlive can bind PID 1 by ticks (pid 0 still refused)", () => {
+  test("probeAlive keeps its PID 1 refusal (the holder scan is what must include it)", () => {
     const deps = fakeProc({ pid: 1 });
     deps.liveProcess = (pid) => (pid === 1 ? { pid: 1, ticks: "900", state: "S" } : undefined);
     const probe = makeHostSharedAliveProbe(deps);
-    expect(probe(1, 900)).toBe(true);
-    expect(probe(1, 901)).toBe(false);
+    expect(probe(1, 900)).toBe(false); // unchanged policy: admission for PID 1 is separate
     expect(probe(0, 900)).toBe(false);
+    expect(probe(777, 900)).toBe(false);
   });
 
   test("probeAlive re-checks ticks, so PID reuse cannot pass", () => {

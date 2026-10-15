@@ -385,9 +385,9 @@ export function makeHostSharedAliveProbe(
 ): (pid: number, startTicks: number) => boolean {
   const deps = { ...defaultDeps(), ...overrides };
   return (pid, startTicks) => {
-    // pid 1 is allowed: it is a real process (and the holder scan now includes it),
-    // and the tick check still binds it. Only pid 0 does not exist.
-    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+    // PID 1's liveness/admission policy stays as it was (通信牛: keep it separate
+    // from the holder scan) — only the fd-holder scan must include PID 1.
+    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
     if (typeof startTicks !== "number" || !Number.isFinite(startTicks)) return false;
     try {
       const proc = deps.liveProcess(pid);

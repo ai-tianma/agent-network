@@ -77,8 +77,9 @@ kept only as the diagnostic `diagnostics.socketUid`.
 
 PID 1 is scanned like any other process (通信牛, #2784 review): in a container PID 1
 can hold a listening fd, and the earlier `pid <= 1` skip would have reported a
-wrong "unique holder". Only pid 0 (not a real process) is out of scope, and
-`makeHostSharedAliveProbe` can bind PID 1 by ticks too.
+wrong "unique holder". Only pid 0 (not a real process) is out of scope. PID 1's
+liveness/admission policy is deliberately unchanged (`makeHostSharedAliveProbe`
+still refuses pid 1, as the review scoped it) — the holder scan is what includes it.
 
 **Uniqueness is still required**: if ANY process's fd table could not be read,
 "unique holder" is unproven and the answer is `permission_denied` — in a mixed-uid
