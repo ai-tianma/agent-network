@@ -477,6 +477,20 @@ Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销
 | `anet node start <name> --copresence` | 启动 Codex app-server、桥和共享 TUI |
 | `anet opencode ...` | 管理 OpenCode preview 集成 |
 
+### OpenCode V2 共享 Server：创建时的复用与逃生门
+
+创建 `opencode-cli` **V2** 节点时，除代际与 unsafe 授权外，还有三个与「主机共享 Server」相关的开关（细节与运维边界见仓库运行手册 `docs/runbooks/opencode-tui-copresence.md`，含本页刻意不展开的凭据与迁移边界）：
+
+| 开关 | 作用 |
+|---|---|
+| `--opencode-shared-server-url <字面量 http://127.0.0.1:<port>>` | 显式指定复用哪个 loopback Server（与下面那项必须成对） |
+| `--opencode-shared-server-password-file <绝对路径>` | 该 Server 的私有密码文件（须为私有普通文件，不得写进命令行/URL/日志） |
+| `--opencode-new-server` | 显式让新节点**自建** Server，不用共享；可与 `clientBinDir` 并用，但不会继承共享 URL/密码文件 |
+
+主机用户也可以在私有 `~/.anet/opencode-shared-server.json` 里登记 `{ "url": ..., "passwordFile": ..., "clientBinDir": ... }`，此后新建 V2 节点**默认复用**它。
+
+⚠️ **当前状态（限定为 main 源码层）**：登记默认复用已生效；运行时的**准入守卫**与**进程观察提供者**（以及待合的代际绑定适配器）**已入库但创建路径尚未消费它们**（`#1302`）。因此**现在必须把该登记当作受信输入** —— 登记指向陈旧、已死或他人 uid 的 Server 时，子节点配置里仍会写入该 URL/密码文件。接线完成后才会变成「证得到才复用、证不到回退自建」。上面这些开关是否可用，以 `anet -v` 的实际版本为准；**不因源码已实现就当作已发布**。
+
 **开发中、尚未发布（#906）**：`anet daemon provider list <daemon>` 回读该 daemon 的脱敏
 Provider → Runtime → 认证方式 → 模型配置；`anet daemon provider put <daemon> --revision N`
 从 stdin 保存私有 JSON，key 不接受命令行参数。配置成功不等于登录、模型请求或节点切换成功。
