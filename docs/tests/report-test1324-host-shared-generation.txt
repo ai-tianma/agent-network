@@ -90,3 +90,25 @@ the same file run inside the image.
 3. **exec behind the same pid/startTicks**: the second `/proc/<pid>/exe` read
    (dev/ino/size) is what catches it; a dedicated unit case asserts
    `observation_drift` for an exec that keeps pid and startTicks unchanged.
+
+## Review round 2 (通信牛, 2026-10-15 19:3x) — three P1 blockers, all fixed
+
+1. **The attestation's OWN generation is now checked** (`generation_contract_mismatch`):
+   `(attestation.generation ?? "v1") === generation` and
+   `isAcceptedOpencodeVersionFor(generation, attestation.expectedVersion)` must both
+   hold. Real negative: a REAL V1 attestation (real resolver output) asked as v2 is
+   refused — previously it produced `ok:true, generation:'v2'` with a mixed
+   package/version pair.
+2. **The listener binding is now re-observed before returning** (`observation_drift`):
+   the #1313 observer is called again (same strict rules, no second scanner) and
+   `pid/uid/startTicks/listenInode/host/port` must all match. Real negative: an
+   invented `listenInode: "0"` on the real V2 positive is refused.
+3. **The attested binary gets its own bigint identity** (`attestation_identity_imprecise`
+   / `executable_identity_mismatch`): `statSync(binary, {bigint:true})` must equal the
+   attestation's stored `dev/ino/size` strings (a numbers-based attestation that
+   rounded an inode above 2^53 is refused) **and** equal the running process's
+   identity. `size` is carried and compared as an exact decimal string — never
+   `Number()`. Unit controls cover the 2^53 collision and an exact >2^53 binding.
+
+Verified locally: unit 14 pass / 0 fail; the isolated Docker suite passes with two
+extra real negatives (`generation_contract_mismatch`, `observation_drift`).

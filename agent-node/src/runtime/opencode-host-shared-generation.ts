@@ -38,8 +38,11 @@ import {
   revalidatePinnedOpencodeBinary,
   type PinnedOpencodeBinaryAttestation,
 } from "./opencode-acp/binary.js";
-import { opencodeGenerationSupport } from "./opencode-versions.js";
-import type { HostSharedProcessEvidence } from "./opencode-host-shared-observer.js";
+import { isAcceptedOpencodeVersionFor, opencodeGenerationSupport } from "./opencode-versions.js";
+import {
+  observeHostSharedServe,
+  type HostSharedProcessEvidence,
+} from "./opencode-host-shared-observer.js";
 
 export type HostSharedGenerationReason =
   | "unsupported_platform"
@@ -49,6 +52,8 @@ export type HostSharedGenerationReason =
   | "attestation_unavailable"
   | "executable_identity_mismatch"
   | "file_changed_since_attestation"
+  | "generation_contract_mismatch"
+  | "attestation_identity_imprecise"
   | "observation_drift";
 
 export interface HostSharedGenerationProof {
@@ -56,7 +61,8 @@ export interface HostSharedGenerationProof {
   binaryPath: string;
   dev: string;
   ino: string;
-  size: number;
+  /** Exact decimal size (string) — never a Number round-trip. */
+  size: string;
   sha256: string;
   packageName: string;
   packageVersion: string;
@@ -74,7 +80,8 @@ export interface ExeIdentity {
   path: string;
   dev: string;
   ino: string;
-  size: number;
+  /** Exact decimal size — compared as a string, never through Number(). */
+  size: string;
 }
 
 export interface HostSharedGenerationDeps {
@@ -93,6 +100,13 @@ export interface HostSharedGenerationDeps {
   revalidate: (attestation: PinnedOpencodeBinaryAttestation) => void;
   /** Executables that cannot prove the script they run. */
   interpreterBasenames?: readonly string[];
+  /** bigint identity of the canonical attested binary. Defaults to a real stat;
+   *  the attestation's stored dev/ino strings are only trusted when they equal
+   *  these exact decimal values (a numbers-based attestation can be rounded). */
+  statBinary?: (path: string) => { dev: string; ino: string; size: string } | undefined;
+  /** Re-observe the endpoint right before returning (defaults to the #1313
+   *  observer, i.e. the same strict rules — no second, looser scanner). */
+  reobserve?: (url: string) => { ok: true; processEvidence: HostSharedProcessEvidence } | { ok: false };
 }
 
 const INTERPRETERS = ["bun", "node", "nodejs", "deno", "tsx", "ts-node", "env", "sh", "bash"];
@@ -108,7 +122,7 @@ function defaultProcExeIdentity(pid: number): ExeIdentity | "permission_denied" 
     // comparison must be exact — never a float round-trip.
     const st = statSync(`/proc/${pid}/exe`, { bigint: true });
     if (!st.isFile()) return undefined;
-    return { path: resolved, dev: st.dev.toString(), ino: st.ino.toString(), size: Number(st.size) };
+    return { path: resolved, dev: st.dev.toString(), ino: st.ino.toString(), size: st.size.toString() };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     return code === "EACCES" || code === "EPERM" ? "permission_denied" : undefined;
@@ -130,6 +144,16 @@ function defaultLiveTicks(pid: number): string | undefined {
 type ResolvedDeps = Required<Omit<HostSharedGenerationDeps, "attest" | "revalidate">>
   & Pick<HostSharedGenerationDeps, "attest" | "revalidate">;
 
+function defaultStatBinary(path: string): { dev: string; ino: string; size: string } | undefined {
+  try {
+    const st = statSync(path, { bigint: true });
+    if (!st.isFile()) return undefined;
+    return { dev: st.dev.toString(), ino: st.ino.toString(), size: st.size.toString() };
+  } catch {
+    return undefined;
+  }
+}
+
 function defaults(overrides: Partial<HostSharedGenerationDeps>): ResolvedDeps {
   if (typeof overrides.attest !== "function" || typeof overrides.revalidate !== "function") {
     // Fail closed at construction: without the package identity and the
@@ -141,6 +165,8 @@ function defaults(overrides: Partial<HostSharedGenerationDeps>): ResolvedDeps {
     procExeIdentity: overrides.procExeIdentity ?? defaultProcExeIdentity,
     liveTicks: overrides.liveTicks ?? defaultLiveTicks,
     interpreterBasenames: overrides.interpreterBasenames ?? INTERPRETERS,
+    statBinary: overrides.statBinary ?? defaultStatBinary,
+    reobserve: overrides.reobserve ?? ((url) => observeHostSharedServe(url)),
     attest: overrides.attest,
     revalidate: overrides.revalidate,
   };
@@ -196,9 +222,27 @@ export function bindHostSharedServeGeneration(
     } catch {
       return { ok: false, reason: "attestation_unavailable" };
     }
+    // The attestation must PROVE the requested generation itself: echoing the
+    // caller's parameter (while a V1 attestation was returned) would label a real
+    // V1 binary as V2.
+    const attestedGeneration = attestation.generation ?? "v1";
+    if (attestedGeneration !== generation
+      || !isAcceptedOpencodeVersionFor(generation, attestation.expectedVersion)) {
+      return { ok: false, reason: "generation_contract_mismatch" };
+    }
+    // Exact identity of the ATTESTED binary (bigint), used as the bridge between
+    // the attestation's stored strings and the running process. A numbers-based
+    // attestation can carry a rounded dev/ino, so a mismatch here is a refusal —
+    // never a silent pass on an unproven identity.
+    const attestedBinary = deps.statBinary(attestation.binary);
+    if (!attestedBinary) return { ok: false, reason: "attestation_unavailable" };
     const attested = attestation.binaryFile;
-    if (String(attested.dev) !== firstExe.dev || String(attested.ino) !== firstExe.ino
-      || Number(attested.size) !== firstExe.size) {
+    if (String(attested.dev) !== attestedBinary.dev || String(attested.ino) !== attestedBinary.ino
+      || String(attested.size) !== attestedBinary.size) {
+      return { ok: false, reason: "attestation_identity_imprecise" };
+    }
+    if (attestedBinary.dev !== firstExe.dev || attestedBinary.ino !== firstExe.ino
+      || attestedBinary.size !== firstExe.size) {
       return { ok: false, reason: "executable_identity_mismatch" };
     }
 
@@ -208,6 +252,21 @@ export function bindHostSharedServeGeneration(
       deps.revalidate(attestation);
     } catch {
       return { ok: false, reason: "file_changed_since_attestation" };
+    }
+    // Re-observe the ENDPOINT (same strict rules as #1313): the listener binding
+    // must still hold, otherwise `listenInode` could be a stale or invented value.
+    let reobserved: HostSharedProcessEvidence;
+    try {
+      const again = deps.reobserve(evidence.url);
+      if (!again.ok) return { ok: false, reason: "observation_drift" };
+      reobserved = again.processEvidence;
+    } catch {
+      return { ok: false, reason: "observation_drift" };
+    }
+    if (reobserved.pid !== evidence.pid || reobserved.listenInode !== evidence.listenInode
+      || reobserved.uid !== evidence.uid || reobserved.startTicks !== evidence.startTicks
+      || reobserved.host !== evidence.host || reobserved.port !== evidence.port) {
+      return { ok: false, reason: "observation_drift" };
     }
     const secondExe = deps.procExeIdentity(evidence.pid);
     const secondTicks = deps.liveTicks(evidence.pid);
@@ -223,9 +282,9 @@ export function bindHostSharedServeGeneration(
       generation,
       proof: {
         binaryPath: attestation.binary,
-        dev: String(attested.dev),
-        ino: String(attested.ino),
-        size: Number(attested.size),
+        dev: attestedBinary.dev,
+        ino: attestedBinary.ino,
+        size: attestedBinary.size,
         sha256: String(attested.sha256),
         packageName: opencodeGenerationSupport(generation).packageName,
         packageVersion: attestation.expectedVersion,

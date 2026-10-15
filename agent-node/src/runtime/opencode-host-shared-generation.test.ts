@@ -29,7 +29,7 @@ const evidence: HostSharedProcessEvidence = {
   },
 };
 
-const attestedExe: ExeIdentity = { path: "/usr/lib/opencode/bin/opencode", dev: "2049", ino: "424242", size: 1234 };
+const attestedExe: ExeIdentity = { path: "/usr/lib/opencode/bin/opencode", dev: "2049", ino: "424242", size: "1234" };
 
 function attestation(over: Partial<PinnedOpencodeBinaryAttestation> = {}): PinnedOpencodeBinaryAttestation {
   return {
@@ -44,15 +44,19 @@ function attestation(over: Partial<PinnedOpencodeBinaryAttestation> = {}): Pinne
 }
 
 function deps(over: Partial<HostSharedGenerationDeps> = {}): HostSharedGenerationDeps {
-  let exeCalls = 0;
-  return {
+  const base: HostSharedGenerationDeps = {
     platform: "linux",
-    procExeIdentity: () => (exeCalls++ === 0 ? attestedExe : attestedExe),
+    procExeIdentity: () => attestedExe,
     liveTicks: () => "900",
     attest: () => attestation(),
     revalidate: () => {},
-    ...over,
+    statBinary: () => ({ dev: "2049", ino: "424242", size: "1234" }),
+    reobserve: () => ({
+      ok: true,
+      processEvidence: { ...evidence },
+    }),
   };
+  return { ...base, ...over };
 }
 
 describe("#1324 generation binding: fail-closed reasons", () => {
@@ -62,7 +66,7 @@ describe("#1324 generation binding: fail-closed reasons", () => {
     if (!r.ok) return;
     expect(r.generation).toBe("v2");
     expect(r.proof).toMatchObject({
-      binaryPath: "/usr/lib/opencode/bin/opencode", dev: "2049", ino: "424242", size: 1234,
+      binaryPath: "/usr/lib/opencode/bin/opencode", dev: "2049", ino: "424242", size: "1234",
       packageName: "@opencode/cli", packageVersion: "2.0.22",
       pid: 777, startTicks: 900, listenInode: "4242",
     });
@@ -136,6 +140,49 @@ describe("#1324 generation binding: fail-closed reasons", () => {
     expect(driftExe).toEqual({ ok: false, reason: "observation_drift" });
   });
 
+  // #1324 review P1-1: a real V1 attestation must not be relabelled as v2.
+  test("the attestation's OWN generation must equal the requested one", () => {
+    const r = bindHostSharedServeGeneration(evidence, "v2", deps({ attest: () => attestation({ generation: "v1", expectedVersion: "1.18.34" } as any) }));
+    expect(r).toEqual({ ok: false, reason: "generation_contract_mismatch" });
+    // A version that is not accepted for the requested generation is the same class.
+    const bad = bindHostSharedServeGeneration(evidence, "v2", deps({ attest: () => attestation({ expectedVersion: "1.18.34" } as any) }));
+    expect(bad).toEqual({ ok: false, reason: "generation_contract_mismatch" });
+  });
+
+  // #1324 review P1-3: the attestation side must be exact too (an inode above
+  // MAX_SAFE_INTEGER can be rounded by a numbers-based attestation).
+  test("a rounded attestation identity is refused, and exact >2^53 inodes still bind", () => {
+    const rounded = bindHostSharedServeGeneration(evidence, "v2", deps({
+      statBinary: () => ({ dev: "2049", ino: "9007199254740993", size: "1234" }),
+      attest: () => attestation({ binaryFile: { dev: "2049", ino: "9007199254740992", size: 1234, sha256: "a".repeat(64) } } as any),
+    }));
+    expect(rounded).toEqual({ ok: false, reason: "attestation_identity_imprecise" });
+
+    const exact = bindHostSharedServeGeneration(evidence, "v2", deps({
+      procExeIdentity: () => ({ ...attestedExe, ino: "9007199254740993" }),
+      statBinary: () => ({ dev: "2049", ino: "9007199254740993", size: "1234" }),
+      attest: () => attestation({ binaryFile: { dev: "2049", ino: "9007199254740993", size: 1234, sha256: "a".repeat(64) } } as any),
+    }));
+    expect(exact.ok).toBe(true);
+    if (!exact.ok) return;
+    expect(exact.proof.ino).toBe("9007199254740993");
+    expect(exact.proof.size).toBe("1234"); // exact string, never Number()
+  });
+
+  // #1324 review P1-2: the listener binding is re-observed, not copied.
+  test("a fabricated or drifted listener binding is refused on re-observation", () => {
+    const fabricated = bindHostSharedServeGeneration({ ...evidence, listenInode: "0" }, "v2", deps());
+    expect(fabricated).toEqual({ ok: false, reason: "observation_drift" });
+
+    const movedPid = bindHostSharedServeGeneration(evidence, "v2", deps({
+      reobserve: () => ({ ok: true, processEvidence: { ...evidence, pid: 4242 } }),
+    }));
+    expect(movedPid).toEqual({ ok: false, reason: "observation_drift" });
+
+    const gone = bindHostSharedServeGeneration(evidence, "v2", deps({ reobserve: () => ({ ok: false }) }));
+    expect(gone).toEqual({ ok: false, reason: "observation_drift" });
+  });
+
   test("the process start ticks must match the observation before anything is attested", () => {
     const r = bindHostSharedServeGeneration(evidence, "v2", deps({ liveTicks: () => "1234" }));
     expect(r).toEqual({ ok: false, reason: "observation_drift" });
@@ -146,7 +193,8 @@ describe("#1324 generation binding: fail-closed reasons", () => {
       binaryFile: { dev: "2049", ino: "555555", size: 10, sha256: "c".repeat(64) } } as any);
     const r = bindHostSharedServeGeneration(evidence, "v1", deps({
       attest: () => v1,
-      procExeIdentity: () => ({ path: "/usr/lib/opencode-ai/bin/opencode", dev: "2049", ino: "555555", size: 10 }),
+      procExeIdentity: () => ({ path: "/usr/lib/opencode-ai/bin/opencode", dev: "2049", ino: "555555", size: "10" }),
+      statBinary: () => ({ dev: "2049", ino: "555555", size: "10" }),
     }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
