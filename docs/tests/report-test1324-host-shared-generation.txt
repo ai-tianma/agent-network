@@ -112,3 +112,24 @@ the same file run inside the image.
 
 Verified locally: unit 14 pass / 0 fail; the isolated Docker suite passes with two
 extra real negatives (`generation_contract_mismatch`, `observation_drift`).
+
+## Reviewer regression check (通信牛, 2026-10-16 Asia/Shanghai)
+
+The genuine V1-attestation negative now uses the REAL V1 listener, not a V2
+listener with a different file identity. It requires `generation_contract_mismatch`;
+the fabricated-inode negative requires `observation_drift`. Both use the real
+resolver/revalidator and the adapter's default /proc readers and observer.
+
+Independent Docker check: use `anet-test1324:latest` as the dependency base and
+mount the exact module/unit files from 38a04137 plus the corrected integration
+fixture, with `--network none`: unit **14 pass / 0 fail**, real V2 positive passes,
+both named negatives refuse with their expected reasons. No business-module
+change was made by this fixture correction. Earlier 10/11-pass counts above are
+historical runs, not evidence for the latest source.
+
+Witnessed red: mount the pre-fix module from 13c590c5 under the SAME corrected
+integration fixture. Exit 1, exactly two failed checks: fabricated listenInode
+was accepted; real V1 process + genuine V1 attestation was relabelled as V2.
+This demonstrates that file-identity mismatch cannot mask the generation bug.
+These are targeted exact-file checks, not exact-head Actions or CLI/Hub creation
+acceptance. Production wiring remains #1302, still incomplete.

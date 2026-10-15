@@ -71,20 +71,11 @@ if (v2Observed?.ok) {
   }
   // Diagnostic: what does /proc/<pid>/exe resolve to? (helps read a failure)
   console.log(`observed exe=${v2Observed.processEvidence.diagnostics.executable} resolved=${readlinkSync(`/proc/${v2Observed.processEvidence.pid}/exe`)}`);
-  // #1324 review P1-1 (real): asking for v2 while the callback returns the REAL
-  // V1 attestation must not relabel a real V1 binary as v2.
-  const v1AttestationForNeg = attest("v1");
-  const relabelled = bindHostSharedServeGeneration(
-    v2Observed.processEvidence, "v2",
-    { attest: () => v1AttestationForNeg as any, revalidate },
-  );
-  check("real V1 attestation asked as v2 is refused", !relabelled.ok, relabelled.ok ? "bound!" : relabelled.reason);
-
   // #1324 review P1-2 (real): an invented listener inode must not pass.
   const fabricated = bindHostSharedServeGeneration(
     { ...v2Observed.processEvidence, listenInode: "0" }, "v2", { attest, revalidate },
   );
-  check("a fabricated listenInode is refused", !fabricated.ok, fabricated.ok ? "bound!" : fabricated.reason);
+  check("a fabricated listenInode is refused", !fabricated.ok && fabricated.reason === "observation_drift", fabricated.ok ? "bound!" : fabricated.reason);
 
   // Asking for v1 while a v2 binary holds the socket must NOT pass.
   const asV1 = bindHostSharedServeGeneration(v2Observed.processEvidence, "v1", { attest, revalidate });
@@ -124,6 +115,15 @@ try {
   // V1 warms up slower than V2 in this image; give it real time before calling it absent.
   const v1Observed = await waitForListener(v1Port, 30_000);
   if (v1Observed?.ok) {
+    // Use the SAME real V1 process and its genuine V1 attestation: before the
+    // generation check, their matching file identities allowed relabelling as V2.
+    // A V2 process paired with a V1 attestation would already fail on file identity.
+    const relabelled = bindHostSharedServeGeneration(
+      v1Observed.processEvidence, "v2", { attest: () => v1Attestation, revalidate },
+    );
+    check("real V1 process and V1 attestation cannot be relabelled as v2",
+      !relabelled.ok && relabelled.reason === "generation_contract_mismatch",
+      relabelled.ok ? "bound!" : relabelled.reason);
     const bound = bindHostSharedServeGeneration(v1Observed.processEvidence, "v2", { attest, revalidate });
     check("a real V1 serve asked as v2 is refused", !bound.ok, bound.ok ? "bound!" : bound.reason);
   } else {
