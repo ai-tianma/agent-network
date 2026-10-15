@@ -41,6 +41,7 @@ import {
 } from "../opencode-v2-configured-model.js";
 import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
 import { readHostSharedOpenCodeServer, withHostOpenCodeV2ClientPath } from "./opencode-shared-server-registry.js";
+import { selectHostSharedOpenCodeForCreate } from "./opencode-host-shared-create.js";
 import { inspectLaunchHealth, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
 import {
   execVersionReal,
@@ -1285,9 +1286,15 @@ export async function handleCreateNodeDoorbell(
   // for the agent-node config shape. anet-node consults config.flags +
   // flat keys; flat keys win, so we write flat for safety.
   try {
-    const { clientBinDir: _clientBinDir, ...registeredSharedServer } = sharedOpenCodeServerForCreate ?? {};
-    const sharedOpenCodeServer = opencodeCopresence && req.node_spec.flags?.opencodeNewServer !== true
-      ? registeredSharedServer : {};
+    const sharedSelection = opencodeCopresence ? selectHostSharedOpenCodeForCreate({
+      candidate: sharedOpenCodeServerForCreate,
+      nodeDir: childDir, projectDir: childWorkDir, searchPath: childEnvForCli.PATH ?? "",
+      newServer: req.node_spec.flags?.opencodeNewServer === true,
+    }) : undefined;
+    if (sharedSelection) {
+      deps.log(`[create-node] OpenCode shared ${sharedSelection.decision} reason=${sharedSelection.reason}`
+        + (sharedSelection.pid === undefined ? "" : ` pid=${sharedSelection.pid} port=${sharedSelection.port}`));
+    }
     const childCfg: Record<string, any> = {
       node_id: `node_${request_id.replace(/^cr_/, "")}`,
       node_name: req.node_spec.name,
@@ -1307,7 +1314,7 @@ export async function handleCreateNodeDoorbell(
       ...(codexCopresenceFullAccess ? { codexCopresenceFullAccess } : {}),
       ...(opencodeGeneration ? { opencodeGeneration } : {}),
       ...(opencodeMode ? { opencodeMode } : {}),
-      ...sharedOpenCodeServer,
+      ...sharedSelection?.fields,
     };
     let initializedReplay = false;
     if (req.node_spec.flags?.daemonProvider) {

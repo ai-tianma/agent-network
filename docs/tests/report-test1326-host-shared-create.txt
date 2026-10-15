@@ -1,0 +1,45 @@
+#1326 / parent #1302 — daemon creation consumes host-shared admission
+
+Local source validation, 2026-10-16 Asia/Shanghai.
+Dependency base: existing anet-test1324:latest (real @opencode/cli@2.0.22 and
+opencode-ai@1.18.34). Exact current agent-node/src and the new fixture mounted
+read-only; every run uses --network none. This is targeted source validation,
+not a newly built exact-head image or exact-head Actions result.
+
+Unit layer: create-node-daemon.test.ts, opencode-server-reuse.test.ts,
+opencode-host-shared-generation.test.ts — 153 pass / 0 fail, 356 expects.
+
+Real handler layer: 51 named assertions, PASS. Every request enters the real
+handleCreateNodeDoorbell, reads the real registry, runs the default observer,
+generation binder, credential-free package probe/revalidation and admission,
+then reads the product-written child config at spawnChild. The injected spawn
+throws before execution; the handler must ACK failed, never started. The
+get_create_request / ack transport is a fixture, not a real Hub.
+
+Witnesses:
+- Real V2 host A stays alive; new B and C both inherit A's connection, with
+  distinct node IDs/tokens. clientBinDir is not copied to either config.
+- Explicit new-server and legacy V1 do not inherit shared connection fields.
+- Dead registered listener, real V1 listener, interpreter/script listener, and
+  foreign-uid listener do not copy URL or password-file fields into the child.
+- Foreign process uses setpriv and an explicit /proc/<pid>/status assertion
+  proves uid 65534 before testing refusal. Incomplete cross-uid observation is
+  permission_denied; it is never mistaken for successful same-uid ownership.
+- Audit records decision/reason and observed pid/port, omits password/path;
+  each version-probe launch root is discarded after selection.
+- Creating nodes leaves the host listener and registry intact. No stop/close
+  implementation was modified; full shared-runtime close coverage is separate.
+
+Preflight in isolated space/py-noapp:t with read-only source: no-bare-rm-rf
+clean (443 shell files); hardcoded-from-session clean; mutation-pins GREEN
+(754 anchors, unchecked 4 at baseline); L1 trigger coverage green (82 suites).
+Local typecheck was not available: the cached runtime image has no TypeScript
+compiler. The existing Actions agent-node-typecheck ratchet must supply that
+result; no local typecheck pass is claimed.
+
+Limits: no actual child launch, CLI/Hub/TUI turn, npm publication, production
+restart/adoption, or full recovery claim. This slice wires daemon creation,
+not CLI direct creation/explicit shared connections. Broken-registry handling
+for explicit new-server is the independent PR2778, not changed here. The new
+Dockerfile and qa.yml matrix registration provide an exact-source suite for
+Actions; its future result must be recorded separately.
