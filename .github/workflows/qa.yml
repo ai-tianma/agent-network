@@ -289,6 +289,7 @@ on:
       - 'tests/test906-hub-upgrade-preflight/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test1293-opencode-server-reuse/**'
+      - 'tests/test1313-host-shared-observer/**'
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test894-launch-window/**'
       - 'tests/test894-v1-runtime/**'
@@ -584,6 +585,7 @@ on:
       - 'tests/test906-hub-upgrade-preflight/**'
       - 'tests/test832-opencode-v2-registry/**'
       - 'tests/test1293-opencode-server-reuse/**'
+      - 'tests/test1313-host-shared-observer/**'
       - 'tests/test883-v2-portable-client/**'
       - 'tests/test894-launch-window/**'
       - 'tests/test894-v1-runtime/**'
@@ -2183,6 +2185,7 @@ jobs:
           - test906-daemon-catalog
           - test832-opencode-v2-registry
           - test1293-opencode-server-reuse
+          - test1313-host-shared-observer
           - test828-opencode-v2-policy
           - test833-user-avatar
           - test1191-windows-steer-contract
