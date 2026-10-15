@@ -41,7 +41,8 @@ processEvidence = {
   listenInode,           // LISTEN socket inode (same in both reads)
   pid, uid, startTicks,  // the pid we actually bound through, and its identity
   diagnostics: {
-    executable,          // /proc/<pid>/exe (fallback: argv[0])
+    executable,          // /proc/<pid>/exe, else the labelled argv[0] fallback, else null
+    executableSource,    // "proc_exe" | "argv0" | null — argv[0] is mutable, never an attestation
     argvTail,            // argv from its `serve` token onward
     argvContract,        // "v1" | "v2" | "none" | "ambiguous"  — DIAGNOSTIC ONLY
     argvContractNote,    // says why the shape proves nothing by itself

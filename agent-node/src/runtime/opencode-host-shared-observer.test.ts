@@ -113,31 +113,45 @@ describe("process evidence (injected /proc)", () => {
     }
   });
 
-  test("an unreadable exe falls back to argv[0], and an unreadable argv is still observable", () => {
-    const deps = fakeProc({});
-    deps.readLink = (path) => {
+  test("the executable is labelled: /proc/<pid>/exe, or a mutable argv[0] fallback", () => {
+    const read = observeHostSharedServe(URL_4096, fakeProc({}));
+    expect(read.ok && read.processEvidence.diagnostics.executable).toBe("/opt/opencode");
+    expect(read.ok && read.processEvidence.diagnostics.executableSource).toBe("proc_exe");
+
+    // exe unreadable → argv[0] is used but LABELLED, so binding cannot mistake it
+    // for the observed binary (通信牛, #2784 review).
+    const fallback = fakeProc({});
+    fallback.readLink = (path) => {
       if (path.endsWith("/exe")) throw Object.assign(new Error("nope"), { code: "ENOENT" });
       return "socket:[4242]";
     };
-    const r = observeHostSharedServe(URL_4096, deps);
+    const r = observeHostSharedServe(URL_4096, fallback);
     expect(r.ok && r.processEvidence.diagnostics.executable).toBe("/opt/opencode");
+    expect(r.ok && r.processEvidence.diagnostics.executableSource).toBe("argv0");
 
-    const noArgv = fakeProc({});
-    noArgv.readProcFile = (path) => {
+    // Neither readable → no executable at all, never a fabricated one.
+    const none = fakeProc({});
+    none.readLink = (path) => {
+      if (path.endsWith("/exe")) throw Object.assign(new Error("nope"), { code: "ENOENT" });
+      return "socket:[4242]";
+    };
+    none.readProcFile = (path) => {
       if (path === "/proc/net/tcp") {
         return [
           "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
           "  0: 0100007F:1000 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 4242 1 0 0 0 0",
         ].join("\n");
       }
-      throw Object.assign(new Error("denied"), { code: "ENOENT" });
+      throw Object.assign(new Error("gone"), { code: "ENOENT" });
     };
-    const r2 = observeHostSharedServe(URL_4096, noArgv);
-    expect(r2.ok).toBe(true);
-    if (!r2.ok) return;
-    expect(r2.processEvidence.diagnostics.argvContract).toBe("none");
-    expect(r2.processEvidence.pid).toBe(777);
+    const r2 = observeHostSharedServe(URL_4096, none);
+    expect(r2.ok && r2.processEvidence.diagnostics.executable).toBeNull();
+    expect(r2.ok && r2.processEvidence.diagnostics.executableSource).toBeNull();
+    // An unreadable cmdline is still an observation: the process identity stands.
+    expect(r2.ok && r2.processEvidence.diagnostics.argvContract).toBe("none");
+    expect(r2.ok && r2.processEvidence.pid).toBe(777);
   });
+
 
   test("non-Linux is explicitly unobservable", () => {
     expect(observeHostSharedServe(URL_4096, fakeProc({ platform: "darwin" })))

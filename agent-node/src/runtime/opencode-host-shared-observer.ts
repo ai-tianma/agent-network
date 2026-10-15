@@ -3,36 +3,30 @@
 //
 // Scope split agreed with 通信牛 (2026-10-16): this module answers only "what
 // process is really behind this loopback URL", read-only; generation BINDING and
-// the reuse decision belong to #1302 — a consumer that cannot prove a generation
-// must refuse reuse, and that call is not made here.
-//
-// Why it returns `processEvidence` and not an observation with a `generation`: an
-// exact argv match, the executable path, a file named `opencode` and the caller's
-// expectation are all *diagnostics* — none proves the process's OpenCode
-// generation. So no proven generation field exists here; the argv shape is
-// reported under `diagnostics`, together with a note saying what it does not prove.
+// the reuse decision belong to #1302. An exact argv match, the executable path, a
+// file named `opencode` and the caller's expectation are all *diagnostics* — none
+// proves a generation — so no proven generation field exists here, and the argv
+// shape is reported under `diagnostics` with a note saying what it does not prove.
 //
 // ONE chain, from ONE process, then re-verified:
 //   /proc/net/tcp LISTEN inode + its kernel uid for 127.0.0.1:<port>
 //     → /proc/<pid>/fd/* "socket:[inode]"  (candidate set bounded by that kernel
 //       socket uid, so the set is provably complete)
 //     → /proc/<pid> uid (must equal the socket uid) | /proc/<pid>/stat start ticks
-//     → /proc/<pid>/cmdline (diagnostic)
+//     → /proc/<pid>/cmdline (diagnostic, never an attestation)
 //   then inode/pid/uid/startTicks are read AGAIN and must be identical. Any drift,
 //   permission wall or multi-candidate answer is an explicit failure — a stale
-//   success is never returned, and this module never throws.
-//
-// Uniqueness is part of the claim: a denial anywhere in the candidate set means
-// "unique holder" cannot be proven, so it refuses even if an owner was found.
-// No daemon wiring, no second registry, no credential read, no `close`
-// lifecycle, no reuse/guard import: the types below are local to this slice.
+//   success is never returned, and this module never throws. A denial anywhere in
+//   the candidate set means "unique holder" is unproven, so it refuses even if an
+//   owner was found. No daemon wiring, no second registry, no credential read, no
+//   `close` lifecycle, no reuse/guard import: the types below are local.
 
 import { readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { opencodeBackendFor } from "./opencode-backend.js";
 import { readLiveProcess } from "./opencode-copresence/launcher-health.js";
 
-/** Why an observation could not be produced. Every value is a refusal. */
+/** Why an observation could not be produced — every value is a refusal. */
 export type HostSharedObserveReason =
   | "unsupported_platform"
   | "url_not_supported"
@@ -49,8 +43,11 @@ export type HostSharedObserveReason =
  * when it cannot (#1302) — never promote this field into a proven generation.
  */
 export interface HostSharedServeDiagnostics {
-  /** Executable behind the process, when readable: /proc/<pid>/exe. */
+  /** Executable behind the process when read from /proc/<pid>/exe, else null. */
   executable: string | null;
+  /** Where `executable` came from: `argv0` is caller-controlled and mutable, so it
+   *  must never be mistaken for the observed binary (still diagnostic). */
+  executableSource: "proc_exe" | "argv0" | null;
   /** argv from its `serve` token onward (empty when there is no `serve`). */
   argvTail: string[];
   /** Which serve-argv shape was seen. Diagnostic; never proves a generation. */
@@ -120,8 +117,7 @@ function defaultDeps(): Required<HostSharedObserverDeps> {
     readLink: (path) => readlinkSync(path),
     procUid: (pid) => statSync(`/proc/${pid}`).uid,
     liveProcess: (pid) => {
-      // Same /proc/<pid>/stat reader the launcher health check uses: undefined
-      // for a gone or zombie process.
+      // Same /proc/<pid>/stat reader the launcher health uses (undefined if gone).
       const proc = readLiveProcess(pid);
       return proc ? { pid: proc.pid, ticks: proc.ticks, state: proc.state } : undefined;
     },
@@ -133,8 +129,7 @@ function defaultDeps(): Required<HostSharedObserverDeps> {
 
 function argvTailOf(argv: readonly string[]): string[] {
   const serveIndex = argv.lastIndexOf("serve");
-  if (serveIndex < 0) return [];
-  return argv.slice(serveIndex);
+  return serveIndex < 0 ? [] : argv.slice(serveIndex);
 }
 
 function argvContractOf(
@@ -154,14 +149,13 @@ function argvContractOf(
     }
   }
   if (matches.length === 1) return matches[0];
-  // 0 matches: unknown shape. 2: the upstream contract no longer distinguishes
-  // them. Either way it is a diagnostic, never a verdict.
+  // 0 matches: unknown shape. 2: the contract no longer distinguishes them.
   return matches.length === 0 ? "none" : "ambiguous";
 }
 
 /** LISTEN sockets on 127.0.0.1:<port>: inodes AND the kernel uid. That uid needs no
- *  permission and bounds the candidate set, so a denial outside it cannot affect
- *  uniqueness (only its processes can hold the socket). */
+ *  permission and bounds the candidate set — only its processes can hold the
+ *  socket, so a denial outside it cannot affect uniqueness. */
 function listenSockets(
   readProcFile: (p: string) => string,
   port: number,
@@ -272,8 +266,7 @@ function locate(
   if (listen === "permission_denied") return { ok: false, reason: "permission_denied" };
   if (listen === "uid_mismatch") return { ok: false, reason: "ambiguous_listener" };
   if (listen.inodes.length === 0) return { ok: false, reason: "no_listener" };
-  // More than one LISTEN inode on the same loopback port: we cannot say which
-  // one the caller means, and guessing is exactly what must not happen.
+  // Two LISTEN inodes on one loopback port: guessing which is meant is not allowed.
   if (listen.inodes.length > 1) return { ok: false, reason: "ambiguous_listener" };
   const inode = listen.inodes[0];
   const owners = socketOwnerPids(deps, inode, listen.uid);
@@ -323,10 +316,17 @@ export function observeHostSharedServe(
       argvReadable = false;
     }
     let executable: string | null = null;
+    let executableSource: "proc_exe" | "argv0" | null = null;
     try {
       executable = deps.readLink(`/proc/${first.snapshot.pid}/exe`);
+      executableSource = "proc_exe";
     } catch {
-      executable = argvReadable && argv.length > 0 ? argv[0] : null;
+      // argv[0] is caller-controlled: keep it as a labelled fallback so later
+      // binding can never mistake it for the observed binary.
+      if (argvReadable && argv.length > 0) {
+        executable = argv[0];
+        executableSource = "argv0";
+      }
     }
 
     // Re-verify the SAME process before returning: inode, pid, uid and start
@@ -350,6 +350,7 @@ export function observeHostSharedServe(
         startTicks: Number(a.ticks),
         diagnostics: {
           executable,
+          executableSource,
           argvTail: argvTailOf(argv),
           argvContract: argvReadable ? argvContractOf(deps, argv, port) : "none",
           argvContractNote: CONTRACT_NOTE,
@@ -365,10 +366,9 @@ export function observeHostSharedServe(
 /** Literal `http://127.0.0.1:<port>` only — the sole shape this provider observes.
  *
  * Matching the RAW string is deliberate (#2784 review, 通信牛): `new URL()` would
- * normalize `http://127.1:4096`, integer/hex addresses and trailing
- * path/query/fragment into `127.0.0.1`, so a parsed-host check would accept
- * spellings the host registry never writes. The regex also refuses a leading-zero
- * port and anything beyond 65535, and it pins the scheme to lowercase http.
+ * normalize `127.1`, integer/hex addresses and path/query/fragment into
+ * `127.0.0.1`, accepting spellings the host registry never writes. It also refuses
+ * a leading-zero port and anything beyond 65535, and pins lowercase http.
  */
 const LOOPBACK_URL_RE = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/;
 
@@ -381,8 +381,8 @@ export function parseLoopbackUrl(url: unknown): { port: number } | undefined {
   return { port };
 }
 
-/** Real liveness re-check bound to the exact pid+startTicks pair (PID reuse cannot
- *  pass), exported so no consumer re-implements it. */
+/** Real liveness re-check bound to the exact pid+startTicks pair, so PID reuse
+ *  cannot pass. Exported so no consumer re-implements it. */
 export function makeHostSharedAliveProbe(
   overrides: HostSharedObserverDeps = {},
 ): (pid: number, startTicks: number) => boolean {
