@@ -1,0 +1,39 @@
+test1313 host-shared OpenCode observation provider source=wip date=2026-10-15T17:27:46+00:00
+L0 + real processes: reason coverage, and REAL listeners (argv classified as a diagnostic)
+bun test v1.3.14 (0d9b296a)
+
+src/runtime/opencode-host-shared-observer.test.ts:
+(pass) process evidence (injected /proc) > a live same-uid listener yields pid/uid/startTicks/inode from one chain [2.08ms]
+(pass) process evidence (injected /proc) > the provider NEVER claims a proven generation — argv is diagnostics only [0.36ms]
+(pass) process evidence (injected /proc) > argv shape is classified but a mismatch is still evidence, not a failure [0.83ms]
+(pass) process evidence (injected /proc) > the executable is labelled: /proc/<pid>/exe, or a mutable argv[0] fallback [0.89ms]
+(pass) process evidence (injected /proc) > non-Linux is explicitly unobservable [0.05ms]
+(pass) process evidence (injected /proc) > only the literal 127.0.0.1 form is observable — raw string, not a normalized URL [0.35ms]
+(pass) process evidence (injected /proc) > a denial inside the candidate set is a refusal even when an owner was found (#2784 review) [0.65ms]
+(pass) process evidence (injected /proc) > an inherited fd is found even when the holder uid differs from the socket uid (#2784 review) [0.43ms]
+(pass) process evidence (injected /proc) > two LISTEN sockets on the port are `ambiguous_listener` [0.21ms]
+(pass) process evidence (injected /proc) > a missing listener is `no_listener`, not a guess [0.16ms]
+(pass) process evidence (injected /proc) > an inode held by nobody is `socket_owner_not_found` [0.13ms]
+(pass) process evidence (injected /proc) > permission errors are reported, not swallowed into a wrong answer [0.25ms]
+(pass) process evidence (injected /proc) > start ticks changing between the two reads is `identity_mismatch` (PID reuse) [0.19ms]
+(pass) process evidence (injected /proc) > a process that died between the reads is `identity_mismatch`, not a stale success [0.28ms]
+(pass) process evidence (injected /proc) > an unobservable uid is never fabricated [0.13ms]
+(pass) process evidence (injected /proc) > a provider failure is a reason, never a throw [0.11ms]
+(pass) process evidence (injected /proc) > probeAlive re-checks ticks, so PID reuse cannot pass [0.27ms]
+(pass) observer against real listening processes > a real listener is observed: pid, uid, startTicks and inode all come from /proc [54.12ms]
+(pass) observer against real listening processes > a V1-shaped invocation is classified v1 — as a diagnostic, not a generation [50.01ms]
+(pass) observer against real listening processes > an unknown flag is still observable, with contract `none` [53.26ms]
+(pass) observer against real listening processes > a killed listener is `no_listener` — no stale success [193.55ms]
+
+ 21 pass
+ 0 fail
+ 100 expect() calls
+Ran 21 tests across 1 file. [414.00ms]
+guard: the observer stays inside read-only /proc observation; argv is diagnostics only
+cross-uid: the uid reported is the HOLDER process uid, not the socket creator uid
+   setup: socket uid=0, holder process uid=65534 (they differ: the point of the control)
+cross-uid ok: refused with permission_denied (uniqueness unprovable in a mixed-uid table)
+cross-uid ok: refused with permission_denied (uniqueness unprovable in a mixed-uid table)
+negative: a non-Linux platform is explicitly unobservable (no /proc assumption)
+non-Linux -> unsupported_platform
+PASS: host-shared OpenCode observation provider suite

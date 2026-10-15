@@ -17,7 +17,7 @@ Image inputs (pinned, the digests the neighbouring OpenCode suites use)
   node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392
 
 Local: `bun test src/runtime/opencode-host-shared-observer.test.ts` →
-**23 pass / 0 fail, ~0.7 s** (four of them drive real
+**21 pass / 0 fail, 100 expect() calls, ~0.4 s** (four of them drive real
 listening processes); `tsc --noEmit` clean for both new files.
 
 ## Scope: PROCESS EVIDENCE, and nothing more
@@ -59,25 +59,32 @@ additionally asserts `Object.keys(evidence)` has no `generation`.
 ## The chain (one process, then re-verified)
 
 ```
-/proc/net/tcp LISTEN inode + its KERNEL uid for 127.0.0.1:<port>
-  -> /proc/<pid>/fd "socket:[inode]"   (candidate set bounded by that socket uid)
-  -> /proc/<pid> uid (must equal the socket uid)
-  -> /proc/<pid>/stat start ticks + state | /proc/<pid>/cmdline
+/proc/net/tcp LISTEN inode for 127.0.0.1:<port>
+  -> /proc/<pid>/fd "socket:[inode]"   (EVERY process is a candidate)
+  -> /proc/<pid> uid (the HOLDER's uid, read from its own process) | start ticks
+  -> /proc/<pid>/cmdline (diagnostic, never an attestation)
 then inode/pid/uid/startTicks are read AGAIN and must be identical
 ```
 
-**Why the kernel socket uid bounds the candidate set** (#2784 review, 通信牛):
-finding a visible owner while fd reads were DENIED does not prove a *unique*
-holder — a denied process might hold the same socket. Refusing on every denial
-would make the provider useless on any busy host, so the set is narrowed to the
-uid the kernel itself reports for that socket (`/proc/net/tcp` uid column, which
-needs no permission). Only processes of that uid can hold it, so a denial
-*outside* the set cannot affect uniqueness, while **any denial inside the set is
-`permission_denied` even when an owner was already found**. The process uid must
-also agree with the socket uid, or nothing is reported.
+**Why the candidate set is NOT filtered by the socket's uid** (#2784 review,
+通信牛, with a reproduction): a process can create the listening socket as root
+(so `/proc/net/tcp` reports uid 0) and then drop privileges to 65534, and a child
+can inherit the fd or receive it over `SCM_RIGHTS`. The socket's uid is therefore
+the *creator's*, not the holder's, and filtering by it silently misses the real
+holder — it would answer `socket_owner_not_found` while a holder exists. So every
+process is scanned, the reported `uid` is the holder's own, and the socket uid is
+kept only as the diagnostic `diagnostics.socketUid`.
+
+**Uniqueness is still required**: if ANY process's fd table could not be read,
+"unique holder" is unproven and the answer is `permission_denied` — in a mixed-uid
+process table an unprivileged reader (or root without `CAP_SYS_PTRACE`) therefore
+gets a refusal rather than a guess, which the suite asserts as a first-class
+outcome. The suite reproduces the counterexample for real: a bun process that
+serves, then `setuid(65534)`, yields **socket uid 0 / holder uid 65534**, and the
+provider refuses instead of claiming there is no holder.
 
 `makeHostSharedAliveProbe()` is exported for consumers that need a real
-pid+startTicks re-check, so PID reuse cannot pass and nobody re-implements it.
+pid+startTicks re-check, so PID reuse cannot pass.
 
 ## 负控（不删、不放宽）
 
@@ -89,10 +96,10 @@ pid+startTicks re-check, so PID reuse cannot pass and nobody re-implements it.
 | 同端口多个 LISTEN inode / 多个持有进程 | `ambiguous_listener` |
 | inode 无人持有 | `socket_owner_not_found` |
 | `/proc` 读写 EACCES/EPERM（含跨 uid 无 CAP_SYS_PTRACE） | `permission_denied` |
-| **候选集内出现权限拒绝（哪怕已找到 owner）** | `permission_denied` —— 唯一持有者不可证 ⇒ 拒绝（#2784 review） |
+| **任一进程的 fd 不可读（含跨 uid、无 CAP_SYS_PTRACE）** | `permission_denied` —— 唯一持有者不可证 ⇒ 拒绝（哪怕已找到 owner） |
 | 候选集内某 pid 的 /proc/<pid> 不可读（非 ENOENT） | `permission_denied` |
-| 持有 inode 的进程 uid ≠ 内核 socket uid | 它不是候选；无 owner ⇒ `socket_owner_not_found` |
-| 同端口两个 LISTEN socket 分属不同 uid | `ambiguous_listener` |
+| 持有 inode 的进程 uid ≠ 内核 socket uid（继承/SCM_RIGHTS） | **正常找到并如实报该 uid**；socket uid 只进 `diagnostics.socketUid` |
+| 同端口两个 LISTEN socket | `ambiguous_listener` |
 | 两次读取之间 startTicks / pid / uid / inode 变化、进程消失 | `identity_mismatch` |
 | argv 读不到 / exe 读不到 | **仍然成功**（argv 只是诊断）：`argvContract: "none"`，exe 回退 argv[0] |
 | argv 形状未知或两条都匹配 | `argvContract: "none"` / `"ambiguous"`，**不是失败、更不是代际** |
@@ -101,14 +108,14 @@ pid+startTicks re-check, so PID reuse cannot pass and nobody re-implements it.
 ## 本次运行（real processes，隔离 Docker）
 
 ```
-23 pass / 0 fail — 其中真实监听进程 4 条 + 注入 /proc 的 15 条（含候选集权限拒绝的 2 条）：
+21 pass / 0 fail — 真实监听进程 4 条 + 注入 /proc 的 17 条（含继承/SCM_RIGHTS 反例与权限拒绝两类）：
   真实 listener -> pid/uid/startTicks/inode 均来自 /proc，probeAlive 真复核为 true
   --pure 形状 -> argvContract=v1（仅诊断；evidence 上无 generation 字段）
   未知 flag  -> 仍可观测，argvContract=none
   kill 后     -> no_listener/permission_denied（无陈旧成功）
   候选集内有未读进程 -> permission_denied（不声称唯一持有者）
-cross-uid ok: uid=65534 …（setpriv --reuid=65534 起的监听，provider 如实报真实 uid）
-cross-uid ok: 无 CAP_SYS_PTRACE 的 root 读者 -> permission_denied（绝不猜 uid）
+setup: socket uid=0, holder process uid=65534（进程 setuid(65534)，socket 仍是 root 创建）
+cross-uid ok: refused with permission_denied —— 唯一性不可证时拒绝，绝不报 socket_owner_not_found（那会假装没有持有者）
 non-Linux -> unsupported_platform
 PASS: host-shared OpenCode observation provider suite
 ```

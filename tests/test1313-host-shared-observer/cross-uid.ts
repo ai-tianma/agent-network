@@ -1,38 +1,37 @@
-// #1313 cross-uid control (Docker suite, runs as root).
+// #1313 assertion helper: an observation must never be produced when only part of
+// the process table could be inspected.
 //
-// The provider must report the listener's REAL uid and never assume "mine": a
-// shared server owned by another uid is exactly what a reuse decision must
-// refuse, and it can only refuse it if the evidence carries the foreign uid.
-// This is a real process on a real port started with `setpriv --reuid`, not a mock.
-//
-// Scope note: this file asserts PROCESS EVIDENCE only. Binding a generation and
-// refusing reuse is #1302's job, so no reuse/guard module is imported here.
+// 通信牛's #2784 review: a child of another uid can hold a listing fd (inherit or
+// SCM_RIGHTS), so the socket's uid says nothing about the holder. That is why the
+// provider scans ALL processes and refuses when any of them is unreadable — the
+// right answer in a mixed-uid table is `permission_denied`, never a single-owner
+// claim and never a fabricated uid.
 import { observeHostSharedServe } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-host-shared-observer.ts";
 
-const [url, foreignUidRaw, ownUidRaw] = process.argv.slice(2);
-const foreignUid = Number(foreignUidRaw);
-const ownUid = Number(ownUidRaw);
-
+const [url, expectedHolderUidRaw, forbiddenReason] = process.argv.slice(2);
+const expectedHolderUid = Number(expectedHolderUidRaw);
 const observed = observeHostSharedServe(url);
+
 if (!observed.ok) {
-  console.error(`FAIL: observeHostSharedServe(${url}) -> ${observed.reason} (expected a foreign-uid observation)`);
-  process.exit(1);
+  if (observed.reason !== "permission_denied") {
+    console.error(`FAIL: expected permission_denied (unproven uniqueness) or a real observation, got ${observed.reason}`);
+    process.exit(1);
+  }
+  if (forbiddenReason && observed.reason === forbiddenReason) {
+    console.error(`FAIL: got ${observed.reason} — that would claim the socket has no holder`);
+    process.exit(1);
+  }
+  console.log("cross-uid ok: refused with permission_denied (uniqueness unprovable in a mixed-uid table)");
+  process.exit(0);
 }
+
 const ev = observed.processEvidence;
-if (ev.uid !== foreignUid) {
-  console.error(`FAIL: evidence uid ${ev.uid}, expected the real foreign uid ${foreignUid}`);
-  process.exit(1);
-}
-if (ev.uid === ownUid) {
-  console.error(`FAIL: provider reported our own uid ${ownUid} for a process owned by ${foreignUid}`);
+if (ev.uid !== expectedHolderUid) {
+  console.error(`FAIL: evidence uid ${ev.uid}, expected the holder's real uid ${expectedHolderUid}`);
   process.exit(1);
 }
 if ("generation" in ev) {
-  console.error("FAIL: evidence carries a top-level generation claim — argv is diagnostics only");
+  console.error("FAIL: evidence carries a generation claim — argv is diagnostics only");
   process.exit(1);
 }
-if (typeof ev.diagnostics?.argvContractNote !== "string") {
-  console.error("FAIL: diagnostics must explain why the argv shape proves nothing");
-  process.exit(1);
-}
-console.log(`cross-uid ok: uid=${ev.uid} pid=${ev.pid} inode=${ev.listenInode} argvContract=${ev.diagnostics.argvContract} (diagnostic only)`);
+console.log(`cross-uid ok: observed uid=${ev.uid} pid=${ev.pid} socketUid=${ev.diagnostics.socketUid} (socket uid is a diagnostic, never a filter)`);

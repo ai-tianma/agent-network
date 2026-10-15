@@ -48,6 +48,9 @@ export interface HostSharedServeDiagnostics {
   /** Where `executable` came from: `argv0` is caller-controlled and mutable, so it
    *  must never be mistaken for the observed binary (still diagnostic). */
   executableSource: "proc_exe" | "argv0" | null;
+  /** The LISTEN socket's creator uid (from /proc/net/tcp). Diagnostic only: an fd
+   *  can be inherited or passed (SCM_RIGHTS), so this is NOT the holder's uid. */
+  socketUid: number | null;
   /** argv from its `serve` token onward (empty when there is no `serve`). */
   argvTail: string[];
   /** Which serve-argv shape was seen. Diagnostic; never proves a generation. */
@@ -153,51 +156,62 @@ function argvContractOf(
   return matches.length === 0 ? "none" : "ambiguous";
 }
 
-/** LISTEN sockets on 127.0.0.1:<port>: inodes AND the kernel uid. That uid needs no
- *  permission and bounds the candidate set — only its processes can hold the
- *  socket, so a denial outside it cannot affect uniqueness. */
-function listenSockets(
+/** LISTEN socket inodes on 127.0.0.1:<port> (plus the kernel's uid for that socket,
+ *  reported as a diagnostic only — see `socketUid` below). */
+function listenInodes(
   readProcFile: (p: string) => string,
   port: number,
-): { inodes: string[]; uid: number } | "permission_denied" | "uid_mismatch" {
+): string[] | "permission_denied" {
   let table: string;
   try {
     table = readProcFile("/proc/net/tcp");
   } catch (error) {
-    return errCode(error) === "EACCES" || errCode(error) === "EPERM" ? "permission_denied" : "uid_mismatch";
+    return errCode(error) === "EACCES" || errCode(error) === "EPERM" ? "permission_denied" : [];
   }
   const wanted = `${LOOPBACK_HEX}:${port.toString(16).toUpperCase().padStart(4, "0")}`;
   const inodes = new Set<string>();
-  let uid: number | undefined;
   for (const line of table.split("\n").slice(1)) {
     const fields = line.trim().split(/\s+/);
     if (fields.length < 10) continue;
     if (fields[1] !== wanted || fields[3] !== TCP_LISTEN) continue;
-    if (!/^\d+$/.test(fields[9]) || !/^\d+$/.test(fields[7])) continue;
-    const lineUid = Number(fields[7]);
-    // Two LISTEN sockets on one loopback port owned by different uids: we cannot
-    // say which one is meant, so we refuse instead of picking one.
-    if (uid === undefined) uid = lineUid;
-    else if (uid !== lineUid) return "uid_mismatch";
-    inodes.add(fields[9]);
+    if (/^\d+$/.test(fields[9])) inodes.add(fields[9]);
   }
-  // uid_mismatch means a real uid conflict on the port, not "no rows at all".
-  if (uid === undefined) return { inodes: [], uid: -1 };
-  return { inodes: [...inodes], uid };
+  return [...inodes];
+}
+
+/** The LISTEN socket's kernel uid, or null when it cannot be read. Diagnostic:
+ *  it is the *creator's* uid, which is NOT the holder's — an fd can be inherited
+ *  or passed (SCM_RIGHTS), so this must never filter the candidate set. */
+function socketUidFor(readProcFile: (p: string) => string, port: number): number | null {
+  let table: string;
+  try {
+    table = readProcFile("/proc/net/tcp");
+  } catch {
+    return null;
+  }
+  const wanted = `${LOOPBACK_HEX}:${port.toString(16).toUpperCase().padStart(4, "0")}`;
+  for (const line of table.split("\n").slice(1)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length < 10) continue;
+    if (fields[1] !== wanted || fields[3] !== TCP_LISTEN) continue;
+    if (/^\d+$/.test(fields[7])) return Number(fields[7]);
+  }
+  return null;
 }
 
 /**
- * The single pid whose fd table holds `socket:[inode]`.
+ * Every pid whose fd table holds `socket:[inode]`.
  *
- * #2784 review (通信牛): a visible owner plus DENIED fd reads does not prove a
- * unique holder — a denied process might hold the same socket. So any denial
- * inside the candidate set refuses, and the set is bounded by the kernel socket
- * uid so completeness needs no assumption about the answer.
+ * NO uid filter (#2784 review, 通信牛): a child of another uid can inherit a
+ * listening fd (or receive it via SCM_RIGHTS), so the socket's uid says nothing
+ * about who holds it. Filtering by it silently misses the real holder.
+ *
+ * Uniqueness is still required, so ANY unreadable candidate is a refusal: if part
+ * of the process table could not be inspected, "unique holder" is unproven.
  */
 function socketOwnerPids(
   deps: Required<HostSharedObserverDeps>,
   inode: string,
-  socketUid: number,
 ): number[] | "permission_denied" {
   const target = `socket:[${inode}]`;
   let pids: string[];
@@ -212,24 +226,12 @@ function socketOwnerPids(
     if (!/^\d+$/.test(entry)) continue;
     const pid = Number(entry);
     if (pid <= 1) continue;
-    const uid = deps.procUid(pid);
-    if (uid === undefined) {
-      // Gone process => skip; a real denial must not be silently treated as gone.
-      try {
-        deps.readDir(`/proc/${pid}`);
-      } catch (error) {
-        const code = errCode(error);
-        if (code !== "ENOENT") denied = true;
-      }
-      continue;
-    }
-    if (uid !== socketUid) continue;
     let fds: string[];
     try {
       fds = deps.readDir(`/proc/${pid}/fd`);
     } catch (error) {
-      const code = errCode(error);
-      if (code === "EACCES" || code === "EPERM") denied = true;
+      // Gone process => skip; a real denial must not be silently treated as gone.
+      if (errCode(error) !== "ENOENT") denied = true;
       continue;
     }
     for (const fd of fds) {
@@ -239,13 +241,10 @@ function socketOwnerPids(
           break;
         }
       } catch (error) {
-        const code = errCode(error);
-        if (code === "EACCES" || code === "EPERM") denied = true;
+        if (errCode(error) !== "ENOENT") denied = true;
       }
     }
   }
-  // A denial anywhere in the candidate set means "unique holder" cannot be
-  // proven, so it is a refusal even when owners were found.
   if (denied) return "permission_denied";
   return owners;
 }
@@ -262,23 +261,21 @@ function locate(
   deps: Required<HostSharedObserverDeps>,
   port: number,
 ): { ok: true; snapshot: Snapshot } | { ok: false; reason: HostSharedObserveReason } {
-  const listen = listenSockets(deps.readProcFile, port);
-  if (listen === "permission_denied") return { ok: false, reason: "permission_denied" };
-  if (listen === "uid_mismatch") return { ok: false, reason: "ambiguous_listener" };
-  if (listen.inodes.length === 0) return { ok: false, reason: "no_listener" };
+  const inodes = listenInodes(deps.readProcFile, port);
+  if (inodes === "permission_denied") return { ok: false, reason: "permission_denied" };
+  if (inodes.length === 0) return { ok: false, reason: "no_listener" };
   // Two LISTEN inodes on one loopback port: guessing which is meant is not allowed.
-  if (listen.inodes.length > 1) return { ok: false, reason: "ambiguous_listener" };
-  const inode = listen.inodes[0];
-  const owners = socketOwnerPids(deps, inode, listen.uid);
+  if (inodes.length > 1) return { ok: false, reason: "ambiguous_listener" };
+  const inode = inodes[0];
+  const owners = socketOwnerPids(deps, inode);
   if (owners === "permission_denied") return { ok: false, reason: "permission_denied" };
   if (owners.length === 0) return { ok: false, reason: "socket_owner_not_found" };
   if (owners.length > 1) return { ok: false, reason: "ambiguous_listener" };
   const pid = owners[0];
+  // The holder's uid comes from its own process, never from the socket: an fd can
+  // be inherited or passed, so the socket's creator uid is not the holder's.
   const uid = deps.procUid(pid);
   if (uid === undefined) return { ok: false, reason: "identity_mismatch" };
-  // The kernel's socket uid and the process's uid must agree; a disagreement
-  // means we are looking at different things and must not report either.
-  if (uid !== listen.uid) return { ok: false, reason: "identity_mismatch" };
   const proc = deps.liveProcess(pid);
   if (!proc) return { ok: false, reason: "identity_mismatch" };
   return { ok: true, snapshot: { inode, pid, uid, ticks: proc.ticks } };
@@ -351,6 +348,9 @@ export function observeHostSharedServe(
         diagnostics: {
           executable,
           executableSource,
+          /** The socket's creator uid from /proc/net/tcp — diagnostic only; it is
+           *  NOT necessarily the holder's uid (inherited / SCM_RIGHTS fds). */
+          socketUid: socketUidFor(deps.readProcFile, port),
           argvTail: argvTailOf(argv),
           argvContract: argvReadable ? argvContractOf(deps, argv, port) : "none",
           argvContractNote: CONTRACT_NOTE,

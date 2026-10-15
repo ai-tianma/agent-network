@@ -211,37 +211,22 @@ describe("process evidence (injected /proc)", () => {
     expect(ok.ok).toBe(true);
   });
 
-  test("a foreign-uid process is not a candidate at all (kernel socket uid bounds the set)", () => {
-    // The socket says uid 1000. pid 888 (uid 2000) holds that inode number, but
-    // it is not a candidate, so no owner must be reported for it.
+  test("an inherited fd is found even when the holder uid differs from the socket uid (#2784 review)", () => {
+    // 通信牛's counterexample: a uid-65534 child inherits a listening fd whose
+    // socket uid is 0. Filtering candidates by the socket uid would MISS the real
+    // holder and wrongly report socket_owner_not_found.
     const deps = fakeProc({});
-    deps.readDir = (path) => {
-      if (path === "/proc") return ["1", "777", "888", "self"];
-      return ["0", "1", "7"];
-    };
-    deps.procUid = (pid) => (pid === 888 ? 2000 : 1000);
-    deps.readLink = (path) => (path.includes("/proc/888/") ? "socket:[4242]" : "/dev/null");
-    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "socket_owner_not_found" });
+    deps.procUid = () => 65534; // the holder is nobody...
+    deps.readDir = (path) => (path === "/proc" ? ["1", "777", "self"] : ["0", "1", "7"]);
+    const r = observeHostSharedServe(URL_4096, deps);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence.uid).toBe(65534);                 // real holder, not the socket's 1000
+    expect(r.processEvidence.pid).toBe(777);
+    expect(r.processEvidence.diagnostics.socketUid).toBe(1000); // reported, never used to filter
   });
 
-  test("kernel socket uid disagreeing with the process uid is `identity_mismatch`", () => {
-    const deps = fakeProc({});
-    deps.procUid = () => 2000; // /proc/net/tcp says 1000 → no candidate, and no owner is invented
-    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "socket_owner_not_found" });
-  });
-
-  test("an unreadable process directory is a refusal, not a silent skip", () => {
-    const deps = fakeProc({});
-    deps.procUid = () => undefined;
-    deps.readDir = (path) => {
-      if (path === "/proc") return ["1", "777", "self"];
-      if (path === "/proc/777") throw Object.assign(new Error("denied"), { code: "EACCES" });
-      return ["0", "1", "7"];
-    };
-    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "permission_denied" });
-  });
-
-  test("two LISTEN sockets on the port with different uids are `ambiguous_listener`", () => {
+  test("two LISTEN sockets on the port are `ambiguous_listener`", () => {
     const deps = fakeProc({});
     deps.readProcFile = (path) => {
       if (path === "/proc/net/tcp") {
@@ -289,15 +274,10 @@ describe("process evidence (injected /proc)", () => {
   });
 
   test("an unobservable uid is never fabricated", () => {
-    // /proc/<pid> gone entirely: no candidate, no invented uid.
-    const gone = fakeProc({});
-    gone.procUid = () => undefined;
-    gone.readDir = (path) => {
-      if (path === "/proc") return ["1", "777", "self"];
-      if (path === "/proc/777") throw Object.assign(new Error("gone"), { code: "ENOENT" });
-      return ["0", "1", "7"];
-    };
-    expect(observeHostSharedServe(URL_4096, gone)).toEqual({ ok: false, reason: "socket_owner_not_found" });
+    // The holder is found, but its uid cannot be read: refuse rather than invent one.
+    const deps = fakeProc({});
+    deps.procUid = () => undefined;
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "identity_mismatch" });
   });
 
   test("a provider failure is a reason, never a throw", () => {
