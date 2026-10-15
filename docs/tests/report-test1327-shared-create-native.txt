@@ -1,6 +1,6 @@
 #1327 / parent #1302 — full native shared daemon creation acceptance
 
-Status: NOT YET RUN. This is the gate definition, not a passing test report.
+Status: FIRST RUN FAILED; correction pending. No passing native claim.
 Local Docker preflight passed: Bun harness compilation with product imports
 externalized, shell syntax, no-bare-rm-rf (444 scripts), hardcoded-from-session,
 mutation pins (754 anchors, unchecked 4 at baseline), L1 trigger coverage and
@@ -30,3 +30,13 @@ head (or main push SHA) and compared with the Docker build/run provenance.
 Logs redact test tokens and the shared password. This does not verify a
 published installer, production adoption, real vendor entitlement, human typing
 readiness or a complete disaster-recovery procedure.
+
+First Actions sample: 9f8377af, run 38800139650 / job 116646723674.
+The locked image built successfully. Real Hub/network/daemon registration and
+authenticated host A readiness/observation passed. B creation was rejected by
+the existing workdir policy: workdir_is_system_dir, because this new fixture
+put child projects below /run. No child startup/session/task/close ran.
+Correction: projects now live in /tmp/test1327-projects; private runtime state
+and tmux still live in /run/test1327. The product workdir rule is untouched.
+The redacted real ACK is also saved before its assertion for future diagnosis.
+The subsequent exact-head Actions result must be recorded separately.

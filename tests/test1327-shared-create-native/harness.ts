@@ -9,7 +9,9 @@ import { handleCreateNodeDoorbell } from "/opt/node_modules/@sleep2agi/agent-nod
 import { observeHostSharedServe } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-host-shared-observer.ts";
 
 const root = "/run/test1327", artifact = process.env.ARTIFACT_DIR ?? "/artifacts";
-const home = join(root, "home"), daemonWork = join(root, "daemon"), projects = join(root, "projects");
+// Child workdirs must obey the real daemon system-directory policy; /run is
+// reserved for private runtime state, not user projects.
+const home = join(root, "home"), daemonWork = join(root, "daemon"), projects = "/tmp/test1327-projects";
 const launches = join(root, "launches"), socket = join(root, "tmux.sock");
 for (const dir of [root, artifact, home, daemonWork, projects, launches, join(root, "host-project"), join(root, "host-data"),
   join(home, ".anet"), join(home, ".config/opencode")]) mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -109,6 +111,7 @@ async function create(alias: string, newServer = false) {
       return result;
     },
   });
+  captured.push(redact(`${alias}: create ACK ${JSON.stringify(ack)}`));
   check(`${alias}: launch health yields real started ACK`, ack?.args.status === "started"
     && ack.args.launch_verified === true && ack.result.ok === true);
   const config = json(join(nodeDir(alias), "config.json"));
