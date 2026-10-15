@@ -123,7 +123,7 @@ describe("process evidence (injected /proc)", () => {
     const fallback = fakeProc({});
     fallback.readLink = (path) => {
       if (path.endsWith("/exe")) throw Object.assign(new Error("nope"), { code: "ENOENT" });
-      return "socket:[4242]";
+      return path.includes("/proc/777/fd/") ? "socket:[4242]" : "/dev/null";
     };
     const r = observeHostSharedServe(URL_4096, fallback);
     expect(r.ok && r.processEvidence.diagnostics.executable).toBe("/opt/opencode");
@@ -133,7 +133,7 @@ describe("process evidence (injected /proc)", () => {
     const none = fakeProc({});
     none.readLink = (path) => {
       if (path.endsWith("/exe")) throw Object.assign(new Error("nope"), { code: "ENOENT" });
-      return "socket:[4242]";
+      return path.includes("/proc/777/fd/") ? "socket:[4242]" : "/dev/null";
     };
     none.readProcFile = (path) => {
       if (path === "/proc/net/tcp") {
@@ -284,6 +284,36 @@ describe("process evidence (injected /proc)", () => {
     const deps = fakeProc({});
     deps.readProcFile = () => { throw new Error("boom"); };
     expect(observeHostSharedServe(URL_4096, deps).ok).toBe(false);
+  });
+
+  test("PID 1 is a candidate: skipping it would report a wrong unique holder (#2784 review)", () => {
+    // PID 1 alone holds the socket: it must be FOUND (not skipped as a non-process).
+    const sole = fakeProc({ pid: 1 });
+    sole.readDir = (path) => (path === "/proc" ? ["1", "self"] : ["0", "1", "7"]);
+    sole.liveProcess = () => ({ pid: 1, ticks: "900", state: "S" });
+    sole.readLink = (path) => (path.endsWith("/exe") ? "/opt/opencode" : (path.includes("/proc/1/fd/") ? "socket:[4242]" : "/dev/null"));
+    const r = observeHostSharedServe(URL_4096, sole);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence.pid).toBe(1);
+
+    // PID 1 AND another process hold it => two holders => ambiguous, never a
+    // single-holder claim.
+    const both = fakeProc({ pid: 777 });
+    both.readDir = (path) => (path === "/proc" ? ["1", "777", "self"] : ["0", "1", "7"]);
+    both.readLink = (path) => (path.endsWith("/exe") ? "/opt/opencode" : "socket:[4242]");
+    both.procUid = () => 1000;
+    both.liveProcess = (pid) => ({ pid, ticks: "900", state: "S" });
+    expect(observeHostSharedServe(URL_4096, both)).toEqual({ ok: false, reason: "ambiguous_listener" });
+  });
+
+  test("probeAlive can bind PID 1 by ticks (pid 0 still refused)", () => {
+    const deps = fakeProc({ pid: 1 });
+    deps.liveProcess = (pid) => (pid === 1 ? { pid: 1, ticks: "900", state: "S" } : undefined);
+    const probe = makeHostSharedAliveProbe(deps);
+    expect(probe(1, 900)).toBe(true);
+    expect(probe(1, 901)).toBe(false);
+    expect(probe(0, 900)).toBe(false);
   });
 
   test("probeAlive re-checks ticks, so PID reuse cannot pass", () => {

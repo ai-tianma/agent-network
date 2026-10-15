@@ -75,6 +75,11 @@ holder — it would answer `socket_owner_not_found` while a holder exists. So ev
 process is scanned, the reported `uid` is the holder's own, and the socket uid is
 kept only as the diagnostic `diagnostics.socketUid`.
 
+PID 1 is scanned like any other process (通信牛, #2784 review): in a container PID 1
+can hold a listening fd, and the earlier `pid <= 1` skip would have reported a
+wrong "unique holder". Only pid 0 (not a real process) is out of scope, and
+`makeHostSharedAliveProbe` can bind PID 1 by ticks too.
+
 **Uniqueness is still required**: if ANY process's fd table could not be read,
 "unique holder" is unproven and the answer is `permission_denied` — in a mixed-uid
 process table an unprivileged reader (or root without `CAP_SYS_PTRACE`) therefore
@@ -97,6 +102,7 @@ pid+startTicks re-check, so PID reuse cannot pass.
 | inode 无人持有 | `socket_owner_not_found` |
 | `/proc` 读写 EACCES/EPERM（含跨 uid 无 CAP_SYS_PTRACE） | `permission_denied` |
 | **任一进程的 fd 不可读（含跨 uid、无 CAP_SYS_PTRACE）** | `permission_denied` —— 唯一持有者不可证 ⇒ 拒绝（哪怕已找到 owner） |
+| **PID 1 持有 fd** | 与其它进程一视同仁：唯一时如实报 pid 1；PID 1 与别人同时持有 ⇒ `ambiguous_listener` |
 | 候选集内某 pid 的 /proc/<pid> 不可读（非 ENOENT） | `permission_denied` |
 | 持有 inode 的进程 uid ≠ 内核 socket uid（继承/SCM_RIGHTS） | **正常找到并如实报该 uid**；socket uid 只进 `diagnostics.socketUid` |
 | 同端口两个 LISTEN socket | `ambiguous_listener` |

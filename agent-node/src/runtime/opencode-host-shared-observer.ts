@@ -9,24 +9,22 @@
 // shape is reported under `diagnostics` with a note saying what it does not prove.
 //
 // ONE chain, from ONE process, then re-verified:
-//   /proc/net/tcp LISTEN inode + its kernel uid for 127.0.0.1:<port>
-//     → /proc/<pid>/fd/* "socket:[inode]"  (candidate set bounded by that kernel
-//       socket uid, so the set is provably complete)
-//     → /proc/<pid> uid (must equal the socket uid) | /proc/<pid>/stat start ticks
+//   /proc/net/tcp LISTEN inode for 127.0.0.1:<port>
+//     → /proc/<pid>/fd/* "socket:[inode]"   (EVERY process is a candidate)
+//     → /proc/<pid> uid (the HOLDER's own) | /proc/<pid>/stat start ticks
 //     → /proc/<pid>/cmdline (diagnostic, never an attestation)
 //   then inode/pid/uid/startTicks are read AGAIN and must be identical. Any drift,
-//   permission wall or multi-candidate answer is an explicit failure — a stale
-//   success is never returned, and this module never throws. A denial anywhere in
-//   the candidate set means "unique holder" is unproven, so it refuses even if an
-//   owner was found. No daemon wiring, no second registry, no credential read, no
-//   `close` lifecycle, no reuse/guard import: the types below are local.
+//   permission wall or multi-candidate answer is an explicit failure (a stale
+//   success is never returned; this module never throws), and a denial anywhere
+//   means "unique holder" is unproven. No daemon wiring, no second registry, no
+//   credential read, no `close` lifecycle: the types below are local.
 
 import { readFileSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { opencodeBackendFor } from "./opencode-backend.js";
 import { readLiveProcess } from "./opencode-copresence/launcher-health.js";
 
-/** Why an observation could not be produced — every value is a refusal. */
+/** Why an observation could not be produced (every value is a refusal). */
 export type HostSharedObserveReason =
   | "unsupported_platform"
   | "url_not_supported"
@@ -45,11 +43,9 @@ export type HostSharedObserveReason =
 export interface HostSharedServeDiagnostics {
   /** Executable behind the process when read from /proc/<pid>/exe, else null. */
   executable: string | null;
-  /** Where `executable` came from: `argv0` is caller-controlled and mutable, so it
-   *  must never be mistaken for the observed binary (still diagnostic). */
+  /** `argv0` is caller-controlled and mutable: never the observed binary. */
   executableSource: "proc_exe" | "argv0" | null;
-  /** The LISTEN socket's creator uid (from /proc/net/tcp). Diagnostic only: an fd
-   *  can be inherited or passed (SCM_RIGHTS), so this is NOT the holder's uid. */
+  /** Socket CREATOR uid (/proc/net/tcp) — NOT the holder's (inherited fds). */
   socketUid: number | null;
   /** argv from its `serve` token onward (empty when there is no `serve`). */
   argvTail: string[];
@@ -179,9 +175,8 @@ function listenInodes(
   return [...inodes];
 }
 
-/** The LISTEN socket's kernel uid, or null when it cannot be read. Diagnostic:
- *  it is the *creator's* uid, which is NOT the holder's — an fd can be inherited
- *  or passed (SCM_RIGHTS), so this must never filter the candidate set. */
+/** The LISTEN socket's kernel uid (null if unreadable). Diagnostic only: it is the
+ *  *creator's* uid, not the holder's (fds are inherited / passed via SCM_RIGHTS). */
 function socketUidFor(readProcFile: (p: string) => string, port: number): number | null {
   let table: string;
   try {
@@ -202,12 +197,10 @@ function socketUidFor(readProcFile: (p: string) => string, port: number): number
 /**
  * Every pid whose fd table holds `socket:[inode]`.
  *
- * NO uid filter (#2784 review, 通信牛): a child of another uid can inherit a
- * listening fd (or receive it via SCM_RIGHTS), so the socket's uid says nothing
- * about who holds it. Filtering by it silently misses the real holder.
- *
- * Uniqueness is still required, so ANY unreadable candidate is a refusal: if part
- * of the process table could not be inspected, "unique holder" is unproven.
+ * NO uid filter and NO pid floor (#2784 review, 通信牛): a child of another uid can
+ * inherit a listening fd (or receive it via SCM_RIGHTS), and in a container PID 1
+ * can hold one — so filtering silently misses the real holder. Uniqueness is still
+ * required, so ANY unreadable candidate is a refusal.
  */
 function socketOwnerPids(
   deps: Required<HostSharedObserverDeps>,
@@ -225,7 +218,10 @@ function socketOwnerPids(
   for (const entry of pids) {
     if (!/^\d+$/.test(entry)) continue;
     const pid = Number(entry);
-    if (pid <= 1) continue;
+    // PID 1 is scanned too (#2784 review, 通信牛): in a container PID 1 can hold a
+    // listening fd, and if it does, skipping it would report a wrong "unique
+    // holder". Only pid 0 (not a real process) is out of scope.
+    if (pid <= 0) continue;
     let fds: string[];
     try {
       fds = deps.readDir(`/proc/${pid}/fd`);
@@ -237,7 +233,8 @@ function socketOwnerPids(
     for (const fd of fds) {
       try {
         if (deps.readLink(`/proc/${pid}/fd/${fd}`) === target) {
-          owners.push(pid);
+          // One pid, one entry: a duplicate would fake a second holder.
+          if (!owners.includes(pid)) owners.push(pid);
           break;
         }
       } catch (error) {
@@ -388,7 +385,9 @@ export function makeHostSharedAliveProbe(
 ): (pid: number, startTicks: number) => boolean {
   const deps = { ...defaultDeps(), ...overrides };
   return (pid, startTicks) => {
-    if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+    // pid 1 is allowed: it is a real process (and the holder scan now includes it),
+    // and the tick check still binds it. Only pid 0 does not exist.
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false;
     if (typeof startTicks !== "number" || !Number.isFinite(startTicks)) return false;
     try {
       const proc = deps.liveProcess(pid);
