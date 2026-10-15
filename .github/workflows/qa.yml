@@ -288,6 +288,7 @@ on:
       - 'tests/test907-hub-provider/**'
       - 'tests/test906-hub-upgrade-preflight/**'
       - 'tests/test832-opencode-v2-registry/**'
+      - 'tests/test1324-host-shared-generation/**'
       - 'tests/test1293-opencode-server-reuse/**'
       - 'tests/test1313-host-shared-observer/**'
       - 'tests/test883-v2-portable-client/**'
@@ -584,6 +585,7 @@ on:
       - 'tests/test907-hub-provider/**'
       - 'tests/test906-hub-upgrade-preflight/**'
       - 'tests/test832-opencode-v2-registry/**'
+      - 'tests/test1324-host-shared-generation/**'
       - 'tests/test1293-opencode-server-reuse/**'
       - 'tests/test1313-host-shared-observer/**'
       - 'tests/test883-v2-portable-client/**'
@@ -2184,6 +2186,7 @@ jobs:
           - test894-v1-runtime
           - test906-daemon-catalog
           - test832-opencode-v2-registry
+          - test1324-host-shared-generation
           - test1293-opencode-server-reuse
           - test1313-host-shared-observer
           - test828-opencode-v2-policy
