@@ -489,7 +489,7 @@ Hub 数据备份；只 clone 仓库不会恢复绑定、账号或密钥。撤销
 
 主机用户也可以在私有 `~/.anet/opencode-shared-server.json` 里登记 `{ "url": ..., "passwordFile": ..., "clientBinDir": ... }`，此后新建 V2 节点**默认复用**它。
 
-**源码状态（daemon 创建准入，父 #1302 / #1326）**：登记是**操作者维护的候选登记**——它只提供连接候选，不提供进程身份或代际证明。daemon 创建 V2 节点时按「**观察 → 代际绑定 → 准入通过**」三步判定，**三步都过才复用**：进程观察（同 uid、真实 pid/startTicks、监听绑定复核）→ 与既有包/文件 attestation 绑定代际 → 准入放行；任何一步拒绝（登记陈旧、进程已死、他人 uid、无法完整观察、代际不可证）都**回退为节点自有 Server**，不写共享 URL/密码文件。`--opencode-new-server` 的显式逃生门仍然有效。上述均为**源码实现**：不代表 npm 已发布或现役 daemon 已采用；**CLI 直接创建/显式连接须单独核对，不能用 daemon 接线代替其验收**；命令可用性以本机 `anet -v`、`anet node create --help` 与对应发布说明为准。
+**源码状态（daemon 创建准入，父 #1302 / #1326）**：登记是**操作者维护的候选登记**——它只提供连接候选，不提供进程身份或代际证明。daemon 创建 V2 节点时按「**观察 → 代际绑定 → 准入通过**」三步判定，**三步都过才复用**：进程观察（同 uid、真实 pid/startTicks、监听绑定复核）→ 与既有包/文件 attestation 绑定代际 → 准入放行；任何一步拒绝（登记陈旧、进程已死、他人 uid、无法完整观察、代际不可证）都**回退为节点自有 Server**，不写共享 URL/密码文件。`--opencode-new-server` 的显式逃生门仍然有效。上述均为**源码实现**：不代表 npm 已发布或现役 daemon 已采用（**完整原生启动验收已于 PR #2790 通过**：exact-head 收据 = Actions run `38809788212` / job `116679815373`，产物 `source=506902c4…`，合并提交 `079daa31`）；**CLI 直接创建/显式连接须单独核对，不能用 daemon 接线代替其验收**；命令可用性以本机 `anet -v`、`anet node create --help` 与对应发布说明为准。
 
 **开发中、尚未发布（#906）**：`anet daemon provider list <daemon>` 回读该 daemon 的脱敏
 Provider → Runtime → 认证方式 → 模型配置；`anet daemon provider put <daemon> --revision N`
