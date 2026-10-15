@@ -26,6 +26,11 @@ loopback URL, private password-file path and optional V2 client bin directory;
 it does not own or launch the Server. Do not infer the data path from a node's
 workspace, `HOME`, or the registry: read it from the actual Server process.
 Do not use a temporary filesystem for the persistent data directory.
+Treat the registry as a **trusted input**: the admission guard and the `/proc`
+observation provider live in the runtime package but the create path does not
+consume them yet, so a stale, dead or foreign-uid entry there is still written
+into a new child's config (the copresence runbook's current-status section
+tracks this; wiring is #1302).
 
 ## Stop and back up
 
