@@ -729,6 +729,26 @@ note "L1 单套件 wait 超时 = ${L1_WAIT_TIMEOUT}s(用 L1_WAIT_TIMEOUT 覆盖)
   fi
 fi
 
+# 🔴 #1627 / #1309 —— **per-test** 余量。`L1-TIMING v1` 只到**套件**粒度,而这个失效
+#    模式发生在**单条测试**上:bun 默认 20000ms **不写在任何测试源码里**,所以套件级
+#    仪表看不见它。(2026-08-31 一天三批红,其中一批来自一个只改两个 `.md` 的纯文档 PR。)
+#    这里补上那一格:解析 L0/L1 日志里 bun 打的逐条耗时,比**该条自己声明的超时**
+#    (没有就它所在 describe 的,再没有才用默认值),报出贴上限的条目。
+#    🔴 分母必须是**有效**超时,不能是默认值 —— 按默认值算会把一条自己声明了
+#       `}, 60_000)` 的测试报成 90% 高危(实测差点因此误判一条测试"未修")。
+#    report-only:只说话,不改退出码 —— 与下面 `L1_SOFT_BUDGET_S` 同一套教义。
+#    阈值用 `TEST_MARGIN_PCT` 覆盖(默认 50%);升成 ratchet 是后续独立一步。
+#
+# 🔴 `command -v python3` 不是可选的礼节:`test823-l1-concurrency-cap` 在
+#    `node:22-bookworm-slim`(**没有 python3**)里跑的是**真的 qa.sh --l1**,
+#    而且它会创建 `/tmp/qa-l1-*.log` ⇒ 少了这个守卫就会在那个容器里喷
+#    `python3: command not found`。这里静默退化,套件行为不变。
+if command -v python3 >/dev/null 2>&1 \
+   && { ls /tmp/qa-l0-*.log >/dev/null 2>&1 || ls /tmp/qa-l1-*-run.log >/dev/null 2>&1; }; then
+  python3 "$REPO_ROOT/scripts/check-test-margin.py" \
+    --logs '/tmp/qa-l0-*.log' '/tmp/qa-l1-*-run.log' || true
+fi
+
 ELAPSED=$(( $(date +%s) - START ))
 # 🔴 软预算 —— #1320。**放在 if 之前：红的那一跑同样消耗了时间，同样是「变慢」的证据。**
 #    第一版我写在 FAILED==0 分支里,结果 816s 那次因为有 1 个失败,时长一个字都没报 ——
