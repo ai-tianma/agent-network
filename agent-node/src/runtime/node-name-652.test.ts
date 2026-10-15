@@ -251,7 +251,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(flags.opencodeGeneration).toBe("v2");
   });
 
-  test("shared V2 create selects the host-registered client without changing the daemon PATH", async () => {
+  test("V2 create keeps the host client PATH but falls back without a live shared listener", async () => {
     plantOpencode("opencode v1.18.34");
     plantMachineModel({ model: "stub/model" });
     const clientBinDir = join(home, "v2-bin");
@@ -270,7 +270,10 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(spawned[0].path?.split(":")[0]).toBe(clientBinDir);
     expect(computeChildPath().split(":")[0]).not.toBe(clientBinDir);
     const cfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "shared-v2", "config.json"), "utf8"));
-    expect(cfg.opencodeSharedServerUrl).toBe("http://127.0.0.1:4097");
+    // This fixture supplies a version-only shell stub and a disk record, not a
+    // real listener. test1326 supplies the independent real-V2 reuse positive.
+    expect(cfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(cfg.opencodeSharedServerPasswordFile).toBeUndefined();
     expect(cfg.clientBinDir).toBeUndefined();
     const owned = await runCreate({ name: "owned-v2", runtime: "opencode-cli", model: "stub/model",
       flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, opencodeNewServer: true } }, "cr_ownedv2client");
@@ -278,6 +281,7 @@ describe("#652 create doorbell — Chinese name, ASCII directories", () => {
     expect(owned.spawned[0].path?.split(":")[0]).toBe(clientBinDir);
     const ownedCfg = JSON.parse(readFileSync(join(workDir, ".anet", "nodes", "owned-v2", "config.json"), "utf8"));
     expect(ownedCfg.opencodeSharedServerUrl).toBeUndefined();
+    expect(ownedCfg.opencodeSharedServerPasswordFile).toBeUndefined();
   });
 
   test.each(["malformed", "missing-password"])("explicit V2 new Server survives a %s shared registry", async (fault) => {

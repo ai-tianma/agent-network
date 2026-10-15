@@ -26,12 +26,13 @@ loopback URL, private password-file path and optional V2 client bin directory;
 it does not own or launch the Server. Do not infer the data path from a node's
 workspace, `HOME`, or the registry: read it from the actual Server process.
 Do not use a temporary filesystem for the persistent data directory.
-On main (`c15f7366`), treat the registry as a **trusted input**: the admission
-guard and the `/proc` observation provider are present in source but the create path does not
-consume them yet, so a stale, dead or foreign-uid entry there is still written
-into a new child's config (the copresence runbook's current-status section
-tracks this; wiring is #1302). This describes source state, not published npm
-packages or adoption by running nodes.
+The registry remains an operator-maintained **trusted input**. The daemon create
+path composes process observation, V2 package/executable binding and admission
+before copying shared connection fields (#1326, parent #1302). A stale, dead,
+foreign-uid or unobservable candidate falls back to a node-owned server. See the
+copresence runbook's daemon-admission section for the Linux observation limits
+and the separate CLI-entry boundary. This describes source state, not published
+npm packages or adoption by running nodes.
 
 ## Stop and back up
 
