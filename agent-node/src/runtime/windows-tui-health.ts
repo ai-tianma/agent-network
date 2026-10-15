@@ -31,7 +31,10 @@ export function readWindowsTuiIdentity(path: string, expected: {
 }
 
 type RunPowerShell = (script: string) => Promise<string>;
-const runPowerShell: RunPowerShell = (script) => new Promise((resolve, reject) => {
+/** Exported for the opt-in #1321 diagnostics, which WRAPS this real runner so a
+ *  test can never exercise a second runner with different semantics. No behaviour
+ *  change: the probe still defaults to this function. */
+export const runPowerShell: RunPowerShell = (script) => new Promise((resolve, reject) => {
   execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8", windowsHide: true, timeout: 10_000, maxBuffer: 4096,
   }, (error, stdout) => error ? reject(error) : resolve(stdout));

@@ -2284,6 +2284,11 @@ jobs:
     name: Windows Codex co-presence native smoke
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      # #1321 diagnostics: opt-in and default OFF in code; the workflow only
+      # forwards a repository Variable, so an admin can turn the sample on for the
+      # next reproducing run WITHOUT a code change, and nothing prints by default.
+      ANET_DIAG_WINDOWS_TUI_HEALTH: ${{ vars.ANET_DIAG_WINDOWS_TUI_HEALTH }}
     steps:
       - uses: actions/checkout@v4
       - name: Verify protected real-Codex gate trust boundary
