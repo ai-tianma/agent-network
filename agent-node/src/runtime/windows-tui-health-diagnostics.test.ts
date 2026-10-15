@@ -57,7 +57,6 @@ describe("#1321 diagnostics: opt-in and semantics-preserving", () => {
   test("fixture reading reports duration/validity and still hands the value back", () => {
     const lines: string[] = [];
     const reading = measureFixtureBirthQuery(() => "12345678\n", (l) => lines.push(l));
-    expect(reading.ok).toBe(true);
     expect(reading.digitsOnly).toBe(true);
     expect(reading.value).toBe("12345678");
     expect(typeof reading.durationMs).toBe("number");
@@ -65,8 +64,29 @@ describe("#1321 diagnostics: opt-in and semantics-preserving", () => {
 
     const bad = measureFixtureBirthQuery(() => "not-a-number", noop);
     expect(bad.digitsOnly).toBe(false); // the H1 discriminator
-    const threw = measureFixtureBirthQuery(() => { throw Object.assign(new Error("x"), { code: "ETIMEDOUT", killed: true, signal: "SIGTERM" }); }, noop);
-    expect(threw.ok).toBe(false);
+  });
+
+  // #1321 review: a thrown fixture query must NOT be swallowed — otherwise an
+  // original execFileSync ETIMEDOUT turns into a later `running -> undefined`
+  // assertion failure and hides the failure path this card exists to separate.
+  test("a throwing fixture query rethrows the SAME error object, once", () => {
+    const original = Object.assign(new Error("spawnSync powershell.exe ETIMEDOUT"), { code: "ETIMEDOUT", killed: true, signal: "SIGTERM" });
+    let calls = 0;
+    let caught: unknown;
+    try {
+      measureFixtureBirthQuery(() => { calls++; throw original; }, noop);
+    } catch (error) { caught = error; }
+    expect(caught).toBe(original);   // identity, not a copy or a wrapper
+    expect(calls).toBe(1);           // no second query, no continuation
+  });
+
+  test("a throwing logger cannot replace the original query exception", () => {
+    const original = Object.assign(new Error("real fixture failure"), { code: "ETIMEDOUT" });
+    let caught: unknown;
+    try {
+      measureFixtureBirthQuery(() => { throw original; }, () => { throw new Error("logger exploded"); });
+    } catch (error) { caught = error; }
+    expect(caught).toBe(original);
   });
 
   test("pre-check reporting distinguishes the gate that would refuse", () => {
@@ -82,5 +102,20 @@ describe("#1321 diagnostics: opt-in and semantics-preserving", () => {
     expect(redactDiagText("token=deadbeefdeadbeefdeadbeefdeadbeef")).toContain("<redacted>");
     expect(redactDiagText("see https://example.test/path?q=1")).toContain("<url>");
     expect(redactDiagText("x".repeat(64))).toContain("<redacted>");
+  });
+
+  // #1321 review: the real runner's execFile callback is `(error, stdout)`, so
+  // stderr is not captured by the product path. The diagnostic must say where a
+  // stderr-looking line came from instead of presenting a fallback as evidence.
+  test("stderr is attributed to its source, and its absence is stated", async () => {
+    const lines: string[] = [];
+    // (a) a runtime that does NOT attach stderr: source must say unavailable.
+    await diagnosingRunPowerShell(async () => { throw Object.assign(new Error("Command failed"), { code: null, killed: true, signal: "SIGTERM" }); }, (l) => lines.push(l))("s").catch(noop);
+    expect(lines.join("\n")).toContain("stderrSource=unavailable-from-runner");
+    // (b) a synthetic error that DOES carry stderr: attributed to error.stderr,
+    //     not presented as if it came from the native runner.
+    lines.length = 0;
+    await diagnosingRunPowerShell(async () => { throw Object.assign(new Error("x"), { stderr: "some stderr" }); }, (l) => lines.push(l))("s").catch(noop);
+    expect(lines.join("\n")).toContain("stderrSource=error.stderr");
   });
 });

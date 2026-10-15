@@ -15,6 +15,15 @@
 //   * no environment/token/header/login data; text is length-capped and redacted;
 //   * the 10s timeout, the `running` assertion and the three-value stdout
 //     protocol stay untouched (nothing here is wired into the decision).
+//
+// NARROWED CAPABILITY (#1321 review): the real runner's execFile callback is
+// `(error, stdout)`, so **stderr is not captured by the product path**. This
+// module therefore reports `stderrSource=error.stderr` only when the rejected
+// value actually carries one, and `stderrSource=unavailable-from-runner`
+// otherwise (falling back to the error message, labelled as such). The H3
+// "script catch summary" is consequently NOT available in this slice — adding it
+// would require changing the product runner's callback contract, which the card
+// scopes out. Nothing here presents a fallback as native-runner evidence.
 
 /** Diagnostics are opt-in; anything other than `1` keeps today's behaviour. */
 export function windowsTuiDiagnosticsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -42,17 +51,23 @@ export function redactDiagText(value: unknown, limit = DIAG_TEXT_LIMIT): string 
 export type DiagRun = (script: string) => Promise<string>;
 
 function describeError(error: unknown): string {
-  const err = error as (Error & { code?: unknown; signal?: unknown; killed?: boolean; stderr?: unknown }) | undefined;
+  const err = error as (Error & { code?: unknown; signal?: unknown; killed?: boolean; stderr?: unknown; stdout?: unknown }) | undefined;
   const code = err?.code === undefined ? "n/a" : String(err.code);
   // node's execFile reports a timeout as killed=true with signal SIGTERM; the
   // pair is what makes "10s window" distinguishable from "spawn failed".
   const timeoutShape = err?.killed === true && String(err?.signal ?? "") === "SIGTERM";
+  // The real runner's execFile callback is `(error, stdout)`, so stderr is not
+  // captured by the product path; whether the rejected value even carries
+  // `.stderr` depends on the runtime. Report the SOURCE instead of presenting a
+  // fallback as native evidence (narrowed capability, per the #1321 review).
+  const hasStderr = typeof err?.stderr === "string" && err.stderr.length > 0;
   return [
     `code=${redactDiagText(code, 40)}`,
     `signal=${err?.signal === undefined ? "n/a" : String(err.signal)}`,
     `killed=${err?.killed === undefined ? "n/a" : String(err.killed)}`,
     `timeoutShape=${timeoutShape}`,
-    `stderr=${redactDiagText(err?.stderr ?? err?.message ?? "")}`,
+    `stderrSource=${hasStderr ? "error.stderr" : "unavailable-from-runner"}`,
+    `stderr=${hasStderr ? redactDiagText(err?.stderr) : redactDiagText(err?.message ?? "")}`,
   ].join(" ");
 }
 
@@ -85,7 +100,6 @@ export function diagnosingRunPowerShell(real: DiagRun, log: (line: string) => vo
 }
 
 export interface FixtureBirthReading {
-  ok: boolean;
   digitsOnly: boolean;
   durationMs: number;
   value: string;
@@ -93,32 +107,32 @@ export interface FixtureBirthReading {
 
 /**
  * Time + validate a fixture-side birth query (the test's own PowerShell call).
- * The caller keeps its own value: this only reports, it never substitutes one.
+ *
+ * The query is invoked EXACTLY ONCE. If it throws, the original error is
+ * rethrown **unchanged** after a safe log line: diagnostics must never convert an
+ * `execFileSync` ETIMEDOUT into an empty value (which would show up later as a
+ * `running → undefined` assertion failure and hide the very failure path this
+ * card exists to distinguish).
  */
 export function measureFixtureBirthQuery(
   query: () => string,
   log: (line: string) => void = (l) => console.error(l),
 ): FixtureBirthReading {
   const started = Date.now();
-  let raw = "";
-  let threw: unknown;
+  let raw: string;
   try {
     raw = query();
   } catch (error) {
-    threw = error;
+    try {
+      log(`[diag-1321] fixture birth query threw in ${Date.now() - started}ms ${describeError(error)}`);
+    } catch { /* a logging failure must not replace the original query error */ }
+    throw error;
   }
   const durationMs = Date.now() - started;
   const value = typeof raw === "string" ? raw.trim() : "";
-  const reading: FixtureBirthReading = {
-    ok: threw === undefined,
-    digitsOnly: /^\d+$/.test(value),
-    durationMs,
-    value: redactDiagText(value, 40),
-  };
+  const reading: FixtureBirthReading = { digitsOnly: /^\d+$/.test(value), durationMs, value: redactDiagText(value, 40) };
   try {
-    log(threw === undefined
-      ? `[diag-1321] fixture birth query in ${durationMs}ms value=${reading.value} digitsOnly=${reading.digitsOnly}`
-      : `[diag-1321] fixture birth query threw in ${durationMs}ms ${describeError(threw)}`);
+    log(`[diag-1321] fixture birth query in ${durationMs}ms value=${reading.value} digitsOnly=${reading.digitsOnly}`);
   } catch { /* a logging failure must not change the outcome */ }
   return reading;
 }
