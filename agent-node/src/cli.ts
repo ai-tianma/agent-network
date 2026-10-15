@@ -225,6 +225,8 @@ import {
   readOpencodeConfig,
   writeOpencodeConfig,
   writebackOpencodeSession,
+  writebackOpencodeConfiguredModel,
+  shouldReconcileOpencodeSessionModel,
 } from "./runtime/opencode-acp/profile-state";
 import { OPENCODE_DEFAULT_PIN, isAcceptedOpencodeVersion, opencodeTransitionNote } from "./runtime/opencode-acp/binary";
 import {
@@ -1720,7 +1722,9 @@ const register = async () => {
   const alias = await liveAlias();
   const activeSessionId = RUNTIME === "grok"
     ? grokSessionId
-    : SESSION_ID || undefined;
+    : RUNTIME === "opencode"
+      ? opencodeSessionId
+      : SESSION_ID || undefined;
   const payload = {
     resume_id: RESUME_ID, alias, status: "idle",
     server: osHostname(), hostname: osHostname(),
@@ -4212,6 +4216,19 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
     const { openOpenCodeCopresenceRuntime } =
       await import("./runtime/opencode-copresence/runtime");
     const { opencodeBackendFor } = await import("./runtime/opencode-backend");
+    const sharedServerUrl = fileConfig.opencodeSharedServerUrl;
+    const sharedServerPasswordFile = fileConfig.opencodeSharedServerPasswordFile;
+    let sharedServer: { url: string; password: string; passwordFile: string } | undefined;
+    if (sharedServerUrl !== undefined || sharedServerPasswordFile !== undefined) {
+      if (typeof sharedServerUrl !== "string" || typeof sharedServerPasswordFile !== "string") {
+        throw new Error("Shared OpenCode Server requires URL and password file");
+      }
+      const passwordStat = statSync(sharedServerPasswordFile);
+      if (!passwordStat.isFile() || (passwordStat.mode & 0o077) !== 0) {
+        throw new Error("Shared OpenCode Server password file must be a private regular file");
+      }
+      sharedServer = { url: sharedServerUrl, password: readFileSync(sharedServerPasswordFile, "utf8").trim(), passwordFile: sharedServerPasswordFile };
+    }
     const borrowed = opencodeBorrowedCli
       ? (await import("./runtime/opencode-copresence/v1-borrowed-cli")).borrowedV1CliAdmission(opencodeBorrowedCli, {
           hubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, hubToken: AUTH_TOKEN,
@@ -4235,10 +4252,20 @@ async function ensureOpencodeCopresenceRuntime(): Promise<
       ...(borrowed ? { borrowedV1: borrowed } : {
         commhubMcpUrl: `${COMMHUB_URL.replace(/\/+$/, "")}/mcp`, commhubToken: AUTH_TOKEN, commhubAlias: ALIAS,
         providerEnvKeys: fileConfig.env && typeof fileConfig.env === "object" ? Object.keys(fileConfig.env) : [],
+        sharedServer,
+        resumeSessionId: opencodeSessionId,
+        reconcileResumedModel: OPENCODE_GENERATION === "v2" &&
+          shouldReconcileOpencodeSessionModel(fileConfig, MODEL),
       }),
       onSession: async (id) => {
         opencodeSessionId = id;
         if (!borrowed) writebackSession(id);
+        if (!borrowed && OPENCODE_GENERATION === "v2" && configFilePath && MODEL) {
+          writebackOpencodeConfiguredModel(configFilePath, MODEL);
+        }
+        if (!borrowed && id !== SESSION_ID) {
+          await register().catch((e: any) => warn(`[opencode-copresence] session registration retry needed: ${e?.message || e}`));
+        }
       },
       log,
       warn,

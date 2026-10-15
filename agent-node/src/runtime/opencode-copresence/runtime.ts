@@ -172,12 +172,19 @@ export interface OpenVettedOpenCodeCopresenceOptions {
   cwd: string;
   workDir: string;
   model?: string;
+  expectedVersion?: string;
   title?: string;
   startupTimeoutMs?: number;
   /** V1 only: optional immutable identity enables private session checkpoints. */
   checkpoint?: V1CheckpointIdentity;
   sessionId?: string;
   newSession?: boolean;
+  /** An independently owned V2 server. Closing this node must not stop it. */
+  sharedServer?: { url: string; password: string; passwordFile?: string };
+  sharedMcpUrl?: string;
+  resumeSessionId?: string;
+  /** Reconcile a resumed V2 session only after an explicit configured-model change. */
+  reconcileResumedModel?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -208,6 +215,10 @@ export interface OpenOpenCodeCopresenceOptions {
   checkpoint?: V1CheckpointIdentity;
   sessionId?: string;
   newSession?: boolean;
+  /** V2 only. The server must have workspace-scoped MCP configured separately. */
+  sharedServer?: { url: string; password: string; passwordFile?: string };
+  resumeSessionId?: string;
+  reconcileResumedModel?: boolean;
   /** #1957 test seam: replaces `tmux respawn-pane` when relaunching the human TUI. */
   tmuxRespawn?: (pane: string, scriptPath: string) => void;
   /** #1957 test seam: tmux command runner (tests bind it to a throwaway `-L` server). */
@@ -601,16 +612,19 @@ export function writeAttachScript(
   sessionId: string,
   cwd: string,
   recordDir: string,
+  passwordFile?: string,
 ): void {
   const exported = Object.entries({
     ...env,
     OPENCODE_SERVER_USERNAME: USERNAME,
-    OPENCODE_SERVER_PASSWORD: password,
-  }).filter((entry): entry is [string, string] => typeof entry[1] === "string");
+    ...(passwordFile ? {} : { OPENCODE_SERVER_PASSWORD: password }),
+  }).filter((entry): entry is [string, string] => typeof entry[1] === "string"
+    && (!passwordFile || !/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/i.test(entry[0])));
   const lines = [
     "#!/usr/bin/env bash",
     "set -eu",
     ...exported.map(([key, value]) => `export ${key}=${shellQuote(value)}`),
+    ...(passwordFile ? [`export OPENCODE_SERVER_PASSWORD="$(<${shellQuote(passwordFile)})"`] : []),
     `cd ${shellQuote(cwd)}`,
     // #1957 — record this launcher's pid/ticks/pane so the runtime can stop
     // exactly this TUI on close and relaunch the next launcher in its pane.
@@ -1035,11 +1049,15 @@ export async function openOpenCodeCopresenceRuntime(
 ): Promise<OpenCodeCopresenceSession> {
   const model = requireOpenCodeCopresenceModel(opts.model);
   const backend = opts.backend ?? OPENCODE_V1_BACKEND;
+  if (opts.sharedServer && backend.generation !== "v2") {
+    throw new Error("Shared OpenCode Server requires the V2 backend");
+  }
   if (opts.borrowedV1) {
     if (backend.generation !== "v1" || opts.unsafeTools || opts.commhubToken || opts.commhubMcpUrl || opts.providerEnvKeys?.length) {
       throw new Error("Borrowed V1 uses its explicit scoped admission; owned credential/environment options are forbidden");
     }
-    const core = await openVettedOpenCodeCopresence({ ...opts, model, backend,
+    const { sharedServer: _shared, resumeSessionId: _resume, reconcileResumedModel: _reconcile, ...borrowedOpts } = opts;
+    const core = await openVettedOpenCodeCopresence({ ...borrowedOpts, model, backend,
       binary: opts.borrowedV1.attestation.binary, env: {}, cwd: resolve(opts.cwd), workDir: resolve(opts.workDir) });
     try { await opts.onSession?.(core.sessionId); return core; }
     catch (error) { await core.close(); throw error; }
@@ -1089,6 +1107,7 @@ export async function openOpenCodeCopresenceRuntime(
   let core: OpenCodeCopresenceSession | undefined;
   let cleaned = false;
   let instructions: OpenCodeCommhubInstructionsHandle | undefined;
+  let sharedMcp: import("./shared-v2-mcp").SharedV2McpHandle | undefined;
   const cleanup = () => {
     if (cleaned) return true;
     const removed = cleanupOpencodeChildEnv(workDir, childEnv);
@@ -1119,7 +1138,11 @@ export async function openOpenCodeCopresenceRuntime(
       if (!opts.commhubMcpUrl || !opts.commhubToken) {
         throw new Error("OpenCode copresence requires both CommHub MCP URL and token");
       }
-      instructions = backend.generation === "v2"
+      if (opts.sharedServer) {
+        const { openSharedV2CommhubMcp } = await import("./shared-v2-mcp");
+        instructions = writeOpenCodeCommhubInstructions(join(projectCwd, "ANET-COMMHUB.md"), opts.commhubAlias);
+        sharedMcp = await openSharedV2CommhubMcp(projectCwd, workDir, opts.commhubMcpUrl, opts.commhubToken, instructions.path);
+      } else instructions = backend.generation === "v2"
         ? (await import("./v2-session")).wireOpenCodeV2CommhubMcp(childEnv, {
           url: opts.commhubMcpUrl,
           token: opts.commhubToken,
@@ -1143,11 +1166,16 @@ export async function openOpenCodeCopresenceRuntime(
       cwd: effectiveCwd,
       workDir,
       model,
+      expectedVersion: opts.expectedVersion,
       title: opts.title,
       startupTimeoutMs: opts.startupTimeoutMs,
       checkpoint: opts.checkpoint,
       sessionId: opts.sessionId,
       newSession: opts.newSession,
+      sharedServer: opts.sharedServer,
+      sharedMcpUrl: sharedMcp?.url,
+      resumeSessionId: opts.resumeSessionId,
+      reconcileResumedModel: opts.reconcileResumedModel,
       tmuxRespawn: opts.tmuxRespawn,
       tmuxRunner: opts.tmuxRunner,
       log: opts.log,
@@ -1164,6 +1192,7 @@ export async function openOpenCodeCopresenceRuntime(
         core!.submit(prompt, timeoutMs, sender, evidence),
       async close(mode?: { restart?: boolean }) {
         await core!.close(mode);
+        await sharedMcp?.close();
         removeInstructions();
         if (!await cleanupAfterExit(cleanup)) {
           opts.warn?.("[opencode-copresence] launch-root cleanup deferred; a live descendant still references it");
@@ -1173,6 +1202,7 @@ export async function openOpenCodeCopresenceRuntime(
     return wrapped;
   } catch (error) {
     await core?.close().catch(() => {});
+    await sharedMcp?.close().catch(() => {});
     removeInstructions();
     await cleanupAfterExit(cleanup);
     throw error;
