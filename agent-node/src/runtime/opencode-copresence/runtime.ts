@@ -1056,7 +1056,8 @@ export async function openOpenCodeCopresenceRuntime(
     if (backend.generation !== "v1" || opts.unsafeTools || opts.commhubToken || opts.commhubMcpUrl || opts.providerEnvKeys?.length) {
       throw new Error("Borrowed V1 uses its explicit scoped admission; owned credential/environment options are forbidden");
     }
-    const core = await openVettedOpenCodeCopresence({ ...opts, model, backend,
+    const { sharedServer: _shared, resumeSessionId: _resume, reconcileResumedModel: _reconcile, ...borrowedOpts } = opts;
+    const core = await openVettedOpenCodeCopresence({ ...borrowedOpts, model, backend,
       binary: opts.borrowedV1.attestation.binary, env: {}, cwd: resolve(opts.cwd), workDir: resolve(opts.workDir) });
     try { await opts.onSession?.(core.sessionId); return core; }
     catch (error) { await core.close(); throw error; }
