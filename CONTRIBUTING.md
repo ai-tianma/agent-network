@@ -101,20 +101,28 @@ Every PR to `main` runs [`bash scripts/qa.sh`](./scripts/qa.sh) (L0 unit + L1 Do
 
 ### Don't leave a test sitting near its own timeout (`TEST-MARGIN v1`, #1627/#1309)
 
-bun's default per-test timeout is **20000ms** and that number appears **nowhere in
-test source** — so grepping for `timeout` finds nothing, and when a slow runner
-pushes a near-limit test over, the failure reads exactly like a real defect
-(`[20832.89ms]`, with `^ this test timed out after 20000ms.` only on the next
-line). 2026-08-31 produced three batches of red this way, one of them on a PR
-that changed two `.md` files. `L1-TIMING v1` records durations at **suite**
-granularity; this failure mode lives at the **single test**.
+The timeout that actually applies to a test often appears **nowhere in its source**:
+bun's implicit per-test default, measured on the pinned 1.3.14 (`oven/bun:1.3.14`,
+no `bunfig.toml`, no `--timeout` in `qa.sh`), is **5000ms** — a test that never
+resolves fails with `[5000.01ms]` and `^ this test timed out after 5000ms.`, with
+or without `--coverage`. So grepping for `timeout` finds nothing, and when a slow
+runner pushes a near-limit test over, the failure reads exactly like a real defect
+(`[20832.89ms]`, with `^ this test timed out after …ms.` only on the next line).
+2026-08-31 produced three batches of red this way, one of them on a PR that
+changed two `.md` files. `L1-TIMING v1` records durations at **suite** granularity;
+this failure mode lives at the **single test**.
 
 - `python3 scripts/check-test-margin.py --logs '/tmp/qa-l0-*.log' '/tmp/qa-l1-*-run.log'`
   prints `TEST-MARGIN v1 tests=… hooks=… threshold=50% near=… slowest=<slug>=<pct>%,…`
   and lists offenders as `duration / effective timeout / pct / source:line`.
-  **Effective** timeout = the test's own, else its `describe`'s, else the
-  20000ms default — measuring against the default instead would report a test
-  that already declares `}, 60_000)` as 90% dangerous (its real margin is 3.3x).
+  **Effective** timeout = the test's own declared `timeout`, else its `describe`'s,
+  else the implicit default above — **measured, not assumed**
+  (`bunfig.toml`'s `[test] timeout` and `TEST_MARGIN_DEFAULT_MS` override it).
+  Measuring everything against one constant instead would report a test that
+  already declares `}, 60_000)` as 90% dangerous (its real margin is 3.3x) *and*
+  hide the 2.5–5s unannotated tests this report exists to surface. A hook that
+  times out is counted against the timeout it actually hit, because the log names
+  the duration but not the hook's declaration.
   It is **report-only** (exit 0; `--pct`/`TEST_MARGIN_PCT` sets the threshold,
   `--fail` is opt-in) and `scripts/qa.sh` calls it next to `L1-TIMING`.
 - So: when a test is genuinely slow, **declare** a timeout with headroom over the
