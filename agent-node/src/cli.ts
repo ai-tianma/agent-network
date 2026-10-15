@@ -20,7 +20,7 @@ import {
   type CodexBinResolution,
 } from "./runtime/codex-bin";
 import { accessSync, constants as fsConstants } from "node:fs";
-import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync, statSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, chmodSync, realpathSync, renameSync } from "fs";
 import { runtimeErrorReplyText } from "./runtime/unverified-reply-text";
 import { resolveOpencodeTimeout, describeOpencodeTimeout } from "./runtime/opencode-timeout";
 import { startTurnHeartbeat } from "./runtime/turn-heartbeat";
