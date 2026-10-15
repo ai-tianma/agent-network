@@ -84,26 +84,45 @@ export interface HostSharedServerAdmission {
 
 /** Loopback only: borrowing must never target a routable address.
  *
- * Only the production-supported literal `http://127.0.0.1:<port>` is admitted
- * (通信牛, #2777 review: the registry itself only ever writes that form, so
- * accepting `localhost` / `[::1]` would widen the guard past anything the host
- * can produce — `localhost` additionally depends on resolver/hosts state).
- * A loopback host in any other shape is reported separately so the audit reason
- * says what was actually wrong. */
+ * Only the production-supported **literal** `http://127.0.0.1:<port>` is admitted
+ * (通信牛, #2777 review): the host registry only ever writes that form, so
+ * accepting `localhost` / `[::1]` would widen the guard past anything the host can
+ * produce — `localhost` additionally depends on resolver/hosts state.
+ *
+ * The check is on the RAW string, not on a parsed URL: `new URL()` normalizes
+ * `http://127.1:4096`, integer/hex addresses and trailing path/query/fragment into
+ * `127.0.0.1`, so a parsed-host comparison accepts spellings the registry never
+ * writes (same defect 通信牛 found in the #1313 provider).
+ *
+ * A loopback host in any other shape is still reported separately
+ * (`unsupported_loopback`) so the audit reason distinguishes it from a routable
+ * address. */
 export type ServeUrlClass = "supported" | "unsupported_loopback" | "not_loopback";
+
+/** The exact production endpoint: lowercase http, literal 127.0.0.1, a decimal
+ *  port with no leading zero and no path/query/fragment/credentials. */
+const SUPPORTED_SERVE_URL_RE = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/;
 
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 export function classifyServeUrl(url: unknown): ServeUrlClass {
   if (typeof url !== "string") return "not_loopback";
+  const literal = SUPPORTED_SERVE_URL_RE.exec(url);
+  if (literal) {
+    const port = Number(literal[1]);
+    if (Number.isSafeInteger(port) && port > 0 && port <= 65535) return "supported";
+  }
+  // Right host, wrong literal endpoint: bad/out-of-range port, path, query,
+  // fragment, credentials, uppercase scheme — still "loopback but unsupported"
+  // rather than a routable address, so the audit reason stays informative.
+  if (url.startsWith("http://127.0.0.1:") || url.startsWith("http://127.0.0.1")) {
+    return "unsupported_loopback";
+  }
+  // Otherwise classify by *host* only to choose the audit reason.
   let parsed: URL;
   try { parsed = new URL(url); } catch { return "not_loopback"; }
   const isLoopbackHost = LOOPBACK_HOSTNAMES.has(parsed.hostname) || /^127\./.test(parsed.hostname);
-  if (!isLoopbackHost) return "not_loopback";
-  const supported = parsed.protocol === "http:"
-    && parsed.hostname === "127.0.0.1"
-    && !parsed.username && !parsed.password;
-  return supported ? "supported" : "unsupported_loopback";
+  return isLoopbackHost ? "unsupported_loopback" : "not_loopback";
 }
 
 export function isSupportedServeUrl(url: unknown): url is string {

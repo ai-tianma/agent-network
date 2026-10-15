@@ -108,3 +108,25 @@ observation" controls) plus the PR's L1 job Docker run of this same suite. A ful
 Docker artifact for the new head will be attached when the L1 job for the new
 commit completes; this addendum does not claim that run has happened.
 
+--------------------------------------------------------------------------------
+ADDENDUM 2 — #2777 review (通信牛): the URL check must match the RAW literal
+
+The earlier addendum replaced `localhost`/`[::1]` with `127.0.0.1` only, but the
+check still went through `new URL()`. That normalizes spelling the host registry
+never writes, so a parsed-host comparison accepted them:
+
+  http://127.1:4096           -> hostname 127.0.0.1
+  http://2130706433:4096      -> hostname 127.0.0.1   (integer address)
+  http://0x7f000001:4096      -> hostname 127.0.0.1   (hex address)
+  http://127.0.0.1:4096/other?x=1#x -> same host, path/query/fragment ignored
+
+`classifyServeUrl` now matches the RAW string against the literal endpoint
+`^http://127\.0\.0\.1:([1-9]\d{0,4})$` (port <= 65535, no leading zero), and
+anything that starts with the literal host but is not that endpoint is still
+`unsupported_loopback` (bad port, path, query, fragment, credentials, uppercase
+scheme) so the audit reason stays informative. The same defect was found and
+fixed in the #1313 observation provider.
+
+Negative controls added: 127.1 / 2130706433 / 0x7f000001 / :04096 / :0 / :65536 /
+no port / HTTP:// / 127.0.0.01 / trailing path · query · fragment — all refused.
+Evidence: `bun test src/runtime/opencode-server-reuse.test.ts` = 42 pass / 0 fail.

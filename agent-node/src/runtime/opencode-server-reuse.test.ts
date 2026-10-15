@@ -144,11 +144,27 @@ describe("host-shared server admission", () => {
 describe("supported serve url guard", () => {
   test.each([
     ["http://127.0.0.1:4096", "supported"],
+    ["http://127.0.0.1:65535", "supported"],
     ["http://localhost:4096", "unsupported_loopback"],
     ["http://[::1]:4096", "unsupported_loopback"],
     ["http://127.0.0.2:4096", "unsupported_loopback"],
     ["https://127.0.0.1:4096", "unsupported_loopback"],
     ["http://user:pass@127.0.0.1:4096", "unsupported_loopback"],
+    // Raw-string strictness (通信牛, #2777 review): all of these normalize to
+    // 127.0.0.1 under `new URL()`, so a parsed-host check would have accepted them.
+    ["http://127.1:4096", "unsupported_loopback"],
+    ["http://2130706433:4096", "unsupported_loopback"],
+    ["http://0x7f000001:4096", "unsupported_loopback"],
+    ["http://127.0.0.1:4096/other?x=1#x", "unsupported_loopback"],
+    ["http://127.0.0.1:4096/", "unsupported_loopback"],
+    ["http://127.0.0.1:4096?x=1", "unsupported_loopback"],
+    ["http://127.0.0.1:4096#frag", "unsupported_loopback"],
+    ["http://127.0.0.1:04096", "unsupported_loopback"],
+    ["http://127.0.0.1:0", "unsupported_loopback"],
+    ["http://127.0.0.1:65536", "unsupported_loopback"],
+    ["http://127.0.0.1", "unsupported_loopback"],
+    ["HTTP://127.0.0.1:4096", "unsupported_loopback"],
+    ["http://127.0.0.01:4096", "unsupported_loopback"],
     ["http://192.168.1.5:4096", "not_loopback"],
     ["https://anet.sh", "not_loopback"],
     ["not-a-url", "not_loopback"],
