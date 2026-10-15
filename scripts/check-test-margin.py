@@ -28,6 +28,7 @@ bun 的默认单条超时是 **20000ms**，而这个数字**不出现在任何�
     python3 scripts/check-test-margin.py --logs '/tmp/qa-l0-*.log' '/tmp/qa-l1-*-run.log'
     python3 scripts/check-test-margin.py --logs job.log --pct 50
     python3 scripts/check-test-margin.py --logs job.log --fail     # 有贴上限的 → 退出 1
+    python3 scripts/check-test-margin.py --selftest                # 用内嵌夹具自证（不读日志）
 
 默认 **report-only**（退出 0）；阈值用 `--pct` 或环境变量 `TEST_MARGIN_PCT` 覆盖。
 `--logs` 可以给任意文本（GitHub job 全文也可以 —— 它就是所有 per-suite 日志的拼接）。
@@ -54,7 +55,9 @@ import argparse
 import glob as globlib
 import os
 import re
+import shutil
 import sys
+import tempfile
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 JOBTS = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")
@@ -160,16 +163,145 @@ def slug(s: str, width: int = 34) -> str:
     return (s[:width] or "unnamed")
 
 
+# ── 自证夹具 ────────────────────────────────────────────────────────────────
+# 🔴 夹具是**故意**这样设计的:一个 describe **没有**声明超时、另一个**有**,
+#    而且有超时的那个把自己的 `}, 30_000);` 放在它的测试**之后**。
+#    这正是唯一需要两趟遍历的地方 —— 任何「取下一个 `}, N)`」的朴素实现,
+#    都会把 30_000 错记到前一个 describe 的测试上。断言里把 4 个分母全钉死,
+#    所以那种退化会在这里炸,而不是在慢 runner 上炸。
+SELFTEST_FIXTURE = """import { describe, test } from "bun:test";
+describe("margin control", () => {
+  test("no declared timeout here", () => {
+    expect(1).toBe(1);
+  });
+  test("declared but tiny", () => {
+    expect(1).toBe(1);
+  }, 4_000);
+  test("safely fast", () => {
+    expect(1).toBe(1);
+  });
+});
+describe("inherited control", () => {
+  test("inherits the describe timeout", () => {
+    expect(1).toBe(1);
+  });
+}, 30_000);
+"""
+
+SELFTEST_LOG = """(pass) margin control > no declared timeout here [19000.00ms]
+(pass) margin control > declared but tiny [3800.00ms]
+(pass) margin control > safely fast [100.00ms]
+(pass) inherited control > inherits the describe timeout [21000.00ms]
+(pass) (unnamed) [4900.00ms]
+"""
+
+
+def evaluate(rows, index, pct):
+    """把「逐条耗时 × 有效超时」算成裁决结果。main 与 selftest 走**同一条**路径。"""
+    # 同名去重取最大：同一个文件被多个套件跑时会重复出现
+    best: dict[str, float] = {}
+    hook_ms = 0.0
+    hooks = 0
+    for _st, name, ms in rows:
+        if name.strip() in ("(unnamed)", ""):
+            # 🔴 #1627 的第二种形态：`(fail) (unnamed) [5490.92ms]` +
+            #    下一行 `a beforeEach/afterEach hook timed out`。钩子的默认超时是
+            #    **5000ms**（不是 20000ms），所以必须单独用一个分母判定，
+            #    否则它会被静默跳过 —— 第一版就是这样：计数了，却不参与判定。
+            hooks += 1
+            hook_ms = max(hook_ms, ms)
+            continue
+        best[name] = max(best.get(name, 0.0), ms)
+
+    entries: list[tuple[float, int, float, str, str]] = []
+    for name, ms in best.items():
+        title = name.split(" > ")[-1].strip()
+        eff, loc = index.get(title, (None, "?"))
+        eff = eff or DEFAULT_MS
+        entries.append((ms, eff, 100.0 * ms / eff, loc, name))
+    if hook_ms:
+        entries.append((hook_ms, HOOK_DEFAULT_MS, 100.0 * hook_ms / HOOK_DEFAULT_MS,
+                        "(hook)", "(unnamed hook — beforeEach/afterEach)"))
+    near = sorted([e for e in entries if e[2] >= pct], key=lambda r: -r[2])
+    return best, hooks, entries, near
+
+
+def selftest() -> int:
+    """内嵌夹具自证：admin/评审不用信我的话,跑 `--selftest` 就行。"""
+    failures: list[str] = []
+
+    def check(cond: bool, what: str) -> None:
+        if not cond:
+            failures.append(what)
+
+    tmp = tempfile.mkdtemp(prefix="test-margin-selftest-")
+    try:
+        with open(os.path.join(tmp, "fixture.test.ts"), "w", encoding="utf-8") as fh:
+            fh.write(SELFTEST_FIXTURE)
+        index = index_source(tmp)
+
+        # ① 声明超时的解析（分母从哪来）
+        check(index.get("no declared timeout here", (None, ""))[0] is None,
+              "「自己、describe 都没声明」必须解析成 None ⇒ 用默认 20000")
+        check(index.get("declared but tiny", (None, ""))[0] == 4_000,
+              "自己声明的 4_000 必须被解析出来")
+        check(index.get("safely fast", (None, ""))[0] is None,
+              "🔴 前一 describe 的测试不得继承后一 describe 的 30_000（两趟遍历的核心）")
+        check(index.get("inherits the describe timeout", (None, ""))[0] == 30_000,
+              "describe 级 30_000 必须被它的测试继承（`}, N)` 在测试之后）")
+
+        # ② 正控：4 条都该被报出，且分母各不相同
+        _b, hooks, _e, near = evaluate(parse_timings(SELFTEST_LOG), index, 50.0)
+        got = {n.split(" > ")[-1].strip(): (ms, eff, pct) for ms, eff, pct, _l, n in near}
+        want = {
+            "no declared timeout here": (19_000.0, 20_000, 95.0),
+            "declared but tiny": (3_800.0, 4_000, 95.0),
+            "inherits the describe timeout": (21_000.0, 30_000, 70.0),
+            "(unnamed hook — beforeEach/afterEach)": (4_900.0, 5_000, 98.0),
+        }
+        check(set(got) == set(want), f"贴上限集合：得到 {sorted(got)}，期望 {sorted(want)}")
+        for k, exp in want.items():
+            got1 = got.get(k)
+            check(got1 is not None and got1[0] == exp[0] and got1[1] == exp[1]
+                  and abs(got1[2] - exp[2]) < 0.051, f"{k}：得到 {got1}，期望 {exp}")
+        check(hooks == 1, f"钩子必须被计数（得到 {hooks}）")
+        pcts = [p for _m, _e, p, _l, _n in near]
+        check(pcts == sorted(pcts, reverse=True), "贴上限条目必须按占比降序")
+
+        # ③ 负控：都不贴上限 ⇒ 一条都不许报
+        quiet = ("(pass) margin control > safely fast [100.00ms]\n"
+                 "(pass) (unnamed) [100.00ms]\n")
+        if evaluate(parse_timings(quiet), index, 50.0)[3] != []:
+            failures.append("全都很快时必须一条都不报")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    if failures:
+        print("TEST-MARGIN SELFTEST FAIL")
+        for f in failures:
+            print(f"  - {f}")
+        return 1
+    print("TEST-MARGIN SELFTEST OK (4 resolution + 4 positive + 1 hook-count + 1 order + 1 negative)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="per-test timeout margin report (#1627)")
-    ap.add_argument("--logs", nargs="+", required=True,
+    ap.add_argument("--logs", nargs="+",
                     help="日志文件或 glob（默认当作 glob 展开，不存在则跳过）")
     ap.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     help="仓库根（用来解析声明超时）")
     ap.add_argument("--pct", type=float, default=float(os.environ.get("TEST_MARGIN_PCT", DEFAULT_PCT)),
                     help="贴上限阈值（占有效超时的百分比），默认 50")
     ap.add_argument("--fail", action="store_true", help="有贴上限条目时退出 1（默认只报告）")
+    ap.add_argument("--selftest", action="store_true",
+                    help="用内嵌夹具自证（解析/正控/负控），不读任何日志")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
+    if not args.logs:
+        ap.error("--logs 必填（除非用 --selftest）")
 
     files: list[str] = []
     for pat in args.logs:
@@ -191,32 +323,9 @@ def main() -> int:
               f"  # 没有可读日志（--logs 给的是 {args.logs}）")
         return 0
 
-    # 同名去重取最大：同一个文件被多个套件跑时会重复出现
-    best: dict[str, float] = {}
-    hook_ms = 0.0
-    hooks = 0
-    for _st, name, ms in rows:
-        if name.strip() in ("(unnamed)", ""):
-            # 🔴 #1627 的第二种形态：`(fail) (unnamed) [5490.92ms]` +
-            #    下一行 `a beforeEach/afterEach hook timed out`。钩子的默认超时是
-            #    **5000ms**（不是 20000ms），所以必须单独用一个分母判定，
-            #    否则它会被静默跳过 —— 第一版就是这样：计数了，却不参与判定。
-            hooks += 1
-            hook_ms = max(hook_ms, ms)
-            continue
-        best[name] = max(best.get(name, 0.0), ms)
-
-    index = index_source(args.root)
-    entries: list[tuple[float, int, float, str, str]] = []
-    for name, ms in best.items():
-        title = name.split(" > ")[-1].strip()
-        eff, loc = index.get(title, (None, "?"))
-        eff = eff or DEFAULT_MS
-        entries.append((ms, eff, 100.0 * ms / eff, loc, name))
-    if hook_ms:
-        entries.append((hook_ms, HOOK_DEFAULT_MS, 100.0 * hook_ms / HOOK_DEFAULT_MS,
-                        "(hook)", "(unnamed hook — beforeEach/afterEach)"))
-    near = sorted([e for e in entries if e[2] >= args.pct], key=lambda r: -r[2])
+    # 同名去重、分母解析、贴上限排序全在 evaluate() 里 —— selftest 走同一条路径，
+    # 所以自证通过就意味着真实调用路径正确，而不是「另一份逻辑副本对上了」。
+    best, hooks, entries, near = evaluate(rows, index_source(args.root), args.pct)
 
     # 🔴 `slowest=` 里的百分比必须和 `near=` 用同一个分母（有效超时），
     #    不能打毫秒却标 `%` —— 第一版就是这样，输出 `waitWs_...=18069.0%`，
