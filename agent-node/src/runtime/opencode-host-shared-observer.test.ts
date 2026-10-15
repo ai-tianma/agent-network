@@ -1,0 +1,300 @@
+// #1313 negative controls + the scope boundary.
+//
+// The provider reports PROCESS EVIDENCE. It must never turn an argv shape into a
+// proven generation (通信牛, 2026-10-16): `argvContract` is a diagnostic, and a
+// consumer that needs a generation binds it itself (#1302) and refuses reuse
+// when it cannot prove it. So this file asserts two things side by side:
+//   A. deterministic reason coverage with injected deps (no /proc needed);
+//   B. REAL listening processes observed through the real /proc — no mocks for
+//      the positive case, because "the pid we found is the pid we bound through"
+//      is the very property under test.
+import { afterEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  makeHostSharedAliveProbe,
+  observeHostSharedServe,
+  parseLoopbackUrl,
+  type HostSharedObserverDeps,
+} from "./opencode-host-shared-observer.js";
+
+const V1_ARGS = ["serve", "--hostname", "127.0.0.1", "--port", "4096", "--pure"];
+const V2_ARGS = ["serve", "--hostname", "127.0.0.1", "--port", "4096"];
+const URL_4096 = "http://127.0.0.1:4096";
+
+/** Scripted /proc: one LISTEN inode, one owner pid, given argv/uid/ticks. */
+function fakeProc(opts: {
+  inode?: string;
+  pid?: number;
+  uid?: number | undefined;
+  ticks?: string | string[];
+  argv?: string[];
+  platform?: NodeJS.Platform;
+  fdsThrow?: NodeJS.ErrnoException;
+  tcpThrow?: NodeJS.ErrnoException;
+}): HostSharedObserverDeps {
+  const inode = opts.inode ?? "4242";
+  const pid = opts.pid ?? 777;
+  const uid = "uid" in opts ? opts.uid : 1000;
+  const ticks = opts.ticks ?? "900";
+  let tickCall = 0;
+  return {
+    platform: opts.platform ?? "linux",
+    readProcFile: (path) => {
+      if (path === "/proc/net/tcp") {
+        if (opts.tcpThrow) throw opts.tcpThrow;
+        return [
+          "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+          `  0: 0100007F:1000 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 ${inode} 1 0 0 0 0`,
+        ].join("\n");
+      }
+      if (path.endsWith("/cmdline")) return (opts.argv ?? ["/opt/opencode", ...V2_ARGS]).join("\0") + "\0";
+      return "";
+    },
+    readDir: (path) => {
+      if (path === "/proc") return ["1", String(pid), "self"];
+      if (opts.fdsThrow) throw opts.fdsThrow;
+      return ["0", "1", "7"];
+    },
+    readLink: (path) => {
+      if (path.endsWith("/exe")) return "/opt/opencode";
+      return path.includes(`/proc/${pid}/fd/7`) ? `socket:[${inode}]` : "/dev/null";
+    },
+    procUid: () => uid,
+    liveProcess: (requested) => {
+      if (requested !== pid) return undefined;
+      const value = Array.isArray(ticks) ? ticks[Math.min(tickCall++, ticks.length - 1)] : ticks;
+      return { pid, ticks: value, state: "S" };
+    },
+    serveArgsFor: (generation, host, port) =>
+      generation === "v1"
+        ? ["serve", "--hostname", host, "--port", String(port), "--pure"]
+        : ["serve", "--hostname", host, "--port", String(port)],
+  };
+}
+
+describe("process evidence (injected /proc)", () => {
+  test("a live same-uid listener yields pid/uid/startTicks/inode from one chain", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({}));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence).toMatchObject({
+      url: URL_4096, host: "127.0.0.1", port: 4096,
+      listenInode: "4242", pid: 777, uid: 1000, startTicks: 900,
+    });
+  });
+
+  test("the provider NEVER claims a proven generation — argv is diagnostics only", () => {
+    const r = observeHostSharedServe(URL_4096, fakeProc({ argv: ["/opt/opencode", ...V1_ARGS] }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // No generation assertion anywhere on the evidence object.
+    expect(Object.keys(r.processEvidence)).not.toContain("generation");
+    expect(JSON.stringify(r.processEvidence)).not.toMatch(/"generation"\s*:/);
+    // The shape is reported, and it says what it is (and is not).
+    expect(r.processEvidence.diagnostics.argvContract).toBe("v1");
+    expect(r.processEvidence.diagnostics.argvContractNote).toMatch(/not prove|diagnostic/i);
+    expect(r.processEvidence.diagnostics.argvTail).toEqual(V1_ARGS);
+  });
+
+  test("argv shape is classified but a mismatch is still evidence, not a failure", () => {
+    for (const [argv, expected] of [
+      [["/opt/opencode", ...V2_ARGS], "v2"],
+      [["/opt/opencode", "serve", "--hostname", "127.0.0.1", "--port", "4096", "--mystery"], "none"],
+      [["/opt/opencode"], "none"],
+      [["/opt/other-binary", ...V2_ARGS], "none"],
+      [["/opt/opencode", "serve", "--hostname", "127.0.0.1", "--port", "4097"], "none"],
+    ] as const) {
+      const r = observeHostSharedServe(URL_4096, fakeProc({ argv: [...argv] }));
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.processEvidence.diagnostics.argvContract).toBe(expected);
+    }
+  });
+
+  test("an unreadable exe falls back to argv[0], and an unreadable argv is still observable", () => {
+    const deps = fakeProc({});
+    deps.readLink = (path) => {
+      if (path.endsWith("/exe")) throw Object.assign(new Error("nope"), { code: "ENOENT" });
+      return "socket:[4242]";
+    };
+    const r = observeHostSharedServe(URL_4096, deps);
+    expect(r.ok && r.processEvidence.diagnostics.executable).toBe("/opt/opencode");
+
+    const noArgv = fakeProc({});
+    noArgv.readProcFile = (path) => {
+      if (path === "/proc/net/tcp") {
+        return [
+          "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+          "  0: 0100007F:1000 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000 0 4242 1 0 0 0 0",
+        ].join("\n");
+      }
+      throw Object.assign(new Error("denied"), { code: "ENOENT" });
+    };
+    const r2 = observeHostSharedServe(URL_4096, noArgv);
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    expect(r2.processEvidence.diagnostics.argvContract).toBe("none");
+    expect(r2.processEvidence.pid).toBe(777);
+  });
+
+  test("non-Linux is explicitly unobservable", () => {
+    expect(observeHostSharedServe(URL_4096, fakeProc({ platform: "darwin" })))
+      .toEqual({ ok: false, reason: "unsupported_platform" });
+  });
+
+  test("only the literal 127.0.0.1 form is observable", () => {
+    for (const url of ["http://localhost:4096", "http://[::1]:4096", "http://10.0.0.5:4096", "https://127.0.0.1:4096", "http://a:b@127.0.0.1:4096", "nope"]) {
+      expect(observeHostSharedServe(url, fakeProc({}))).toEqual({ ok: false, reason: "url_not_supported" });
+    }
+    expect(parseLoopbackUrl(URL_4096)).toEqual({ port: 4096 });
+    expect(parseLoopbackUrl("http://127.0.0.1:0")).toBeUndefined();
+  });
+
+  test("a missing listener is `no_listener`, not a guess", () => {
+    const deps = fakeProc({});
+    deps.readProcFile = (path) => (path === "/proc/net/tcp"
+      ? "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode"
+      : "");
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "no_listener" });
+  });
+
+  test("an inode held by nobody is `socket_owner_not_found`", () => {
+    const deps = fakeProc({});
+    deps.readLink = () => "/dev/null";
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "socket_owner_not_found" });
+  });
+
+  test("permission errors are reported, not swallowed into a wrong answer", () => {
+    const eacces = Object.assign(new Error("denied"), { code: "EACCES" }) as NodeJS.ErrnoException;
+    expect(observeHostSharedServe(URL_4096, fakeProc({ tcpThrow: eacces }))).toEqual({ ok: false, reason: "permission_denied" });
+    expect(observeHostSharedServe(URL_4096, fakeProc({ fdsThrow: eacces }))).toEqual({ ok: false, reason: "permission_denied" });
+  });
+
+  test("start ticks changing between the two reads is `identity_mismatch` (PID reuse)", () => {
+    expect(observeHostSharedServe(URL_4096, fakeProc({ ticks: ["900", "901"] })))
+      .toEqual({ ok: false, reason: "identity_mismatch" });
+  });
+
+  test("a process that died between the reads is `identity_mismatch`, not a stale success", () => {
+    const deps = fakeProc({});
+    let calls = 0;
+    deps.liveProcess = (pid) => (calls++ === 0 ? { pid, ticks: "900", state: "S" } : undefined);
+    expect(observeHostSharedServe(URL_4096, deps)).toEqual({ ok: false, reason: "identity_mismatch" });
+  });
+
+  test("an unobservable uid is `identity_mismatch`, never a fabricated 0", () => {
+    expect(observeHostSharedServe(URL_4096, fakeProc({ uid: undefined })))
+      .toEqual({ ok: false, reason: "identity_mismatch" });
+  });
+
+  test("a provider failure is a reason, never a throw", () => {
+    const deps = fakeProc({});
+    deps.readProcFile = () => { throw new Error("boom"); };
+    expect(observeHostSharedServe(URL_4096, deps).ok).toBe(false);
+  });
+
+  test("probeAlive re-checks ticks, so PID reuse cannot pass", () => {
+    const probe = makeHostSharedAliveProbe(fakeProc({ ticks: "900" }));
+    expect(probe(777, 900)).toBe(true);
+    expect(probe(777, 901)).toBe(false);
+    expect(probe(778, 900)).toBe(false);
+    expect(probe(1, 900)).toBe(false);
+    expect(probe(777, Number.NaN)).toBe(false);
+  });
+});
+
+// ── B. real processes ────────────────────────────────────────────────────────
+const FAKE_OPENCODE = `#!/usr/bin/env bun
+const argv = process.argv.slice(2);
+const i = argv.indexOf("--port");
+const port = Number(argv[i + 1]);
+Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("ok") });
+await new Promise(() => {});
+`;
+
+interface Spawned {
+  pid: number;
+  port: number;
+  dir: string;
+  proc: ReturnType<typeof Bun.spawn>;
+}
+
+const spawned: Spawned[] = [];
+
+async function startFakeServe(extraArgs: string[] = []): Promise<Spawned> {
+  const dir = mkdtempSync(join(tmpdir(), "obs1313-"));
+  const bin = join(dir, "opencode");
+  writeFileSync(bin, FAKE_OPENCODE, { mode: 0o755 });
+  chmodSync(bin, 0o755);
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const port = 20000 + Math.floor(Math.random() * 30000);
+    const proc = Bun.spawn([bin, "serve", "--hostname", "127.0.0.1", "--port", String(port), ...extraArgs], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    const result = { pid: proc.pid, port, dir, proc };
+    spawned.push(result);
+    if (await waitForListener(port)) return result;
+    proc.kill();
+  }
+  throw new Error("could not start a real loopback listener");
+}
+
+/** Wait until the port has a listener. A full success is NOT required: the
+ *  diagnostics cases legitimately report `argvContract: "none"` and still have a
+ *  real listening process. */
+async function waitForListener(port: number): Promise<boolean> {
+  for (let i = 0; i < 100; i++) {
+    const r = observeHostSharedServe(`http://127.0.0.1:${port}`);
+    if (r.ok || (r.reason !== "no_listener" && r.reason !== "socket_owner_not_found")) return true;
+    await Bun.sleep(20);
+  }
+  return false;
+}
+
+afterEach(() => {
+  for (const s of spawned.splice(0)) {
+    try { s.proc.kill(); } catch { /* already gone */ }
+    try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
+describe.if(process.platform === "linux")("observer against real listening processes", () => {
+  test("a real listener is observed: pid, uid, startTicks and inode all come from /proc", async () => {
+    const s = await startFakeServe();
+    const r = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.processEvidence.pid).toBe(s.pid);
+    expect(r.processEvidence.uid).toBe(process.getuid?.());
+    expect(Number.isFinite(r.processEvidence.startTicks)).toBe(true);
+    expect(r.processEvidence.listenInode).toMatch(/^\d+$/);
+    expect(r.processEvidence.diagnostics.argvContract).toBe("v2");
+    expect(makeHostSharedAliveProbe()(r.processEvidence.pid, r.processEvidence.startTicks)).toBe(true);
+  });
+
+  test("a V1-shaped invocation is classified v1 — as a diagnostic, not a generation", async () => {
+    const s = await startFakeServe(["--pure"]);
+    const r = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
+    expect(r.ok && r.processEvidence.diagnostics.argvContract).toBe("v1");
+    if (r.ok) expect(Object.keys(r.processEvidence)).not.toContain("generation");
+  });
+
+  test("an unknown flag is still observable, with contract `none`", async () => {
+    const s = await startFakeServe(["--mystery"]);
+    const r = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.processEvidence.diagnostics.argvContract).toBe("none");
+  });
+
+  test("a killed listener is `no_listener` — no stale success", async () => {
+    const s = await startFakeServe();
+    expect(observeHostSharedServe(`http://127.0.0.1:${s.port}`).ok).toBe(true);
+    s.proc.kill();
+    await Bun.sleep(150);
+    const after = observeHostSharedServe(`http://127.0.0.1:${s.port}`);
+    expect(after.ok).toBe(false);
+    if (!after.ok) expect(["no_listener", "socket_owner_not_found"]).toContain(after.reason);
+  });
+});
