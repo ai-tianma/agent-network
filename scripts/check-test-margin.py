@@ -78,16 +78,30 @@ JOBTS = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")
 # bun: `(pass) describe > test [123.45ms]` / `(fail) (unnamed) [5490.92ms]`
 TIMING = re.compile(r"^\s*\(?\b(pass|fail|skip)\)?\s+(?P<name>.+?)\s+\[(?P<ms>\d+(?:\.\d+)?)ms\]\s*$")
 
+# 修饰器（`.only` / `.skip` / `.skipIf` / `.each` …）与**柯里化**的第二层调用：
+#   `test.skipIf(cond)("title", …)`、`test.each([[1,2]])("t %d", …)`。
+# `_CURRY` 只允许同一行、括号不嵌套的写法；取不到就退回默认（**偏保守**：只会多报）。
+_MOD = r"(?:\.[A-Za-z_$][\w$]*)?"
+# 柯里化的第二层调用：`test.skipIf(cond)("title"…)` / `test.each([…])("title"…)` ——
+# 条件本身也在同一行，所以 `_CURRY` 要吃下 `cond)` **和** 紧接着的那个 `(`。
+_CURRY = r"(?:[^()\n]*\)\s*\(\s*)?"
 TEST_START = re.compile(
-    r"^(?P<ind>\s*)(?:test|it)(?:\.(?:each|only|skip|todo|concurrent|failing|if))?\("
-    r"\s*(?:\"(?P<d>[^\"]{1,300})\"|'(?P<s>[^']{1,300})'|`(?P<b>[^`$]{1,300})`)"
+    rf"^(?P<ind>\s*)(?:test|it){_MOD}\({_CURRY}"
+    r"(?:\"(?P<d>[^\"]{1,300})\"|'(?P<s>[^']{1,300})'|`(?P<b>[^`$]{1,300})`)"
 )
 DESC_START = re.compile(
-    r"^(?P<ind>\s*)describe(?:\.(?:each|only|skip|if))?\("
-    r"\s*(?:\"(?P<d>[^\"]{1,300})\"|'(?P<s>[^']{1,300})'|`(?P<b>[^`$]{1,300})`)"
+    rf"^(?P<ind>\s*)describe{_MOD}\({_CURRY}"
+    r"(?:\"(?P<d>[^\"]{1,300})\"|'(?P<s>[^']{1,300})'|`(?P<b>[^`$]{1,300})`)"
 )
 # `}, 60_000);` 或 `});` —— 缩进必须与 opener 相同，否则不动栈（防止内层闭包打乱对齐）
 CLOSE = re.compile(r"^(?P<ind>\s*)\}\s*(?:,\s*(?P<ms>[0-9][0-9_]*)\s*)?\)")
+# 🔴 **单行**形式：`test("t", () => { … }, 500);` —— opener 与 closer 在同一行，
+#    `CLOSE` 要求行首是 `}`，所以它**永远**看不到这一种（#1309 评审给的见证原文
+#    正是这个写法：450ms/500ms 被算成 450/5000 = 9%）。
+SELF_CLOSED_TMO = re.compile(r"(?:\}|\))\s*,\s*(?P<ms>[0-9][0-9_]*)\s*\)\s*;?\s*$")
+# 单行且**没有**声明：`test("t", () => { … });` / `test.todo("t")` —— 同样必须在
+# 原地闭掉，否则会留下一个永远弹不掉的栈帧，把后面的 `}, N)` 错配到它身上。
+SELF_CLOSED = re.compile(r"\)\s*;?\s*$")
 
 # 🔴 默认超时是**测出来的**，不是抄文档的。测量配方（钉死的 bun 1.3.14，与
 #    `.github/workflows/qa.yml` 里 `bun-version: 1.3.14` 同一版本）：
@@ -191,19 +205,37 @@ def index_source(root: str):
             descs: list[dict] = []
             for i, line in enumerate(lines):
                 mt = TEST_START.match(line)
-                if mt:
-                    frames.append({"kind": "test", "ind": len(mt.group("ind")), "line": i,
-                                   "title": mt.group("d") or mt.group("s") or mt.group("b")})
-                    continue
-                md = DESC_START.match(line)
-                if md:
-                    frames.append({"kind": "describe", "ind": len(md.group("ind")), "line": i, "timeout": None})
+                md = None if mt else DESC_START.match(line)
+                if mt or md:
+                    m = mt or md
+                    ind = len(m.group("ind"))
+                    st = SELF_CLOSED_TMO.search(line)
+                    sc = bool(st) or bool(SELF_CLOSED.search(line))
+                    if not sc:
+                        # 多行形式：入栈，等它的 `}, N)` / `});` 收尾
+                        frames.append({"kind": "test" if mt else "describe", "ind": ind,
+                                       "line": i, "timeout": None,
+                                       "title": (m.group("d") or m.group("s") or m.group("b")) if mt else None})
+                        continue
+                    # 🔴 单行形式：opener 与 closer 在同一行 ⇒ 就地解析，不入栈
+                    #    （入栈会留下永远弹不掉的帧，把后面的 `}, N)` 错配过来）。
+                    if mt:
+                        val = int(st.group("ms").replace("_", "")) if st else 0
+                        tests.append({"kind": "test", "ind": ind, "line": i,
+                                      "title": m.group("d") or m.group("s") or m.group("b"),
+                                      "timeout": val if val >= 1 else None, "end": i})
+                    # 单行 describe 里不可能还有别的行 ⇒ 直接忽略
                     continue
                 mc = CLOSE.match(line)
                 if mc:
                     ind = len(mc.group("ind"))
-                    while frames and frames[-1]["ind"] > ind:
-                        frames.pop()
+                    # 🔴 **不**强制弹更深的帧（原来是 `while frames[-1]["ind"] > ind:
+                    #    frames.pop()`）。那一步会让「缩进恰好是 0 的 `});`」把整片
+                    #    栈弹掉 —— 而本仓 `runtime.test.ts:1094/1109` 就有这种行：
+                    #    用例体里内嵌了一段**要构建的源码**（模板字面量），里面
+                    #    `});` 就在第 0 列。后果：1065 行那条 `test.skipIf(...)` 的
+                    #    声明帧被无声弹掉 ⇒ 它永远进不了 `tests` ⇒ 30_000 丢失。
+                    #    缩进不等就**不动栈**，这正是本文件上面那条原则。
                     if frames and frames[-1]["ind"] == ind:
                         fr = frames.pop()
                         val = int(mc.group("ms").replace("_", "")) if mc.group("ms") else 0
@@ -217,6 +249,17 @@ def index_source(root: str):
                         else:
                             fr["end"] = i
                             descs.append(fr)
+            for fr in frames:
+                # 没有配到 closer 的帧（例如 `test(` 后面跟的不是静态标题）同样归入 ——
+                # 拿不到声明就去用默认/describe，方向是**多报**而不是漏报。
+                if fr["kind"] == "test":
+                    fr.setdefault("timeout", None)
+                    fr["end"] = fr["line"]
+                    tests.append(fr)
+                else:
+                    # describe 也要进去，否则它下面的测试会丢掉继承
+                    fr["end"] = len(lines)
+                    descs.append(fr)
             for t in tests:
                 eff = t.get("timeout")
                 if eff is None:
@@ -254,6 +297,11 @@ describe("margin control", () => {
   test("short timeout", () => {
     expect(1).toBe(1);
   }, 500);
+  test("one line declared", () => { expect(1).toBe(1); }, 500);
+  test.skipIf(true)("curried declared", () => {
+    expect(1).toBe(1);
+  }, 9_000);
+  test("one line no declaration", () => { expect(1).toBe(1); });
   test("declares twenty", () => {
     expect(1).toBe(1);
   }, 20_000);
@@ -271,6 +319,9 @@ describe("inherited control", () => {
 SELFTEST_LOG = """(pass) margin control > no declared timeout here [19000.00ms]
 (pass) margin control > declared but tiny [3800.00ms]
 (pass) margin control > short timeout [450.00ms]
+(pass) margin control > one line declared [450.00ms]
+(pass) margin control > curried declared [8000.00ms]
+(pass) margin control > one line no declaration [1000.00ms]
 (pass) margin control > declares twenty [4000.00ms]
 (pass) margin control > safely fast [100.00ms]
 (pass) inherited control > inherits the describe timeout [21000.00ms]
@@ -352,6 +403,17 @@ def selftest() -> int:
               "自己声明的 4_000 必须被解析出来")
         check(index.get("short timeout", (None, ""))[0] == 500,
               "🔴 自己声明的 **500** 必须被解析出来（旧的 >=1000 守卫会把它丢掉）")
+        # 🔴 **单行**形式 —— #1309 评审给的见证原文就是这一行。旧解析器只认
+        #    行首是 `}` 的 closer，于是它拿到默认值，450ms/500ms 被算成 9%。
+        check(index.get("one line declared", (None, ""))[0] == 500,
+              "🔴 单行 `test(\"one line declared\", () => { … }, 500);` 必须解析出 500"
+              "（评审见证原文的写法；只认行首 `}` 的解析器会把它算成 450/5000 = 9%）")
+        # 柯里化 `test.skipIf(cond)("…", …, N)` —— 仓库里 runtime.test.ts:1065 就是这个
+        # 形状（声明 30_000）；旧解析器不认第二层调用 ⇒ 那一条退默认。
+        check(index.get("curried declared", (None, ""))[0] == 9_000,
+              "柯里化 `test.skipIf(cond)(\"…\", …, 9_000)` 的声明必须解析出来")
+        check(index.get("one line no declaration", (None, ""))[0] is None,
+              "单行且无声明的测试必须解析成 None（⇒ 用默认），不能留下弹不掉的栈帧")
         check(index.get("declares twenty", (None, ""))[0] == 20_000,
               "自己声明的 20_000 必须被解析出来（显式 20s 覆盖必须保留）")
         check(index.get("safely fast", (None, ""))[0] is None,
@@ -359,7 +421,7 @@ def selftest() -> int:
         check(index.get("inherits the describe timeout", (None, ""))[0] == 30_000,
               "describe 级 30_000 必须被它的测试继承（`}, N)` 在测试之后）")
 
-        # ② 正控：5 条该被报出，且分母各不相同
+        # ② 正控：7 条该被报出，且分母各不相同（含**单行**与**柯里化**两种声明）
         log = SELFTEST_LOG
         _b, hooks, _e, near = evaluate(parse_timings(log), index, 50.0, dflt)
         got = {n.split(" > ")[-1].strip(): (ms, eff, pct) for ms, eff, pct, _l, n in near}
@@ -367,6 +429,8 @@ def selftest() -> int:
             "no declared timeout here": (19_000.0, 5_000, 380.0),
             "declared but tiny": (3_800.0, 4_000, 95.0),
             "short timeout": (450.0, 500, 90.0),
+            "one line declared": (450.0, 500, 90.0),
+            "curried declared": (8_000.0, 9_000, 88.889),
             "inherits the describe timeout": (21_000.0, 30_000, 70.0),
             "(unnamed hook — beforeEach/afterEach)": (4_900.0, 5_000, 98.0),
         }
@@ -382,6 +446,9 @@ def selftest() -> int:
         # ③ 显式 20s 覆盖必须**真的**被用上：4000/20000 = 20% ⇒ 不报
         check("declares twenty" not in got,
               f"🔴 自己声明了 20_000 的测试（实测 4000ms = 20%）不许进贴上限集合，得到 {sorted(got)}")
+        # ③b 单行无声明那条：1000/5000 = 20% ⇒ 不报（同时证明它没有把栈带坏）
+        check("one line no declaration" not in got,
+              f"单行无声明（实测 1000ms = 20%）不该进贴上限集合，得到 {sorted(got)}")
 
         # ④ 钩子超时：分母必须是**它撞上的**那个超时，不是测试自己的 5000
         hook_log = SELFTEST_HOOK_LOG
@@ -411,8 +478,9 @@ def selftest() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print("TEST-MARGIN SELFTEST OK (3 default-resolution + 6 declared-resolution + 5 positive "
-          "+ 1 hook-count + 1 order + 1 explicit-20s-not-reported + 1 hook-timeout "
+    print("TEST-MARGIN SELFTEST OK (3 default-resolution + 9 declared-resolution "
+          "(incl. one-line + curried) + 7 positive + 1 hook-count + 1 order "
+          "+ 1 explicit-20s-not-reported + 1 one-line-not-reported + 1 hook-timeout "
           "+ 1 hook-misattribution-witness + 1 negative)")
     return 0
 

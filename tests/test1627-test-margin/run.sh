@@ -89,8 +89,13 @@ fi
 if ! grep -qE '/ 500ms = 9[0-9]\.' "$W/declared.margin"; then
   fail "450ms/500ms 必须报 ~90%（分母 500ms）—— 旧的 >=1000 守卫会把它丢掉"
 fi
-if ! grep -q 'near=2' "$W/declared.margin"; then
-  fail "450ms（过）与 900ms（撞 500ms）两条都该进贴上限集合"
+if ! grep -q 'near=3' "$W/declared.margin"; then
+  fail "450ms（多行过）/ 900ms（撞 500ms）/ 450ms（单行过）三条都该进贴上限集合"
+fi
+# 🔴 评审见证的**原样**写法：单行 `test("…", () => { … }, 500);`。
+#    只认「行首 `}`」的解析器看不到它 ⇒ 450ms 会被算成 450/5000 = 9%。
+if ! grep -qE '/ 500ms = 9[0-9]\..*:: one line 500 takes 450' "$W/declared.margin"; then
+  fail "单行 `test(\"one line 500 takes 450\", … , 500);` 必须按 500ms 判（评审见证的原文写法）"
 fi
 
 # ── 3) 钩子撞满它**声明**的超时 ───────────────────────────────────────────

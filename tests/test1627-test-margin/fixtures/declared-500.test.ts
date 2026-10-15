@@ -11,3 +11,7 @@ test("declared 500 takes 450", async () => {
 test("declared 500 takes 900", async () => {
   await Bun.sleep(900);
 }, 500);
+
+// 🔴 评审见证的**原样**写法：**单行** —— opener 与 closer 在同一行。
+//    只认「行首是 `}`」的解析器看不到这一行，会把 450ms 算成 450/5000 = 9%。
+test("one line 500 takes 450", async () => { await Bun.sleep(450); }, 500);

@@ -1,6 +1,6 @@
-test1627 test-margin source=771c3b6011b31b1e9fcbfb59ab411da64831bf8b date=2026-10-15T21:22:44+00:00
+test1627 test-margin source=e2737cbb0fb3ddda947e5c1f2133c36a1899e21d date=2026-10-15T21:29:58+00:00
 · 0) 仪表自证（内嵌夹具：默认解析 / 声明解析 / 正控 / 负控 / 钩子 / 显式 20s 覆盖）
-    TEST-MARGIN SELFTEST OK (3 default-resolution + 6 declared-resolution + 5 positive + 1 hook-count + 1 order + 1 explicit-20s-not-reported + 1 hook-timeout + 1 hook-misattribution-witness + 1 negative)
+    TEST-MARGIN SELFTEST OK (3 default-resolution + 9 declared-resolution (incl. one-line + curried) + 7 positive + 1 hook-count + 1 order + 1 explicit-20s-not-reported + 1 one-line-not-reported + 1 hook-timeout + 1 hook-misattribution-witness + 1 negative)
 · 1/2/3) 真 bun 见证（并行：无声明 5s、声明 500ms、声明 6s 的钩子）
 --- implicit.log
     
@@ -12,9 +12,10 @@ test1627 test-margin source=771c3b6011b31b1e9fcbfb59ab411da64831bf8b date=2026-1
      1 fail
     Ran 1 test across 1 file. [5.02s]
 --- declared.log
-    (pass) declared 500 takes 450 450.95ms
-    (fail) declared 500 takes 900 500.51ms
+    (pass) declared 500 takes 450 450.64ms
+    (fail) declared 500 takes 900 500.55ms
       ^ this test timed out after 500ms.
+    (pass) one line 500 takes 450 452.08ms
 --- hook.log
     (fail) hook control > body passes 6000.01ms
       ^ a beforeEach/afterEach hook timed out for this test.
@@ -23,9 +24,10 @@ test1627 test-margin source=771c3b6011b31b1e9fcbfb59ab411da64831bf8b date=2026-1
       NEAR-LIMIT 5000ms / 5000ms = 100.0%  implicit-default.test.ts:6  :: implicit default
       ⇒ 有效超时是「自己声明的，否则所在 describe 的，否则运行器默认 5000ms（本仓库钉死的 bun 1.3.14 实测值；bunfig.toml 的 [test] timeout 或 TEST_MARGIN_DEFAULT_MS 会覆盖）」；慢 runner 上这些会先红，而报错会像是真缺陷（#1627）。
 · 5) 显式 500ms：450ms 该报 ~90%、900ms 撞满 100%，两条都进集合
-    TEST-MARGIN v1 tests=2 hooks=0 threshold=50% near=2 slowest=declared_500_takes_900=100.1%, declared_500_takes_450=90.2%
+    TEST-MARGIN v1 tests=3 hooks=0 threshold=50% near=3 slowest=declared_500_takes_900=100.1%, one_line_500_takes_450=90.4%, declared_500_takes_450=90.1%
       NEAR-LIMIT 501ms / 500ms = 100.1%  declared-500.test.ts:11  :: declared 500 takes 900
-      NEAR-LIMIT 451ms / 500ms = 90.2%  declared-500.test.ts:6  :: declared 500 takes 450
+      NEAR-LIMIT 452ms / 500ms = 90.4%  declared-500.test.ts:17  :: one line 500 takes 450
+      NEAR-LIMIT 451ms / 500ms = 90.1%  declared-500.test.ts:6  :: declared 500 takes 450
       ⇒ 有效超时是「自己声明的，否则所在 describe 的，否则运行器默认 5000ms（本仓库钉死的 bun 1.3.14 实测值；bunfig.toml 的 [test] timeout 或 TEST_MARGIN_DEFAULT_MS 会覆盖）」；慢 runner 上这些会先红，而报错会像是真缺陷（#1627）。
 · 6) 钩子：声明 6s 撞满必须报 100%（分母 = 它撞上的 6000ms），不是 120%
     TEST-MARGIN v1 tests=1 hooks=0 threshold=50% near=1 slowest=body_passes=100.0%
