@@ -8,6 +8,17 @@
 
 创建时可显式提供 `--opencode-shared-server-url http://127.0.0.1:<port>` 和 `--opencode-shared-server-password-file <绝对路径>`。也可在主机用户的私有 `~/.anet/opencode-shared-server.json` 中登记 `{ "url": "http://127.0.0.1:<port>", "passwordFile": "<绝对路径>", "clientBinDir": "<V2 私有安装的 bin 绝对目录>" }`，之后新建 V2 节点默认复用它。`clientBinDir` 可省略；当 daemon 的默认 PATH 优先找到 V1 时须填写，仅为 V2 子节点的创建与启动临时优先选用，不改 daemon 的全局 PATH。显式 `--opencode-new-server` 则创建节点自有 Server，仍可使用登记的 V2 客户端目录，但不会继承共享 Server URL/密码文件；它不能和显式共享参数同时使用。密码文件须为私有普通文件，不应把密码写进命令行、URL、日志或项目 Git。上述选项只有该 PR 合并并发布对应 CLI/runtime 后才可作为正式命令使用；旧版本不能靠手改配置冒充支持。
 
+### main 源码现状：登记默认复用已实现；准入守卫与观察提供者**已入库但尚未接线**（#1302）
+
+2026-10-15 main `c15f7366` 的源码状态如下；不代表对应 npm 包已发布或现役节点已采用：
+
+- **main 中已实现**：创建 V2 节点时 daemon 读取上述私有登记，并把 `opencodeSharedServerUrl` / `opencodeSharedServerPasswordFile` 写进子节点配置（显式 `--opencode-new-server` 仍可绕开）。
+- **已入库、但不在创建路径上**：
+  - `agent-node/src/runtime/opencode-server-reuse.ts` —— 准入守卫（纯决策，fail-closed）。它要求：字面量 `http://127.0.0.1:<port>`、同 uid、**真实 pid + startTicks 存活复核**、且代际由调用方绑定；任何一条不满足即回退自建。
+  - `agent-node/src/runtime/opencode-host-shared-observer.ts` —— 观察提供者（只读 `/proc`）。它产出 `processEvidence`（`url/host/port/listenInode/pid/uid/startTicks`），argv 只作 `diagnostics`，**不声称代际**；**仅 Linux**，非 Linux 或观测不全（含权限不足、多候选）一律明确拒绝。
+- **尚未完成**：创建路径**还没有消费**这两个模块（#1302）。因此**上述 main 创建路径**把登记当作受信输入：登记指向陈旧、已死或他人 uid 的 Server 时，子节点配置里仍会写入该 url/密码文件。运维上请把 `~/.anet/opencode-shared-server.json` 视为**受信输入**，并在变更登记后自行核对 Server 存活与 uid。
+- 接线完成后（#1302），上述“默认复用”才会变成“**证得到才复用、证不到回退自建**”。本节不代替该验收。
+
 共享 Server 的数据库应放在持久磁盘。OpenCode V2 默认使用 `~/.local/share/opencode/opencode.db`，`OPENCODE_DB` 可覆盖位置；先核实际进程环境、数据库路径、文件系统和备份，再停旧实例迁移。不得在活动写入期间直接复制数据库，不得把临时目录当作持久目录。原节点可以保留各自工作区并换用新 session，但这不自动迁移旧对话历史；要保留历史须单独验证数据库迁移和会话归属。共享 Server 关闭或重启不应被单个节点的 stop/close 连带终止。
 
 候选的停服备份、恢复、逐节点验收和数据回滚边界见 [共享 Server 恢复合同](opencode-v2-shared-server-recovery.md)；它尚未替代主机实际启动器和演练记录。
