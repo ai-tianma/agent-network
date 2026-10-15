@@ -40,3 +40,11 @@ Correction: projects now live in /tmp/test1327-projects; private runtime state
 and tmux still live in /run/test1327. The product workdir rule is untouched.
 The redacted real ACK is also saved before its assertion for future diagnosis.
 The subsequent exact-head Actions result must be recorded separately.
+
+Second Actions sample: 22abdf0a, run38802397366 / job116654544919.
+The image built and B passed real host_shared_live admission plus the real
+started/launch_verified ACK. The fixture then read an incorrect config path:
+it used alias nodeB1327 literally, while #652 correctly writes nodeb1327.
+Correction: reuse product childDirNameForCreate for config/receipt/log paths.
+No product path rule or startup assertion is changed; subsequent session/task/
+close/fallback assertions remain unexecuted. The new head needs its own run.

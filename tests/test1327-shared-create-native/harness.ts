@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { handleCreateNodeDoorbell } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/create-node-daemon.ts";
 import { observeHostSharedServe } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/opencode-host-shared-observer.ts";
+import { childDirNameForCreate } from "/opt/node_modules/@sleep2agi/agent-node/src/runtime/child-dir-name.ts";
 
 const root = "/run/test1327", artifact = process.env.ARTIFACT_DIR ?? "/artifacts";
 // Child workdirs must obey the real daemon system-directory policy; /run is
@@ -78,7 +79,7 @@ const tmux = (...args: string[]) => spawnSync("tmux", ["-S", socket, ...args], {
   env: process.env, encoding: "utf8", timeout: 5000,
 });
 const projectFor = (alias: string) => join(projects, alias);
-const nodeDir = (alias: string) => join(projectFor(alias), ".anet/nodes", alias);
+const nodeDir = (alias: string) => join(projectFor(alias), ".anet/nodes", childDirNameForCreate(alias, projectFor(alias)));
 const json = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 function register(url: string) {
   writeFileSync(registry, JSON.stringify({ url, passwordFile, clientBinDir: "/usr/local/bin" }), { mode: 0o600 });
