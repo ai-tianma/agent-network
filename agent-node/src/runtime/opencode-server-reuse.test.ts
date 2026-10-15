@@ -1,5 +1,6 @@
 // #1293 negative controls: reuse must never cross identity, never target a
-// non-loopback/stale/foreign candidate, and must fall back rather than throw.
+// non-loopback/stale/foreign candidate, never approve reuse without a live
+// pid+startTicks observation, and must fall back rather than throw.
 import { describe, expect, test } from "bun:test";
 import { decideOpencodeServerReuse, isLoopbackServeUrl, type OpencodeServerReuseCandidate, type OpencodeServerReuseInput } from "./opencode-server-reuse.js";
 
@@ -22,21 +23,42 @@ function input(overrides: Partial<OpencodeServerReuseInput> = {}): OpencodeServe
     uid: 1000,
     generation: "v2",
     candidates: [base],
+    probeAlive: () => true,
     ...overrides,
   };
 }
 
 describe("opencode server reuse decision", () => {
-  test("exact same identity reuses", () => {
-    const d = decideOpencodeServerReuse(input());
+  test("exact same identity reuses only with a live pid+startTicks probe", () => {
+    const observed: Array<[number, number]> = [];
+    const d = decideOpencodeServerReuse(input({ probeAlive: (pid, ticks) => { observed.push([pid, ticks]); return true; } }));
     expect(d.decision).toBe("reuse");
     expect(d.reason).toBe("same_identity_live");
     expect(d.candidate?.nodeId).toBe("node-aaa");
+    expect(observed).toEqual([[4242, 900]]);
   });
 
   test("off mode preserves today's always-spawn behaviour", () => {
     expect(decideOpencodeServerReuse(input({ mode: "off" })).decision).toBe("fallback");
     expect(decideOpencodeServerReuse(input({ mode: "off" })).reason).toBe("reuse_off");
+  });
+
+  test("absent probe never approves reuse (no reuse on on-disk record alone)", () => {
+    const d = decideOpencodeServerReuse(input({ probeAlive: undefined }));
+    expect(d.decision).toBe("fallback");
+    expect(d.reason).toBe("probe_unavailable");
+  });
+
+  test("a throwing probe falls back and never escapes as a throw", () => {
+    const d = decideOpencodeServerReuse(input({ probeAlive: () => { throw new Error("probe blew up"); } }));
+    expect(d.decision).toBe("fallback");
+    expect(d.reason).toBe("probe_error");
+  });
+
+  test("missing startTicks is refused (PID reuse would be undetectable)", () => {
+    const d = decideOpencodeServerReuse(input({ candidates: [{ ...base, startTicks: null }] }));
+    expect(d.decision).toBe("fallback");
+    expect(d.reason).toBe("missing_start_ticks");
   });
 
   test("cross-identity reuse is refused (credentials never shared)", () => {
@@ -45,8 +67,20 @@ describe("opencode server reuse decision", () => {
     expect(d.reason).toBe("identity_mismatch");
   });
 
+  test("same nodeId but a different alias is refused", () => {
+    const d = decideOpencodeServerReuse(input({ alias: "beta" }));
+    expect(d.decision).toBe("fallback");
+    expect(d.reason).toBe("alias_mismatch");
+  });
+
   test("missing binding is refused (fail-closed)", () => {
     const d = decideOpencodeServerReuse(input({ candidates: [{ ...base, nodeId: "" }] }));
+    expect(d.decision).toBe("fallback");
+    expect(d.reason).toBe("missing_binding");
+  });
+
+  test("missing alias in the record is refused (fail-closed)", () => {
+    const d = decideOpencodeServerReuse(input({ candidates: [{ ...base, alias: "" }] }));
     expect(d.decision).toBe("fallback");
     expect(d.reason).toBe("missing_binding");
   });
