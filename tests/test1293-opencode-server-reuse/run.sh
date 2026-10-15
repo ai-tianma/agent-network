@@ -9,14 +9,16 @@ unset TMUX TMUX_PANE
 export ARTIFACT_DIR="${ARTIFACT_DIR:-/artifacts}"
 mkdir -p "$ARTIFACT_DIR"
 exec > >(tee "$ARTIFACT_DIR/report-test1293-runtime.txt") 2>&1
-echo "test1293 opencode server reuse decision source=${SOURCE_COMMIT:-unset} date=$(date -Is)"
+echo "test1293 host-shared OpenCode server admission guard source=${SOURCE_COMMIT:-unset} date=$(date -Is)"
 if [[ -n "${EXPECTED_SOURCE_COMMIT:-}" ]]; then test "$SOURCE_COMMIT" = "$EXPECTED_SOURCE_COMMIT"; fi
 
 cd /opt/node_modules/@sleep2agi/agent-node
 
-echo 'L0 unit: reuse is approved ONLY for an exact live (nodeId, alias) binding;'
-echo '         cross-identity / alias mismatch / missing startTicks / absent or throwing'
-echo '         probe / foreign uid / non-loopback / dead pid all fall back.'
+echo 'L0 unit: a host-shared server is admitted ONLY when observed loopback + same uid'
+echo '         + live pid/startTicks (real probe) + matching generation. Missing'
+echo '         observations, absent or throwing probe, foreign uid, non-loopback and'
+echo '         dead pid all fall back. Node identity is NOT a gate here (MCP'
+echo '         credentials / session binding carry it), so another node may borrow.'
 bun test src/runtime/opencode-server-reuse.test.ts
 
 echo 'guard: the decision module must not read or trust any file (no second registry)'
@@ -25,4 +27,4 @@ if grep -nE "readFileSync|lstatSync|openSync|realpathSync|readdirSync" src/runti
   exit 1
 fi
 
-echo 'PASS: opencode server reuse decision suite'
+echo 'PASS: host-shared OpenCode server admission guard suite'

@@ -1,13 +1,13 @@
-#1293 / test1293 — OpenCode server reuse decision (fail-closed negative controls)
+#1293 / test1293 — host-shared OpenCode server ADMISSION GUARD (fail-closed negative controls)
 
 Runtime: Docker, `--network none` (no network, no credentials, no spawn).
 Date: 2026-10-15 (UTC)
-Code under test: agent-node/src/runtime/opencode-server-reuse.ts @ bbc6c29d
-                  + tests/test1293-opencode-server-reuse/ (this suite)
+Code under test: agent-node/src/runtime/opencode-server-reuse.ts @ 498fed1e
+                 + tests/test1293-opencode-server-reuse/ (this suite)
 
 Commands
   sg docker -c 'docker build -f tests/test1293-opencode-server-reuse/Dockerfile -t anet-test1293 .'
-  sg docker -c 'docker run --rm --network none -e SOURCE_COMMIT=bbc6c29d \
+  sg docker -c 'docker run --rm --network none -e SOURCE_COMMIT=498fed1e \
       -v "$PWD/docs/tests:/artifacts" anet-test1293'
 
 Image inputs (pinned, same digests other suites use)
@@ -16,41 +16,47 @@ Image inputs (pinned, same digests other suites use)
   bun test v1.3.14 (0d9b296a)
 
 Property proven
-  Reuse of an already-running host OpenCode server is approved ONLY for an exact
-  live (nodeId, alias) binding. Every other path is a fallback: cross-identity /
-  alias mismatch / missing binding / missing startTicks / absent probe /
-  throwing probe (never throws) / dead pid / foreign uid / non-loopback url /
-  directory mismatch / generation mismatch / malformed records.
-  The module has no file-reading surface: candidates are supplied by the caller
-  (the authoritative host shared-server registry reader), so it introduces no
-  second registry and no second file-trust surface (asserted by an in-suite grep
-  guard over the module source).
+  Admission to borrow an already-running host-shared OpenCode server (the PR
+  #2776 `host shared registry → create default-selects shared` path) is granted
+  ONLY when the server is observed as: loopback url + same uid + live
+  pid/startTicks via a real probe + matching generation.
+  Everything else falls back: cross-uid, non-loopback, dead pid, missing
+  pid/startTicks, absent probe (probe_unavailable), throwing probe (probe_error,
+  never throws), generation mismatch, empty/malformed observations.
+  Node identity is deliberately NOT a gate (isolation is carried by each
+  workspace's MCP credential and session binding), so another node on the host
+  may borrow the same server. The admitted facts must come from actual
+  observation — the shared registry carries no pid/startTicks/uid/generation, so
+  a caller must not fabricate them.
+  The module has no file-reading surface: observations are supplied by the caller
+  (the existing private-file registry reader), so it introduces no second
+  registry and no second file-trust surface (asserted by an in-suite grep guard
+  over the module source).
 
 Captured container log
 --------------------------------------------------------------------------------
-test1293 opencode server reuse decision source=bbc6c29d date=2026-10-15T14:07:29+00:00
-L0 unit: reuse is approved ONLY for an exact live (nodeId, alias) binding;
-         cross-identity / alias mismatch / missing startTicks / absent or throwing
-         probe / foreign uid / non-loopback / dead pid all fall back.
+test1293 host-shared OpenCode server admission guard source=498fed1e date=2026-10-15T14:19:13+00:00
+L0 unit: a host-shared server is admitted ONLY when observed loopback + same uid
+         + live pid/startTicks (real probe) + matching generation. Missing
+         observations, absent or throwing probe, foreign uid, non-loopback and
+         dead pid all fall back. Node identity is NOT a gate here (MCP
+         credentials / session binding carry it), so another node may borrow.
 bun test v1.3.14 (0d9b296a)
 
-(pass) opencode server reuse decision > exact same identity reuses only with a live pid+startTicks probe
-(pass) opencode server reuse decision > off mode preserves today's always-spawn behaviour
-(pass) opencode server reuse decision > absent probe never approves reuse (no reuse on on-disk record alone)
-(pass) opencode server reuse decision > a throwing probe falls back and never escapes as a throw
-(pass) opencode server reuse decision > missing startTicks is refused (PID reuse would be undetectable)
-(pass) opencode server reuse decision > cross-identity reuse is refused (credentials never shared)
-(pass) opencode server reuse decision > same nodeId but a different alias is refused
-(pass) opencode server reuse decision > missing binding is refused (fail-closed)
-(pass) opencode server reuse decision > missing alias in the record is refused (fail-closed)
-(pass) opencode server reuse decision > non-loopback url is refused
-(pass) opencode server reuse decision > dead server (pid not live) falls back, never reuses stale record
-(pass) opencode server reuse decision > foreign uid is refused
-(pass) opencode server reuse decision > directory outside managed root is refused
-(pass) opencode server reuse decision > generation mismatch is refused
-(pass) opencode server reuse decision > empty candidates fall back
-(pass) opencode server reuse decision > malformed record degrades to fallback, not throw
-(pass) opencode server reuse decision > first valid candidate wins over earlier refusals
+(pass) host-shared server admission > a live same-uid loopback host-shared server is admitted
+(pass) host-shared server admission > a DIFFERENT node may borrow the same host-shared server (no node-id gate)
+(pass) host-shared server admission > off mode preserves today's always-spawn behaviour
+(pass) host-shared server admission > absent probe never admits (no admission on a registered record alone)
+(pass) host-shared server admission > a throwing probe falls back and never escapes as a throw
+(pass) host-shared server admission > missing startTicks is refused (PID reuse would be undetectable)
+(pass) host-shared server admission > missing pid is refused (fail-closed)
+(pass) host-shared server admission > non-loopback url is refused
+(pass) host-shared server admission > dead server (pid not live) falls back, never reuses a stale record
+(pass) host-shared server admission > foreign uid is refused
+(pass) host-shared server admission > generation mismatch is refused
+(pass) host-shared server admission > empty observations fall back
+(pass) host-shared server admission > malformed record degrades to fallback, not throw
+(pass) host-shared server admission > the first valid observation wins over earlier refusals
 (pass) loopback url guard > http://127.0.0.1:4096 -> %s
 (pass) loopback url guard > http://localhost:4096 -> %s
 (pass) loopback url guard > http://[::1]:4096 -> %s
@@ -59,16 +65,16 @@ bun test v1.3.14 (0d9b296a)
 (pass) loopback url guard > http://user:pass@127.0.0.1:4096 -> %s
 (pass) loopback url guard > not-a-url -> %s
 
- 24 pass
+ 21 pass
  0 fail
- 40 expect() calls
-Ran 24 tests across 1 file. [26.00ms]
+ 34 expect() calls
+Ran 21 tests across 1 file. [27.00ms]
 guard: the decision module must not read or trust any file (no second registry)
-PASS: opencode server reuse decision suite
+PASS: host-shared OpenCode server admission guard suite
 --------------------------------------------------------------------------------
 
 Limits
-  Covers the DECISION only. It does not prove the wired create/start path,
+  Covers the GUARD DECISION only. It does not prove the wired create/start path,
   native V2 startup, real server sharing, TUI, or lifecycle cleanup. Production
   wiring/qualification lives with the host shared-registry path (PR #2776) and
   is tracked by #1302. Not a release; no credentials or production changes.
