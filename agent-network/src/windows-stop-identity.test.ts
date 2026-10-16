@@ -1,3 +1,4 @@
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
@@ -378,4 +379,40 @@ describe("#1335 原生验证：后代身份协议在真机上精确可往返（W
       try { execFileSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch {}
     }
   });
+});
+
+// #1344: execute the CLI's actual private function against the strict SDK transport;
+// source extraction avoids starting the CLI or adding a product-only test hook.
+test("#1344 offline notification reaches a strict MCP transport and its target handler", async () => {
+  const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+  const start = cli.indexOf("async function notifyServerOffline(");
+  const end = cli.indexOf("// ── stop ──", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  const source = new Bun.Transpiler({ loader: "ts" }).transformSync(cli.slice(start, end));
+  const statuses: number[] = [];
+  const received: unknown[] = [];
+  const strictFetch = async (url: string, init: RequestInit) => {
+    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    transport.onmessage = async (message: any) => {
+      if (message.method === "tools/call") received.push(message.params);
+      const result = message.method === "initialize"
+        ? { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: "offline-fixture", version: "1" } }
+        : { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
+      await transport.send({ jsonrpc: "2.0", id: message.id, result });
+    };
+    await transport.start();
+    try {
+      const response = await transport.handleRequest(new Request(url, init));
+      statuses.push(response.status);
+      await response.text();
+      return response;
+    } finally { await transport.close(); }
+  };
+  const notify = new Function("loadGlobal", "nodeDisplayName", "authHeaders", "fetch", `${source}; return notifyServerOffline;`)(
+    () => ({}), (id: string) => id, () => ({}), strictFetch,
+  );
+  await notify({ hub: "http://127.0.0.1:1", node_id: "n_1344" }, "offline-fixture");
+  expect(statuses).toEqual([200, 200]);
+  expect(received).toEqual([{ name: "report_status", arguments: { resume_id: "sdk-n_1344", alias: "offline-fixture", status: "offline" } }]);
 });
