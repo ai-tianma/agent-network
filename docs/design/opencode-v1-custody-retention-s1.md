@@ -69,7 +69,7 @@ with two different answers, and neither may be produced by faking the other.
 |---|---|---|
 | `ordinary-cleanup` | **No retention intent or record has ever existed** for this root, and the root is the caller's own ordinary allocation | The **existing** flow applies unchanged: identity check, liveness check, then credential cleanup on their current paths. Ordinary never-prepared roots keep behaving exactly as today (#1272's requirement) |
 | `retain` | A record exists in `prepared`, `retain-pending`, `retained-ready` or `handed-off` | Keep the root and the record; no cleanup |
-| `retain` (prepare-in-flight) | A prepare is **in flight or has a durable intent** for this root, but no committed record is readable yet | Keep the root; cleanup must **not** conclude `ordinary-cleanup` while an intent exists (§3.1, §4) |
+| `retain` (prepare in flight) | The store lock is held by a **live** coordinator generation for this root, or a commit is unconfirmed **while that generation is alive** | Keep the root until the commit resolves (§3.1, §4) |
 | `retain` + `refuse(record-expected-missing)` | A record **should** exist (a prepare intent was observed) but is **lost, corrupt, unreadable, or unobservable**, or its digest chain does not verify | Keep everything; refuse. This is the *only* case where a missing record means unknown |
 | `released` | A **durable** `released` record exists for this exact root identity (`{dev, ino}`) with its release evidence and the holding participant | Cleanup of the retained root is permitted |
 | `refuse(...)` | Cannot decide (schema newer, mixed state, unreadable record, unqualified participant) | Keep everything; refuse with a reason code |
@@ -83,9 +83,16 @@ of a record; it requires the durable release record of §5.
 
 | Case | Evidence | Decision |
 |---|---|---|
-| never-prepared | **no intent and no record has ever existed**, and none is in flight | `ordinary-cleanup` |
-| intent exists, record missing/corrupt/unreadable | a durable intent (or an observed intent) exists, but no verifiable committed record | `retain` + `refuse(record-expected-missing)` |
-| prepare in flight | the store lock is held by a live coordinator generation, or a durable intent exists whose commit is unconfirmed | `retain` until the commit resolves |
+| never-prepared | **no intent, no record, no confirmation**, and no prepare in flight | `ordinary-cleanup` |
+| prepare in flight | the store lock is held by a **live** coordinator generation, or a commit is unconfirmed while that generation is alive | `retain` until it resolves |
+| intent-only, **never committed** | a durable intent exists but **no commit confirmation has ever existed** (e.g. the coordinator died between intent and commit) | **no claim was ever made** ⇒ `ordinary-cleanup` stays correct; keep the intent for audit |
+| **committed-then-lost** | a **commit confirmation exists** (or its durable trace does) while the record is missing, corrupt or unreadable | `retain` + `refuse(record-expected-missing)` |
+
+🔴 **The commit-confirmation artifact is the discriminator.** It is what makes "a
+record was *expected*" provable: without it we have *never committed* (ordinary path
+dissolves the root normally), with it we have *committed then lost* (retain and
+refuse). Intent alone is **not** evidence of a claim, and the digest chain alone
+cannot tell the two apart.
 
 **Race rule (cleanup vs prepare).** Cleanup and prepare serialize on the same
 store lock (§4), and a caller is told `prepared` **only after** the record's commit
@@ -126,9 +133,9 @@ The design therefore names an authority and a commit boundary:
 | Observation | Verdict | Allowed recovery |
 |---|---|---|
 | record verifies **and** matching confirmation present | committed | none needed |
-| durable intent, but no record and no confirmation | no claim was ever made | ordinary path stays correct (§3.1) |
+| durable intent, but **no record and no confirmation** | never committed ⇒ no claim was made | ordinary path stays correct (§3.1); keep the intent for audit |
 | record verifies, **confirmation missing** | `unknown` ⇒ `retain` + `refuse(commit-unconfirmed)` | only the **named recovery authority** may **re-publish the same revision and digest** through the full protocol (idempotent). It may not infer durability and may not advance the revision |
-| confirmation present, record missing or corrupt | contradiction ⇒ `refuse(record-missing)` | retain both artifacts; no auto-repair |
+| **confirmation present**, record missing or corrupt | committed-then-lost ⇒ `retain` + `refuse(record-expected-missing)` | retain both artifacts; no auto-repair; only the named recovery authority may re-publish the same revision |
 | digest chain broken | `unknown` ⇒ retain + refuse | named recovery authority only; same-revision re-publish |
 
 - **Lock ownership**: the lock file records the coordinator generation that holds
@@ -324,7 +331,8 @@ Reason codes: `no-record` (⇒ ordinary path, **not** a refusal), `schema-newer`
 | Outcome incomplete (no `nativeExit` / `writerExclusion` / `credentialDisposition`) | Stay `prepared`; not `retained-ready` | A generic evidence digest must not stand in for these |
 | Coordinator generation exited, then something writes an outcome | refuse: writer generation must match the record's coordinator | A stale exited process may not author an outcome |
 | Credential cleanup needed while a root is retained | credential cleanup proceeds on its **own** path | Must not be disabled by retention; must not copy real auth to a target |
-| Cleanup races an in-flight prepare | `retain` until the commit resolves; the lock is the arbiter | Cleanup must not conclude `ordinary-cleanup` while a durable intent exists; prepare must not report "prepared" before commit evidence exists |
+| Cleanup races an **in-flight** prepare (lock held by a live generation) | `retain` until the commit resolves; the lock is the arbiter | Cleanup must not conclude `ordinary-cleanup` while that lock is live; prepare must not report "prepared" before commit evidence exists |
+| Cleanup meets an **intent-only** root (no confirmation, coordinator gone) | `ordinary-cleanup` — never committed, so no claim existed | Must not be reported as `record-expected-missing`; must not be "repaired" into a claim |
 | Record verifies but its commit confirmation is missing | `unknown` ⇒ `retain` + `refuse(commit-unconfirmed)`; only the named recovery authority may re-publish the **same** revision | Must not be read as "durable"; must not advance the revision; must not be "repaired" by inference |
 | Native exit observed **without** a writer-exclusion barrier | stay `prepared` | Exit must not be recorded as, or substituted for, exclusion |
 
