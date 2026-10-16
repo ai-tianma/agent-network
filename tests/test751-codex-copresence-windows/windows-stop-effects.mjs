@@ -235,6 +235,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         for (const c of candidates) {
           try {
             const j = JSON.parse(c);
+            if (j.jsonrpc !== "2.0" || j.id !== 2) continue; // this report_status response only
             if (Object.prototype.hasOwnProperty.call(j, "error")) throw new Error(`MCP error reply: ${JSON.stringify(j.error)}`);
             if (j.result && j.result.isError === true) throw new Error(`MCP tool reported isError: ${JSON.stringify(j.result)}`);
             if (j.result) handled = j.result;
@@ -253,10 +254,10 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (!inner) throw new Error(`test1337 A: MCP result carried no parsable inner JSON: ${JSON.stringify(handled).slice(0, 300)}`);
         if (inner.ok !== true) throw new Error(`test1337 A: Hub report_status not ok:true (${JSON.stringify(inner).slice(0, 300)})`);
         if (inner.alias !== expected.alias) throw new Error(`test1337 A: returned alias mismatch (got ${inner.alias}, expected ${expected.alias})`);
-        if (inner.resume_id !== undefined && inner.resume_id !== expected.resumeId) {
+        if (inner.resume_id !== expected.resumeId) {
           throw new Error(`test1337 A: returned resume_id mismatch (got ${inner.resume_id}, expected ${expected.resumeId})`);
         }
-        console.log(`       (A inner: Hub ok:true, alias=${inner.alias}, resume_id=${inner.resume_id ?? "(none)"} — matches expected target)`);
+        console.log(`       (A inner: Hub ok:true, alias=${inner.alias}, resume_id=${inner.resume_id} — matches expected target)`);
         console.log(`       (A: upstream responded ${status} to the target-bound offline notification)`);
         console.log(`       (A evidence: target-bound offline alias=${r.offline[0]?.alias} resumeId=${r.offline[0]?.resumeId}; upstream=${r.offline[0].upstreamStatus} (2xx); MCP result parsed=yes; unrelated-node notifications excluded by self-check)`);
         console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias}, upstream=${r.offline[0].upstreamStatus})`);
