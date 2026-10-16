@@ -69,6 +69,7 @@ with two different answers, and neither may be produced by faking the other.
 |---|---|---|
 | `ordinary-cleanup` | **No retention intent or record has ever existed** for this root, and the root is the caller's own ordinary allocation | The **existing** flow applies unchanged: identity check, liveness check, then credential cleanup on their current paths. Ordinary never-prepared roots keep behaving exactly as today (#1272's requirement) |
 | `retain` | A record exists in `prepared`, `retain-pending`, `retained-ready` or `handed-off` | Keep the root and the record; no cleanup |
+| `retain` (prepare-in-flight) | A prepare is **in flight or has a durable intent** for this root, but no committed record is readable yet | Keep the root; cleanup must **not** conclude `ordinary-cleanup` while an intent exists (§3.1, §4) |
 | `retain` + `refuse(record-expected-missing)` | A record **should** exist (a prepare intent was observed) but is **lost, corrupt, unreadable, or unobservable**, or its digest chain does not verify | Keep everything; refuse. This is the *only* case where a missing record means unknown |
 | `released` | A **durable** `released` record exists for this exact root identity (`{dev, ino}`) with its release evidence and the holding participant | Cleanup of the retained root is permitted |
 | `refuse(...)` | Cannot decide (schema newer, mixed state, unreadable record, unqualified participant) | Keep everything; refuse with a reason code |
@@ -77,6 +78,26 @@ with two different answers, and neither may be produced by faking the other.
 claimed", while `released` asserts "a claim existed and was closed by evidence".
 A `released` outcome cannot be produced by a reader, by a timeout, or by absence
 of a record; it requires the durable release record of §5.
+
+### 3.1 Never-prepared vs record-lost, and the cleanup/prepare race
+
+| Case | Evidence | Decision |
+|---|---|---|
+| never-prepared | **no intent and no record has ever existed**, and none is in flight | `ordinary-cleanup` |
+| intent exists, record missing/corrupt/unreadable | a durable intent (or an observed intent) exists, but no verifiable committed record | `retain` + `refuse(record-expected-missing)` |
+| prepare in flight | the store lock is held by a live coordinator generation, or a durable intent exists whose commit is unconfirmed | `retain` until the commit resolves |
+
+**Race rule (cleanup vs prepare).** Cleanup and prepare serialize on the same
+store lock (§4), and a caller is told `prepared` **only after** the record's commit
+evidence exists (§4). Therefore:
+
+- a cleanup path may not conclude `ordinary-cleanup` while the lock is held by a
+  prepare, or while a durable intent exists;
+- a prepare may not report "prepared" to its caller before the commit evidence
+  exists — so there is no window in which a caller believes retention was claimed
+  while a cleanup may still take the ordinary path;
+- if a crash loses the intent **before** any commit, no retention was ever claimed:
+  the ordinary path stays correct, and this is **not** a lost retention record.
 
 ## 4. Record store, commit authority and write permissions
 
@@ -89,14 +110,27 @@ The design therefore names an authority and a commit boundary:
 - **Authority**: the record store is the **single serialization point**. A writer
   must hold the store's exclusive advisory lock for the whole commit (compare →
   write → publish). No other participant may commit concurrently.
-- **Commit boundary** (one atomic publication): read current record → compare
-  `expectedRevision` **and** `expectedPrevDigest` → write a new record to a temp
-  file → `fsync` the temp file → `rename` over the record → `fsync` the parent
-  directory → release the lock. Publication is atomic; the compare is meaningful
-  **only** inside the lock.
-- **Crash adjudication on read**: verify the digest chain. A record that does not
-  verify, or that was published without a directory `fsync` we can observe, is
-  `unknown` ⇒ `cleanupDecision = retain + refuse`. Never silently repair.
+- **Commit boundary** (one atomic publication, with **positive** durability
+  evidence): hold the lock → read current record → compare `expectedRevision`
+  **and** `expectedPrevDigest` → write the new record to a temp file → `fsync` the
+  temp file → `rename` over the record → `fsync` the parent directory → **write the
+  commit-confirmation artifact `{recordId, revision, digest}`** (written *after*
+  that directory `fsync`) → `fsync` the artifact → release the lock.
+- **Durability is never inferred after the fact.** The confirmation artifact is the
+  evidence that publish + directory durability completed. A record whose digest
+  verifies but whose matching confirmation is absent is **`unknown`** — not
+  "probably durable". Nothing else may stand in for the confirmation.
+- **Crash recovery (read side)** — the verdict is derived from artifacts, never
+  from inference:
+
+| Observation | Verdict | Allowed recovery |
+|---|---|---|
+| record verifies **and** matching confirmation present | committed | none needed |
+| durable intent, but no record and no confirmation | no claim was ever made | ordinary path stays correct (§3.1) |
+| record verifies, **confirmation missing** | `unknown` ⇒ `retain` + `refuse(commit-unconfirmed)` | only the **named recovery authority** may **re-publish the same revision and digest** through the full protocol (idempotent). It may not infer durability and may not advance the revision |
+| confirmation present, record missing or corrupt | contradiction ⇒ `refuse(record-missing)` | retain both artifacts; no auto-repair |
+| digest chain broken | `unknown` ⇒ retain + refuse | named recovery authority only; same-revision re-publish |
+
 - **Lock ownership**: the lock file records the coordinator generation that holds
   it. A lock held by a dead generation is **not** auto-taken by a different
   participant; recovery requires the named recovery authority below.
@@ -126,16 +160,29 @@ A generic `stateEvidence` digest cannot prove anything. Each edge therefore
 consumes **typed** references:
 
 ```ts
-type GenRef        = { pid: number; startTicks: string; uid: number; exeDigest: string };
-type FsId          = { dev: string; ino: string };                     // exact filesystem identity
-type WriterExclusion = { kind: "native-clean-exit" | "scoped-check"; ref: string };
+type GenRef = { pid: number; startTicks: string; uid: number; exeDigest: string };
+type FsId   = { dev: string; ino: string };                    // exact filesystem identity
+
+// 🔴 Exit and exclusion are DIFFERENT facts, and need separate evidence.
+//    A native process having exited (even cleanly) says nothing about whether
+//    another writer can still write the tree.
+type NativeExit = { pid: number; startTicks: string; observedAt: string; ref: string };
+type WriterExclusion = {
+  kind: "exclusive-store-lock" | "fs-barrier" | "participant-audit-no-writer";
+  ref: string;
+  heldFrom: string;
+  heldUntil: string | null;   // must hold AT outcome time AND through the retention window
+};
 type CredentialDisposition = { mode: "unchanged" | "cleaned"; ref: string };  // never carries secrets
+type CommitEvidence = { revision: number; digest: string; confirmationRef: string };  // §4
+
 type QualifiedOutcome = {
   kind: "qualified";
-  coordinator: GenRef;                 // the writer must still be this generation
-  nativeExit: { observedAt: string; ref: string };   // native *child* exit evidence
-  writerExclusion: WriterExclusion;    // proof no other writer holds the tree
-  credentialDisposition: CredentialDisposition;      // separate, never suppressed by retention
+  coordinator: GenRef;               // the writer must still be this generation
+  nativeExit: NativeExit;            // the native *child* stopped being the live generation
+  writerExclusion: WriterExclusion;  // a real barrier — NOT implied by the exit
+  credentialDisposition: CredentialDisposition;   // separate; never suppressed by retention
+  commit: CommitEvidence;            // the outcome's own durability evidence (§4)
   target?: { nodeId: string; alias: string; confirmedBy: string };
 };
 ```
@@ -144,7 +191,7 @@ type QualifiedOutcome = {
 |---|---|---|---|---|
 | `observed` → `prepare-requested` | coordinator | identity group complete, **both coordinates present** with their `{dev, ino}`; **absent inodes do not qualify** (observation may record absence, preparation may not) | replay yields the same digest; concurrent prepares conflict in the lock | nothing durable ⇒ back to `observed` |
 | `prepare-requested` → `prepared` | coordinator | §6 participant audit passed; durable commit per §4 with `revision=1`, `prevRecordDigest=null` | second writer loses the compare; identical replay is a no-op | torn write ⇒ `unknown` ⇒ retain + refuse |
-| `prepared` → `retained-ready` | coordinator (generation must still match) | a `QualifiedOutcome` whose `coordinator` == the record's coordinator generation, with `nativeExit`, `writerExclusion`, `credentialDisposition` all present; any re-read of `{dev, ino}` that differs ⇒ refuse | duplicate outcomes collapse to one revision | re-read failure ⇒ `refused` |
+| `prepared` → `retained-ready` | coordinator (generation must still match) | a `QualifiedOutcome` whose `coordinator` == the record's coordinator generation, with **`nativeExit` AND a separate `writerExclusion` barrier held through the retention window** (a native exit alone is **not** exclusion), plus `credentialDisposition` and its own `commit` evidence; any re-read of `{dev, ino}` that differs ⇒ refuse | duplicate outcomes collapse to one revision | re-read failure ⇒ `refused` |
 | `prepared` → `retain-pending` | coordinator (or named recovery authority) | native child no longer matches its generation **and** no qualified outcome exists | idempotent (pessimistic) | this *is* the crash path |
 | `retained-ready` → `handed-off` | named target | **#1238's intent journal and all-launcher refusal gate satisfied** (precondition, not a footnote); target identity read independently; CAS on `revision+1` | exactly one CAS wins; losers re-read | crash mid-handoff ⇒ both stores retained |
 | `handed-off`/`retained-ready` → `released` | current holder | **#1239's final-history / lossless-restore gate satisfied** (precondition); explicit release evidence; `{dev, ino}` unchanged since the revision read | idempotent per `(recordId, revision)` | crash before durable release ⇒ still retained |
@@ -277,6 +324,9 @@ Reason codes: `no-record` (⇒ ordinary path, **not** a refusal), `schema-newer`
 | Outcome incomplete (no `nativeExit` / `writerExclusion` / `credentialDisposition`) | Stay `prepared`; not `retained-ready` | A generic evidence digest must not stand in for these |
 | Coordinator generation exited, then something writes an outcome | refuse: writer generation must match the record's coordinator | A stale exited process may not author an outcome |
 | Credential cleanup needed while a root is retained | credential cleanup proceeds on its **own** path | Must not be disabled by retention; must not copy real auth to a target |
+| Cleanup races an in-flight prepare | `retain` until the commit resolves; the lock is the arbiter | Cleanup must not conclude `ordinary-cleanup` while a durable intent exists; prepare must not report "prepared" before commit evidence exists |
+| Record verifies but its commit confirmation is missing | `unknown` ⇒ `retain` + `refuse(commit-unconfirmed)`; only the named recovery authority may re-publish the **same** revision | Must not be read as "durable"; must not advance the revision; must not be "repaired" by inference |
+| Native exit observed **without** a writer-exclusion barrier | stay `prepared` | Exit must not be recorded as, or substituted for, exclusion |
 
 ## 12. Acceptance plan for the next slice (not executed here)
 
@@ -293,7 +343,10 @@ retained; (5) `schemaVersion+1` ⇒ refuse; (6) unqualifiable sweeper ⇒ refuse
 prepare (and retention survives an external sweep when a record exists); (7)
 **never-prepared root still gets ordinary cleanup** (the regression that motivates
 §3); (8) incomplete outcome ⇒ never `retained-ready`; (9) empty `auth.json` ⇒
-credential cleanup still runs.
+credential cleanup still runs; (10) a cleanup racing an in-flight prepare ⇒ `retain`
+(the race of §3.1); (11) a record whose confirmation is missing ⇒ `unknown`, never
+inferred durable, and the named recovery authority re-publishes the same revision;
+(12) a native exit without an exclusion barrier ⇒ never `retained-ready`.
 
 None of these runs natively or on an original machine in this slice.
 
