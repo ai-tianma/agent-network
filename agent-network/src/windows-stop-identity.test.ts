@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
 import {
   captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript,
   probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr,
@@ -218,5 +219,28 @@ describe("#1335 副作用门控：**实际观测**「记录仍在／未通知离
     const notifyAt = cli.indexOf("notifyServerOffline(resolved.profile, resolved.id)", settleAt);
     expect(notifyAt).toBeGreaterThan(settleAt);
     expect(cli.slice(settleAt, notifyAt)).toContain("if (settle.kept)");
+  });
+});
+
+describe("#1335 原生验证：后代身份协议在真机上精确可往返（Windows runner 才跑）", () => {
+  test.skipIf(process.platform !== "win32")("CIM `CreationDate` 对同一进程两次读数**完全相同**（不截短／不近似），且与根的 ticks 协议不同域", () => {
+    const child = spawn("cmd.exe", ["/c", "ping -n 30 127.0.0.1 > nul"], { windowsHide: true });
+    const ps = (script: string) => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 30_000,
+    }).trim();
+    try {
+      const readCreation = () => ps(`(Get-CimInstance Win32_Process -Filter "ProcessId = ${child.pid}").CreationDate.ToString('o')`);
+      const first = readCreation();
+      const second = readCreation();
+      expect(first.length).toBeGreaterThan(8);
+      // 🔴 精确相等：这正是后代身份协议 (`kind:"creation"`) 赖以判 alive/pid-reused 的依据。
+      expect(second).toBe(first);
+      // 与根的 `.NET ticks` 协议**不同域**（两者不混用、互不比较）。
+      const ticks = ps(`[Diagnostics.Process]::GetProcessById(${child.pid}).StartTime.ToUniversalTime().Ticks.ToString()`);
+      expect(ticks).toMatch(/^\d+$/);
+      expect(first).not.toBe(ticks);
+    } finally {
+      try { execFileSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch {}
+    }
   });
 });
