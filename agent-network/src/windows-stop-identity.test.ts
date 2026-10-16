@@ -37,7 +37,7 @@ function scriptedEnv(opts: { capture: string; probes: string[]; snapshot?: strin
     if (script.includes("SNAP:")) {
       calls.push("snapshot");
       if (opts.snapshot === null) throw new Error("snapshot failed");
-      return opts.snapshot ?? "SNAP:";
+      return opts.snapshot ?? "SNAP:1=0,4=1";   // 非空、与捕获树无关：证明正常退出竞态仍可判 stopped
     }
     const pid = Number(/GetProcessById\((\d+)\)|ProcessId = (\d+)/.exec(script)!.slice(1).filter(Boolean)[0]);
     calls.push(`probe:${pid}`);
@@ -126,6 +126,14 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(stop.verdict.kind).toBe("unverifiable");     // 旧实现（只从 8100 BFS）会误判 stopped
     expect(stop.mustKeepRecord).toBe(true);
     expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("unaccounted live descendants 9999");
+  });
+
+  test("🔴 [评审 2798 收尾] 全机快照**零行**不得证明全部退出 ⇒ 必须 unknown", () => {
+    const env = scriptedEnv({ capture: cap(`8744=${DESC_BIRTH}`), probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:ABSENT"], snapshot: "SNAP:" });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("unverifiable");     // 曾误判 stopped（把观测缺口当空集合）
+    expect(stop.mustKeepRecord).toBe(true);
+    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("snapshot was empty");
   });
 
   test("🔴 [Codex P1] 非零 kill 且快照**无法取得/不可解析** ⇒ 必须 unknown", () => {
@@ -332,7 +340,7 @@ describe("#1335 记录清理／本地节点停止回调门控（spy；真实文�
 });
 
 describe("#1335 原生验证：后代身份协议在真机上精确可往返（Windows runner 才跑）", () => {
-  test.skipIf(process.platform !== "win32")("（原生）**有真实子进程**时 capture 仍返回合法 CAP 并能枚举到后代（Codex P1：`$id`≡只读 `$PID` 的碰撞已消除）", () => {
+  test.skipIf(process.platform !== "win32")("（原生）**有真实子进程**时 capture 仍返回合法 CAP 并能枚举到后代", () => {
     const parent = spawn("cmd.exe", ["/c", "start /b ping -n 30 127.0.0.1 > nul & ping -n 30 127.0.0.1 > nul"], { windowsHide: true });
     const ps = (script: string) => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 30_000,

@@ -508,6 +508,10 @@ export function orchestrateWindowsManagedStop(
     catch { snapshot = null; }
     if (snapshot === null) {
       reconGaps.push(`tree not reconciled: process snapshot not obtained or not understood`);
+    } else if (snapshot.length === 0) {
+      // 🔴 全机 CIM 枚举**零行**不能证明"受管树已消失"：执行查询本身就会产生 powershell 进程，
+      //    空结果更可能是**观测缺口**。不得把观察缺口当空集合 ⇒ unknown。
+      reconGaps.push(`tree not reconciled: whole-machine process snapshot was empty; completeness not provable`);
     } else {
       const unaccounted = findUnaccountedDescendants(snapshot, capturedPids);
       if (unaccounted.length > 0) reconGaps.push(`tree not proven empty after a non-zero taskkill: unaccounted live descendants ${unaccounted.join(",")}`);
@@ -560,6 +564,11 @@ export function parseWindowsProcessSnapshot(raw: string): Array<{ pid: number; p
  * 这修掉的是这个反例：捕获 8100→8744 后，8744 又生出 9999；非零 kill 使 8100/8744 退出而
  * 9999 存活（快照里 `9999=8744`）。旧实现只从 8100 出发 BFS ⇒ 根已不可达 ⇒ 得空 ⇒ 误判 stopped。
  * 现在 8744 也在种子里 ⇒ 9999 可达 ⇒ 必须 `unknown`。
+ *
+ * ⚠️ **保证范围（有界）**：这是**单次有限快照**上的可达性判据，**不是**"历史后代完整性证明"。
+ *    若某个中间节点**从未被捕获**且已退出，有限 pid/ppid 快照里**没有那条历史边**，本条判据
+ *    看不到它；因此本片**不承诺**全时段/任意树零残留。超出该范围需要启动屏障/Job Object 一类
+ *    机制，**不在本片引入**。
  */
 export function findUnaccountedDescendants(
   snapshot: Array<{ pid: number; ppid: number }>,
