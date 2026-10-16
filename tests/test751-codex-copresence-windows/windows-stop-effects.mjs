@@ -226,6 +226,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
           throw new Error(`test1337 A: offline notification did not get a real upstream response (status=${status})`);
         }
         console.log(`       (A: upstream responded ${status} to the target-bound offline notification)`);
+        console.log(`       (A evidence: target-bound offline alias=${r.offline[0]?.alias} resumeId=${r.offline[0]?.resumeId}; upstream=${r.offline[0].upstreamStatus}; unrelated-node notifications excluded by self-check)`);
         console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias}, upstream=${r.offline[0].upstreamStatus})`);
       } finally { cleanup(s.identities); }
     }
@@ -254,6 +255,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         }
         const alive = s.identities.filter((p) => { try { return probeTicks(p.pid) === p.creationDate; } catch { return false; } });
         if (alive.length === 0) throw new Error("test1337 B: expected the real managed identities to still be alive");
+        console.log(`       (B evidence: nonzero-noop tk hits bound to pids ${s.identities.map((p) => p.pid).join(",")}; cli diagnostic contains 'Windows managed processes survived'; offline target count=0)`);
         console.log(`PASS test1337 B: rc=${r.rc}, record retained, offline=0, alive=${alive.length}`);
       } finally { cleanup(s.identities); }
     }
@@ -279,6 +281,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (r.out.includes("STOP_TIMEOUT: Windows ownership could not be proven")) {
           throw new Error(`test1337 C: an earlier ownership pre-check failure masqueraded as this scenario\n${r.out}`);
         }
+        console.log(`       (C evidence: reached 'could not prove Windows managed identity exited'; record bytes equal; target offline count=0)`);
         console.log(`PASS test1337 C: rc=${r.rc}, record retained, offline=0, reached unverifiable`);
       } finally { cleanup(s.identities); }
     }
