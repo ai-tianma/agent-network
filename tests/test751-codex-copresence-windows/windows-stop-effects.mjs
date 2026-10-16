@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { spawnSync } from "node:child_process";
 
@@ -41,6 +41,12 @@ export async function runStopEffectsScenarios({ cli, env, project, root, join, t
 
   /** 用给定夹具模式跑一次**真实** `node stop`，返回 rc（不抛）。start 复用现有 **PTY** 助手。 */
   async function stopWithShim(tkMode, psMode) {
+    // 像主流程一样为该节点准备它**自己的** codex-home 与可用登录形状（否则 start 起不来/超时）。
+    const shimHome = join(project, ".anet", "nodes", shimNode, "codex-home");
+    mkdirSync(shimHome, { recursive: true });
+    writeFileSync(join(shimHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-fake-test751-windows" }) + "\n");
+    env.ANET_TEST751_CODEX_HOME = shimHome;
+    env.ANET_TEST751_MATERIALIZE_ON_CREATE = "1";
     writeFileSync(psLog, "");
     writeFileSync(tkLog, "");
     rmSync(shimRecord, { force: true });
