@@ -308,6 +308,7 @@ import {
   probeWindowsOwnedLoopbackConnection,
   readWindowsCopresenceRecord,
   orchestrateWindowsManagedStop,
+  settleWindowsManagedStop,
   taskkillWindowsProcessTree,
   windowsCopresenceLogPath,
   windowsCopresenceRecordPath,
@@ -13131,12 +13132,16 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
         console.error(`[anet] STOP_TIMEOUT: could not prove Windows managed identity exited: ${stop.verdict.unknown.join(", ")}`);
         process.exit(1);
       }
-      if (stop.mustKeepRecord) {
+      // 🔴 副作用由共享 settle 门控：只有 stopped 才删记录并通知离线；两种失败都不删、不通知。
+      const settle = await settleWindowsManagedStop(stop, {
+        removeRecord: () => rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true }),
+        notifyOffline: () => stopNode(resolved.id),
+      });
+      if (settle.kept) {
         console.error(`[anet] STOP_TIMEOUT: Windows managed identity could not be settled; record kept, hub not notified offline.`);
         process.exit(1);
       }
-      rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
-      const pidResult = await stopNode(resolved.id);
+      const pidResult = settle.notification!;
       if (pidResult.status === "survived") {
         console.error(`[anet] STOP_TIMEOUT: Windows node pid ${pidResult.pid} survived; hub was not notified offline.`);
         process.exit(1);

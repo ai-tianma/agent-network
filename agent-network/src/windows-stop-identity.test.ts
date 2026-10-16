@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
-  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, windowsCaptureScript,
+  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript,
   probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr,
-  type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity,
+  type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity, type WindowsStopOrchestration,
 } from "./windows-codex-copresence";
 
 // #1335 见证。🔴 正负见证走 **CLI 实际使用的那一份编排**
@@ -83,7 +83,7 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("pid reused; unrelated process left untouched");
   });
 
-  test("（编排层）查询 unknown ⇒ verdict 非零且 mustKeepRecord=true —— **未验** CLI 退出码/记录文件/离线通知", () => {
+  test("（编排层）查询 unknown ⇒ verdict 非零且 mustKeepRecord=true（副作用门控由下方 spy 见证验证）", () => {
     const env = scriptedEnv({
       capture: cap(`8744=${DESC_BIRTH}`),
       probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "garbage-not-a-protocol"],
@@ -91,7 +91,7 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     const stop = orchestrateWindowsManagedStop([root], env);
     expect(stop.verdict.kind).toBe("unverifiable");
     expect(stop.mustKeepRecord).toBe(true);
-    // 🔴 本条**只**断言编排层的 verdict 与布尔；CLI 是否真的保留记录、是否真的没通知离线 = **未验**（见下条结构见证）。
+    // 编排层断言 verdict/布尔；「是否真的没删记录、没通知离线」由下面的 spy 门控见证**实际观测**。
   });
 
   test("负控：初检匹配→**取证期间根复用** ⇒ kill 调用为 0，无关身份不被触碰", () => {
@@ -108,19 +108,17 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(diagnostics).toContain("pid reused; unrelated process left untouched");
   });
 
-  test("（结构见证）CLI 停止入口在删记录/通知离线**之前**退出 —— 副作用本身仍为**未验**", () => {
+  test("（结构见证）CLI 使用共享 settle 门控副作用（删记录/通知离线只在 green 发生）", () => {
     const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
     const start = cli.indexOf("const stop = orchestrateWindowsManagedStop(");
-    const rm = cli.indexOf("rmSync(windowsCopresenceRecordPath(", start);
     expect(start).toBeGreaterThan(0);
-    expect(rm).toBeGreaterThan(start);
-    const slice = cli.slice(start, rm);
-    expect(slice).toContain("if (stop.verdict.kind === \"survived\")");
-    expect(slice).toContain("if (stop.verdict.kind === \"unverifiable\")");
-    expect(slice).toContain("if (stop.mustKeepRecord)");
-    expect((slice.match(/process\.exit\(1\)/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    // 🔴 未验：CLI 的**实际退出码**、记录文件是否仍在、是否**未**通知 Hub 离线 —— 需要隔离 CLI fixture 才能观察，
-    //    本片**保留为未验项**，不把编排层布尔当作已发生的副作用证据。
+    const settleAt = cli.indexOf("await settleWindowsManagedStop(stop,", start);
+    expect(settleAt).toBeGreaterThan(start);
+    const slice = cli.slice(start, settleAt);
+    expect(slice).toContain('if (stop.verdict.kind === "survived")');
+    expect(slice).toContain('if (stop.verdict.kind === "unverifiable")');
+    expect((slice.match(/process\.exit\(1\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(cli.slice(settleAt)).toContain("if (settle.kept)");
   });
 });
 
@@ -176,5 +174,49 @@ describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据�
     expect(kept).toContain("ERROR: The process with PID 8744");
     expect(kept).not.toContain("secret");
     expect(droppedBytes).toBeGreaterThan(0);
+  });
+});
+
+describe("#1335 副作用门控：**实际观测**「记录仍在／未通知离线」（spy，非布尔）", () => {
+  const orchestrationWith = (kind: "stopped" | "survived" | "unverifiable"): WindowsStopOrchestration => ({
+    verdict: kind === "stopped"
+      ? { kind: "stopped", retainedDiagnostics: [] }
+      : kind === "survived"
+        ? { kind: "survived", alive: ["bridge:desc pid=8744"], retainedDiagnostics: [] }
+        : { kind: "unverifiable", unknown: ["bridge:desc pid=8744"], retainedDiagnostics: [] },
+    killedPids: [], identities: [], mustKeepRecord: kind !== "stopped",
+  });
+
+  test("survived / unverifiable ⇒ 删记录 0 次、通知离线 0 次（两种失败副作用**确实没发生**）", async () => {
+    for (const kind of ["survived", "unverifiable"] as const) {
+      const calls: string[] = [];
+      const settle = await settleWindowsManagedStop(orchestrationWith(kind), {
+        removeRecord: () => { calls.push("removeRecord"); },
+        notifyOffline: async () => { calls.push("notifyOffline"); return "notified"; },
+      });
+      expect(calls).toEqual([]);
+      expect(settle).toEqual({ kept: true, notified: false });
+    }
+  });
+
+  test("stopped ⇒ 删记录 1 次、通知离线 1 次，且顺序为 删记录→通知（分辨力：同场景翻转 verdict 即翻转副作用）", async () => {
+    const calls: string[] = [];
+    const settle = await settleWindowsManagedStop(orchestrationWith("stopped"), {
+      removeRecord: () => { calls.push("removeRecord"); },
+      notifyOffline: async () => { calls.push("notifyOffline"); return { status: "stopped", pid: 8100 }; },
+    });
+    expect(calls).toEqual(["removeRecord", "notifyOffline"]);
+    expect(settle.kept).toBe(false);
+    expect(settle.notified).toBe(true);
+    expect(settle.notification).toEqual({ status: "stopped", pid: 8100 });
+  });
+
+  test("（结构见证）CLI 的 Hub 离线通知只可能在 settle 之后（非 green 提前退出）", () => {
+    const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
+    const settleAt = cli.indexOf("await settleWindowsManagedStop(stop,");
+    expect(settleAt).toBeGreaterThan(0);
+    const notifyAt = cli.indexOf("notifyServerOffline(resolved.profile, resolved.id)", settleAt);
+    expect(notifyAt).toBeGreaterThan(settleAt);
+    expect(cli.slice(settleAt, notifyAt)).toContain("if (settle.kept)");
   });
 });

@@ -483,6 +483,28 @@ export function orchestrateWindowsManagedStop(
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 
+export interface WindowsStopSideEffects<TNotification> {
+  /** 删除 Windows 归属记录（`rmSync(windowsCopresenceRecordPath(…))`）。 */
+  removeRecord: () => void;
+  /** 通知 Hub 该节点离线（含其前的 pid 收敛）。 */
+  notifyOffline: () => Promise<TNotification>;
+}
+
+/**
+ * 🔴 副作用的**唯一门控**（CLI 与见证共用）：只有 `stopped` 才删记录并通知离线；
+ * `survived`/`unverifiable` **既不删记录也不通知离线**（并把两者如实回报给调用方，
+ * 便于用 spy 观测"实际发生了什么"，而不是只看一个布尔）。
+ */
+export async function settleWindowsManagedStop<TNotification>(
+  outcome: WindowsStopOrchestration,
+  effects: WindowsStopSideEffects<TNotification>,
+): Promise<{ kept: boolean; notified: boolean; notification?: TNotification }> {
+  if (outcome.verdict.kind !== "stopped") return { kept: true, notified: false };
+  effects.removeRecord();
+  const notification = await effects.notifyOffline();
+  return { kept: false, notified: true, notification };
+}
+
 export type WindowsStopVerdict =
   | { kind: "stopped"; retainedDiagnostics: string[] }
   | { kind: "survived"; alive: string[]; retainedDiagnostics: string[] }
