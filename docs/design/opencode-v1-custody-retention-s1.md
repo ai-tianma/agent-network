@@ -1,240 +1,307 @@
-# Versioned custody state and permission contract for V1 retention (S1 design, #1334)
+# Versioned custody state, CAS authority and cleanup contract for V1 retention (S1 design, #1334)
 
-Status: **design draft only**. This document defines a schema, a state machine and
-a permission contract for a future V1 exact-instance retention/ custody protocol.
-It is **not** a runtime implementation, **not** a custody proof, and it creates no
-module that can only refuse. Nothing here changes runtime, marker, cleanup,
-registry or startup paths. No native/original-machine run is performed or promised.
+Status: **design draft only** (revision 2, after review of head `4214d1c8`). This
+document defines a schema, a cleanup decision, a state machine, a commit authority
+and a permission contract for a future V1 exact-instance retention/custody
+protocol. It is **not** a runtime implementation and **not** a custody proof.
+Nothing here changes runtime, marker, cleanup, registry or startup paths.
 
-Lineage: this is the first design slice of #1269 (itself the prerequisite line of
-#1238, per the five-layer structure — #1269 is **not** moved, and its contract /
-native / main items remain **unfinished**). S2 (cleanup participation) and S3
-(named handoff/release execution) are **not** dispatched. #1272 and #1239 are not
-taken here. S1 is a design delivery time; it is not an ETA for the migration.
+Lineage: first design slice of #1269 (prerequisite line of #1238; #1269 is **not**
+moved and its contract/native/main items remain **unfinished**). S2 (cleanup
+participation) and S3 (named handoff/release execution) are **not** dispatched;
+#1272 and #1239 are not taken here. Design delivery time, not a migration ETA.
 
 ## 1. Verified source baseline (current `main`)
 
-All symbols below were re-read from `main` at
-`6ed5b6859fad31ab65449c79d98bfb22f119169c` on 2026-10-16; the older #1328
-observation does not substitute for this reading.
+Re-read from `main` at `6ed5b6859fad31ab65449c79d98bfb22f119169c` on 2026-10-16 (the
+older #1328 observation does not substitute for this reading):
 
-- `agent-node/src/runtime/opencode-copresence/v1-safe-retention-request.ts` —
-  a single observation with a digest; it refuses and states that byte-identical
-  JSON reconstruction is not a durable recovery/custody entry.
-- `agent-node/src/runtime/opencode-copresence/v1-owned-safe-topology.ts` —
-  read-only topology observation; its own contract says current-process
-  allocation and stable private files are observations, never final history or a
-  custody lease, and lists native workspace retention/custody with cleanup and
-  unknown-fault qualification among the things still required before commit.
-- `agent-node/src/runtime/opencode-copresence/v1-migration-plan.ts` — refuses;
-  it has an explicit "no intent or lease" refusal path.
-- `agent-node/src/runtime/opencode-copresence/close-cleanup.ts` — `cleanupAfterExit`
-  retries a caller-supplied identity/live-process predicate; the caller retains
-  the root on timeout/unknown state.
-- `agent-node/src/runtime/opencode-copresence/runtime.ts` — the two product call
-  sites of that helper (close path and error path) share one cleanup closure.
-- `agent-node/src/runtime/opencode-copresence/v1-borrowed-tui.ts` — a **different,
-  cooperative, read-only** admission to an already-live node's lease
-  (`schema`-versioned lock plus a scoped MCP credential). It is not custody of an
-  owned runtime and cannot be reused as one; it is listed here only to bound the
-  word "lease" in this document.
-- No open custody/retention pull request exists on `main` at the time of writing.
+- `v1-safe-retention-request.ts` — one observation with a digest; refuses; states
+  that byte-identical JSON reconstruction is not a durable recovery/custody entry.
+- `v1-owned-safe-topology.ts` — read-only topology observation; its own contract
+  says current-process allocation and stable private files are observations, never
+  final history or a custody lease.
+- `v1-migration-plan.ts` — refuses; has an explicit no-intent-or-lease refusal path.
+- `close-cleanup.ts` — `cleanupAfterExit` retries a caller-supplied identity /
+  live-process predicate; the caller retains the root on timeout/unknown.
+- `runtime.ts` — the two product call sites of that helper (close path, error path)
+  share one cleanup closure.
+- `v1-borrowed-tui.ts` — a different, cooperative, read-only admission to an
+  already-live node's lease; not custody of an owned runtime (listed only to bound
+  the word "lease").
+- No open custody/retention pull request exists on `main` at writing time.
 
-Consequence: today no code can prove retention custody, writer exclusion, final
-native history or a qualified release. Registration, idle, a clean shutdown flag
+Consequence: no code can today prove retention custody, writer exclusion, final
+native history or a qualified release. Registration, idle, a clean-shutdown flag
 or a process-reference scan are **never** accepted as those things.
 
 ## 2. Identity binding (what a custody record is bound to)
 
-A custody record binds **named participants** to **precise running instances**.
-Nothing weaker may be written into it.
+A record binds **named participants** to **precise running instances**. Nothing
+weaker may be written into it.
 
-Required fields (names are indicative; the design owns the final spelling):
-
-| Group | Fields | Why it is required |
+| Group | Fields | Why required |
 |---|---|---|
-| Schema | `schemaVersion` (integer, starts at 1), `recordId` (opaque), `createdAt` | Versioned; unknown higher versions must be refused rather than guessed |
-| Source instance | `sourceNodeId`, `sourceAlias`, `sourceNetworkId` | Named participant, not "some node" |
-| Process generation | `sourcePid`, `sourceStartTicks`, `sourceUid`, `sourceExePath` + exe attestation digest | A pid alone is reusable; ticks+exe pin the generation |
-| Version capability | `sourceRuntimeVersion`, `sourceGeneration` (`v1`), capability set actually observed | Declared config version is not capability proof |
-| Requested coordinate | `requestedDirectory` + `requestedRootInode`, `requestedConfigDigest` | Exact identity of the requested tree |
-| Native coordinate | `nativeDirectory` + `nativeDataInode`, `nativeWorkspaceInode`, `nativeLaunchInode`, `nativeCheckpointDigest` | Exact identity of the native tree |
-| Request / target | `requestId` (named request), `targetNodeId`/`targetAlias` (may be unset until handoff) | Handoff must be *named*, never implied |
-| Revision / CAS | `revision` (monotonic), `prevRecordDigest`, `writerId` | Compare-and-set so two writers cannot both win |
-| State | `state` (see §3), `stateEvidence` (digest of the independent evidence that justified the transition) | A state without evidence is not a state |
+| Schema | `schemaVersion` (int, from 1), `recordId`, `createdAt` | Versioned; a higher version is refused, never guessed |
+| Source coordinator | `coordinatorNodeId`, `coordinatorAlias`, `coordinatorNetworkId` | Named participant, not "some node" |
+| **Coordinator generation** | `coordinatorPid`, `coordinatorStartTicks`, `coordinatorUid`, `coordinatorExeDigest` | Binds *who may durably write*; a pid alone is reusable |
+| **Native generation** | `nativePid`, `nativeStartTicks`, `nativeUid`, `nativeExeDigest`, `nativeRuntimeVersion` | The server/TUI child is a **different** process generation from the coordinator; keeping them apart is what makes "the coordinator exited" ≠ "a stale process may now write an outcome" |
+| Capability | `sourceGeneration` (`v1`), observed capability set | Declared config version is not capability proof |
+| Requested coordinate | `requestedDirectory`, `requestedRootId` = `{dev, ino}`, `requestedConfigDigest` | Exact identity: `{dev, ino}` is the filesystem identity; a bare ino is ambiguous across filesystems |
+| Native coordinate | `nativeDirectory`, `nativeDataId`, `nativeWorkspaceId`, `nativeLaunchId` (each `{dev, ino}`), `nativeCheckpointDigest` | Exact identity of the native tree |
+| Request / target | `requestId` (named request), `targetNodeId`/`targetAlias` (unset until handoff) | Handoff must be named, never implied |
+| Commit inputs | `revision` (monotonic), `prevRecordDigest`, `writerId` | Comparison inputs for the commit authority (§4) — **not** a lock by themselves |
+| State | `state` (§5) and typed evidence references (§5) | A state without its typed evidence is not a state |
 
 Explicitly **not** stored: credentials, tokens, passwords, provider keys, model
-session content, message bodies, or any secret material. Digests and inode
-numbers only. An empty `auth.json` is **not** evidence that a root holds no
-secrets.
+session content, message bodies. Digests and `{dev, ino}` only. An empty
+`auth.json` is **not** evidence that a root holds no secrets.
 
-## 3. State machine
+## 3. Two different conclusions: ordinary cleanup vs retained-root release
 
-States (the design owns the names; the semantics below are the contract):
+The single most important correction in revision 2: **"may this root be cleaned
+up?"** and **"may this retained root be released?"** are two different questions
+with two different answers, and neither may be produced by faking the other.
 
-1. `observed` — read-only, no lease. Produced by the existing observations.
-2. `prepare-requested` — a named prepare intent exists, bound to the identity
-   group of §2. Not yet durable; no retention claim.
-3. `prepared` — the prepare intent is durably recorded with a revision and CAS
-   previous-digest. Still no retention claim.
-4. `retain-pending` — the source instance exited **without** a qualified outcome
-   (crash, unknown, unverifiable). The root is retained *pessimistically*: no
-   consumer may adopt, clear or replay it.
-5. `retained-ready` — the source instance produced a qualified outcome and the
-   retention is durably recorded. Only now may a **named** handoff be attempted.
-6. `handed-off` — a named target has adopted custody under a new revision, with
-   the source record kept (both stores retained until release).
-7. `released` — retention is explicitly released by the participant that holds
-   it, with its own evidence. Release is the only transition that allows cleanup
-   of the retained root.
-8. `refused` — a terminal *decision* (not an error handler): the protocol could
-   not establish the required evidence. Refusal retains both stores.
+`cleanupDecision(root, participant)` — the one function every cleanup path asks:
 
-Transition table — every edge names its **executor**, the **independent evidence**
-required before it may happen, and its **idempotency / concurrency / crash**
-behaviour:
+| Outcome | When | Effect |
+|---|---|---|
+| `ordinary-cleanup` | **No retention intent or record has ever existed** for this root, and the root is the caller's own ordinary allocation | The **existing** flow applies unchanged: identity check, liveness check, then credential cleanup on their current paths. Ordinary never-prepared roots keep behaving exactly as today (#1272's requirement) |
+| `retain` | A record exists in `prepared`, `retain-pending`, `retained-ready` or `handed-off` | Keep the root and the record; no cleanup |
+| `retain` + `refuse(record-expected-missing)` | A record **should** exist (a prepare intent was observed) but is **lost, corrupt, unreadable, or unobservable**, or its digest chain does not verify | Keep everything; refuse. This is the *only* case where a missing record means unknown |
+| `released` | A **durable** `released` record exists for this exact root identity (`{dev, ino}`) with its release evidence and the holding participant | Cleanup of the retained root is permitted |
+| `refuse(...)` | Cannot decide (schema newer, mixed state, unreadable record, unqualified participant) | Keep everything; refuse with a reason code |
 
-| From → To | Executor | Precondition (independent evidence) | Idempotency & concurrency | Crash handling |
-|---|---|---|---|---|
-| `observed` → `prepare-requested` | owning source instance | identity group of §2 fully read; requested+native inodes differ or are both absent per existing observation rules | replays produce the same digest; concurrent prepares conflict on CAS | nothing durable written ⇒ restart returns to `observed` |
-| `prepare-requested` → `prepared` | owning source instance | durable write with `revision=1`, `prevRecordDigest=empty` | second writer loses CAS; identical replay is a no-op | torn write must be detected by digest; partial records are `refused`, not silently upgraded |
-| `prepare-requested`/`prepared` → `retain-pending` | **any** participant that can observe the exit | the source instance stopped being the live generation (ticks/exe no longer match) **and** no qualified outcome exists | idempotent (state is already pessimistic) | this is the crash path: retain both stores, refuse adoption |
-| `prepared` → `retained-ready` | owning source instance | the qualified outcome itself, plus a re-read of every inode in §2 that is *not* the same as the ones recorded at prepare time ⇒ refuse instead | duplicate outcomes collapse to one revision | if the re-read fails ⇒ `refused` |
-| `retained-ready` → `handed-off` | named target, accepted by the source participant | target identity read independently; source record unchanged since the revision the target read; CAS on `revision+1` | exactly one successful CAS; a losing target must re-read | crash mid-handoff ⇒ both stores retained (`retain-pending` semantics) |
-| `retained-ready`/`handed-off` → `released` | the participant that currently holds retention | explicit release intent naming the record and revision, plus its own evidence | idempotent per `(recordId, revision)` | crash before durable release ⇒ still retained (fail-safe direction) |
-| any → `refused` | any participant | evidence missing, contradictory, mixed or of an unknown version | idempotent | never auto-clears, never replays |
+`ordinary-cleanup` is **not** `released`: it asserts "no retention was ever
+claimed", while `released` asserts "a claim existed and was closed by evidence".
+A `released` outcome cannot be produced by a reader, by a timeout, or by absence
+of a record; it requires the durable release record of §5.
 
-Two rules hold across the table: **(a)** a transition that cannot be *proved*
-becomes `refused`, never "best effort"; **(b)** unknown/mixed/older-version state
-retains both stores and refuses adoption.
+## 4. Record store, commit authority and write permissions
 
-## 4. Permission contract
+`revision` / `prevRecordDigest` / `writerId` are **comparison inputs, not a lock**.
+The design therefore names an authority and a commit boundary:
 
-- **Ownership**: the custody record and any retained-root marker live in the
-  source user's private state and are readable only by the owning uid. Cross-uid
-  reads of the record are a refusal, not a merge.
-- **Writers**: only the owning source instance may move `prepare-requested →
-  prepared → retained-ready`; only a named target may request handoff; only the
-  current holder may release. `writerId` plus CAS makes "two writers" detectable
-  instead of silently last-write-wins.
-- **Readers**: read-only observation may read the record but gains **no** lease,
-  no writer exclusion and no history claim; it may not clear, replay or adopt.
-- **Secrets**: this protocol never carries credentials. Retaining a database root
-  must **not** disable credential persistence/cleanup, must not copy a real
-  `auth.json` to a target, and must not treat an empty credential file as proof
-  that the root has no secrets. Credential cleanup stays on its existing path and
-  its own permissions; retention of a data root is a separate concern with a
-  separate record.
-- **Old or external sweepers**: an old launcher or an external sweeper that does
-  not implement this protocol is **unknown** to us. We may not assume it is safe;
-  the refusal contract in §6 is what protects the root until such participants
-  are qualified.
+- **Store**: one record file per source node in the owning uid's private state,
+  plus a sibling lock file. Both are owner-uid private; cross-uid reads/writes are
+  a refusal, not a merge.
+- **Authority**: the record store is the **single serialization point**. A writer
+  must hold the store's exclusive advisory lock for the whole commit (compare →
+  write → publish). No other participant may commit concurrently.
+- **Commit boundary** (one atomic publication): read current record → compare
+  `expectedRevision` **and** `expectedPrevDigest` → write a new record to a temp
+  file → `fsync` the temp file → `rename` over the record → `fsync` the parent
+  directory → release the lock. Publication is atomic; the compare is meaningful
+  **only** inside the lock.
+- **Crash adjudication on read**: verify the digest chain. A record that does not
+  verify, or that was published without a directory `fsync` we can observe, is
+  `unknown` ⇒ `cleanupDecision = retain + refuse`. Never silently repair.
+- **Lock ownership**: the lock file records the coordinator generation that holds
+  it. A lock held by a dead generation is **not** auto-taken by a different
+  participant; recovery requires the named recovery authority below.
 
-## 5. Minimal source-owned API draft
+Write permissions (who may write which state):
 
-Draft surface only — no runtime file is changed by this document, and none of
-these functions may be implemented as a permanent `throw`:
+| State | Writer | Notes |
+|---|---|---|
+| `prepare-requested`, `prepared`, `retained-ready` | the **coordinator** whose generation matches the record | Any other writer ⇒ refusal, no write |
+| `handed-off` | the **named target**, committing against the coordinator's revision | CAS; a losing target re-reads; the source record is kept |
+| `released` | the participant that currently **holds** retention (coordinator or target) | Requires the release evidence of §5; never producible by a reader |
+| `retain-pending` (from `prepared`) | the coordinator generation, **or** the named recovery authority | A `retain-pending` insert never overwrites another record's custody |
+| `refused` (as a *record*) | **nobody** | A refusal is a **decision returned to the caller**, not a write. Readers cannot "overwrite a valid record with a refusal" |
+
+Recovery authority: named explicitly (a participant identity + a precondition
+proving the previous holder is gone) and its writable range is limited to
+**inserting `retain-pending`** and repairing a torn publication of the *same*
+revision — it may never write `retained-ready`, `handed-off` or `released`.
+
+## 5. State machine, typed evidence and preconditions
+
+States: `observed` → `prepare-requested` → `prepared` → (`retain-pending` |
+`retained-ready`) → `handed-off` → `released`; plus the terminal decision
+`refused` (returned, not written).
+
+A generic `stateEvidence` digest cannot prove anything. Each edge therefore
+consumes **typed** references:
 
 ```ts
-// All functions are source-owned and bound to the identity group of §2.
-type CustodyRevision = { recordId: string; revision: number; prevRecordDigest: string | null };
-
-// Read-only. Never acquires a lease; returns refinement of the existing observation.
-function readCustodyRecord(opts: { sourceNodeId: string; sourceAlias: string }):
-  | { kind: "absent" }
-  | { kind: "record"; state: CustodyState; revision: number; digest: string; bound: CustodyIdentity }
-  | { kind: "unknown"; reason: "unreadable" | "schema-newer" | "mixed" };
-
-// Durable prepare intent. Idempotent per (source instance generation, revision).
-function requestRetentionPrepare(opts: { bound: CustodyIdentity }): Promise<CustodyRevision>;
-
-// Qualified outcome of the owning source instance. Refuses if any bound inode changed.
-function recordQualifiedOutcome(opts: { recordId: string; revision: number; evidence: OutcomeEvidence }):
-  Promise<CustodyRevision>;
-
-// Named handoff. CAS on revision; a losing target must re-read.
-function handOffCustody(opts: { recordId: string; revision: number; target: CustodyTarget }):
-  Promise<CustodyRevision>;
-
-// Explicit release by the current holder. Idempotent per (recordId, revision).
-function releaseCustody(opts: { recordId: string; revision: number; reason: ReleaseReason }):
-  Promise<CustodyRevision>;
-
-// What every consumer (close, catch/after-exit cleanup, stale sweep, restart) asks
-// before touching a root. Returning "retain" is the default for anything unproven.
-function custodyDisposition(opts: { root: string; participant: ParticipantIdentity }):
-  "retain" | "released" | "unknown";
+type GenRef        = { pid: number; startTicks: string; uid: number; exeDigest: string };
+type FsId          = { dev: string; ino: string };                     // exact filesystem identity
+type WriterExclusion = { kind: "native-clean-exit" | "scoped-check"; ref: string };
+type CredentialDisposition = { mode: "unchanged" | "cleaned"; ref: string };  // never carries secrets
+type QualifiedOutcome = {
+  kind: "qualified";
+  coordinator: GenRef;                 // the writer must still be this generation
+  nativeExit: { observedAt: string; ref: string };   // native *child* exit evidence
+  writerExclusion: WriterExclusion;    // proof no other writer holds the tree
+  credentialDisposition: CredentialDisposition;      // separate, never suppressed by retention
+  target?: { nodeId: string; alias: string; confirmedBy: string };
+};
 ```
 
-Wiring contract (draft): close and the error path ask `custodyDisposition` **before**
-their existing cleanup predicate; `unknown` and `retain` both mean "keep the root".
-No caller may flip this to "released" without a `released` state and its evidence.
+| From → To | Executor | Precondition (exact evidence consumed) | Idempotency / concurrency | Crash |
+|---|---|---|---|---|
+| `observed` → `prepare-requested` | coordinator | identity group complete, **both coordinates present** with their `{dev, ino}`; **absent inodes do not qualify** (observation may record absence, preparation may not) | replay yields the same digest; concurrent prepares conflict in the lock | nothing durable ⇒ back to `observed` |
+| `prepare-requested` → `prepared` | coordinator | §6 participant audit passed; durable commit per §4 with `revision=1`, `prevRecordDigest=null` | second writer loses the compare; identical replay is a no-op | torn write ⇒ `unknown` ⇒ retain + refuse |
+| `prepared` → `retained-ready` | coordinator (generation must still match) | a `QualifiedOutcome` whose `coordinator` == the record's coordinator generation, with `nativeExit`, `writerExclusion`, `credentialDisposition` all present; any re-read of `{dev, ino}` that differs ⇒ refuse | duplicate outcomes collapse to one revision | re-read failure ⇒ `refused` |
+| `prepared` → `retain-pending` | coordinator (or named recovery authority) | native child no longer matches its generation **and** no qualified outcome exists | idempotent (pessimistic) | this *is* the crash path |
+| `retained-ready` → `handed-off` | named target | **#1238's intent journal and all-launcher refusal gate satisfied** (precondition, not a footnote); target identity read independently; CAS on `revision+1` | exactly one CAS wins; losers re-read | crash mid-handoff ⇒ both stores retained |
+| `handed-off`/`retained-ready` → `released` | current holder | **#1239's final-history / lossless-restore gate satisfied** (precondition); explicit release evidence; `{dev, ino}` unchanged since the revision read | idempotent per `(recordId, revision)` | crash before durable release ⇒ still retained |
+| any → `refused` (decision) | any participant | evidence missing/contradictory/mixed/newer schema | idempotent; **never writes a record** | never auto-clears, never replays |
 
-## 6. Cleanup and refusal boundaries
+## 6. Prepare eligibility requires an auditable cleanup-participant set
 
-Participation points, each with its refusal edge:
+A state flag does **not** make old code stop: an old or external sweeper that does
+not read the record will delete the native directory regardless of our refusal.
+Refusal is therefore a **decision**, not a protection mechanism. Protection must
+be established **before** promising `prepared`/retention:
+
+For each relevant cleanup participant (every path that can delete or move the
+native directory), the profile must show one of:
+
+1. **Protocol-aware (coordinated)**: it consults `cleanupDecision` and honours
+   `retain` — evidenced by its version/capability and the code path that reads the
+   record (our own close/catch/after-exit paths and our stale sweeper, at or above
+   the version that implements this contract); or
+2. **Provably excluded**: it cannot reach the native directory — evidenced by its
+   configured sweep roots/patterns (e.g. it only sweeps its own namespace); or
+3. **Coordinated out of the window**: it is stopped/disabled for the retention
+   window, with the evidence of that state.
+
+If **any** relevant participant is `unknown` (no inventory entry, no configuration
+evidence, no capability), the profile **refuses at prepare**. It does not accept a
+record and hope.
+
+Boundary of this model: it covers **named, auditable participants only**. We make
+no claim of protection against arbitrary same-uid external programs; where such a
+program can reach the native directory and cannot be excluded or coordinated, the
+correct answer is refusal to prepare (and, if a record already exists,
+`retain` + `refuse(unknown-sweeper)`).
+
+## 7. Minimal source-owned API draft
+
+Draft surface only; no runtime file is changed by this document, and none of these
+may be implemented as a permanent `throw`.
+
+```ts
+// Read-only. Never acquires or implies a lease.
+function readCustodyRecord(opts: { coordinatorNodeId: string; coordinatorAlias: string }):
+  | { kind: "absent" }                                   // ⇒ ordinary-cleanup (see §3)
+  | { kind: "record"; state: CustodyState; revision: number; digest: string; bound: CustodyIdentity }
+  | { kind: "unknown"; reason: "unreadable" | "schema-newer" | "digest-chain" | "mixed" };
+
+// The single question every cleanup path asks. Never returns "released" without a durable release record.
+function cleanupDecision(opts: { root: FsId; participant: ParticipantIdentity }):
+  "ordinary-cleanup" | "retain" | "released" | { refuse: RefusalReason };
+
+// Durable prepare intent. Refuses unless §6's participant audit passes.
+function requestRetentionPrepare(opts: {
+  bound: CustodyIdentity; actor: ParticipantIdentity;
+}): Promise<{ revision: number; digest: string }>;
+
+// Qualified outcome of the owning coordinator generation (typed, see §5).
+function recordQualifiedOutcome(opts: {
+  recordId: string; expectedRevision: number; expectedPrevDigest: string;
+  actor: ParticipantIdentity; outcome: QualifiedOutcome;
+}): Promise<{ revision: number; digest: string }>;
+
+// Named handoff. Requires the #1238 gate; CAS on revision; a losing target re-reads.
+function handOffCustody(opts: {
+  recordId: string; expectedRevision: number; expectedPrevDigest: string;
+  actor: ParticipantIdentity; target: CustodyTarget;
+}): Promise<{ revision: number; digest: string }>;
+
+// Explicit release by the current holder. Requires the #1239 gate; idempotent per (recordId, revision).
+function releaseCustody(opts: {
+  recordId: string; expectedRevision: number; expectedPrevDigest: string;
+  actor: ParticipantIdentity; evidence: ReleaseEvidence;
+}): Promise<{ revision: number; digest: string }>;
+```
+
+Wiring contract (draft): close and the error path (which share one cleanup
+closure) ask `cleanupDecision` **before** their existing predicate, and treat
+`retain` / `refuse` as "keep". Because `absent` maps to `ordinary-cleanup`,
+never-prepared roots keep today's behaviour. A writer must always pass the
+expected revision **and** digest plus its own participant identity.
+
+## 8. Cleanup participants, refusal reasons
 
 | Participant | May do | Must refuse when |
 |---|---|---|
-| `close()` path | read disposition; release only via `releaseCustody` | record is `retain-pending`, unknown, or newer schema |
-| error/`catch` path | same as close; it shares the same cleanup closure | the identity check cannot be evaluated |
-| after-exit cleanup (`cleanupAfterExit`) | defer while any of retain/unknown holds | its caller-supplied predicate is the *only* evidence available |
-| stale sweeper (ours) | nothing about a retained root | the record exists in any state other than `released` |
-| stale sweeper (external/old) | **unknown** | always — we cannot qualify it; retention must survive it |
-| restart / old or mismatched version | read-only; refuse to adopt | version capability or generation does not match the record |
+| `close()` path | read `cleanupDecision`; release only via `releaseCustody` | `retain`/`refuse`; or the record's schema is newer |
+| error/`catch` path | same (shared closure) | the identity predicate cannot be evaluated |
+| after-exit cleanup | defer while `retain`/`refuse` | its caller predicate is the only evidence available |
+| our stale sweeper | nothing about a retained root | the record is not `released` |
+| external/old sweeper | **unknown** | always; retention must survive it (§6) |
+| restart / mismatched version | read-only; refuse to adopt | capability or generation mismatch |
 
-Refusal is a **decision with a reason code**, not a silent skip: reasons include
-`no-record`, `schema-newer`, `generation-mismatch`, `inode-drift`,
-`unqualified-exit`, `unknown-sweeper`, `mixed-state`.
+Reason codes: `no-record` (⇒ ordinary path, **not** a refusal), `schema-newer`,
+`generation-mismatch`, `fs-identity-drift`, `digest-chain`, `unqualified-exit`,
+`unknown-sweeper`, `mixed-state`, `record-expected-missing`, `participant-unknown`.
 
-## 7. Responsibility boundaries
+## 9. Responsibility boundaries
 
-- **#1272** owns the persistent marker/CAS/fsync implementation and the
-  source-owned *preparation* mechanics. S1 defines the schema and contract those
-  mechanics must satisfy; S1 does not implement them.
-- **#1238** owns the intent journal and the all-launcher refusal gate for the
-  auditable migration plan. S1 defines the custody states that gate depends on.
-- **#1239** owns the final history / lossless restore gate. S1 makes no claim
-  about final native history or restore; it only defines how a root is retained
-  and named-released.
-- **#1269** keeps its three items unfinished: this document does not complete the
-  contract item, not the native item, not the main item.
+- **#1272** owns persistent marker/CAS/fsync implementation and source-owned
+  preparation mechanics; S1 defines the schema, the commit authority and the
+  ordinary-vs-retained distinction they must satisfy. S1 does not implement them.
+- **#1238** owns the intent journal and the all-launcher refusal gate; that gate is
+  a **precondition of `handed-off`** in §5, not only a boundary note.
+- **#1239** owns the final-history / lossless-restore gate; it is a **precondition
+  of `released`** in §5.
+- **#1269** keeps its three items unfinished.
 
-## 8. Rejection contracts
+## 10. Rejection contracts
 
 | Case | Contract |
 |---|---|
-| Unsupported profile | refuse (`unsupported-profile`); never approximate with a supported one |
-| Borrowed source (`v1-borrowed-*`) | refuse as custody: cooperative read-only lease is not custody |
+| Unsupported profile | refuse `unsupported-profile`; never approximate |
+| Cleanup participant unknown | refuse `participant-unknown` **at prepare** (§6) |
+| Borrowed source (`v1-borrowed-*`) | refuse as custody; a cooperative read-only lease is not custody |
 | `unsafe`/headless source | refuse; safety posture is part of the identity |
-| Older source without this protocol | refuse (`unqualified-participant`); retain |
-| Mixed or unknown state | refuse (`mixed-state`); retain **both** stores; never auto-clear or replay |
-| Target whose identity cannot be read independently | refuse; no implied handoff |
+| Older source without this protocol | refuse `unqualified-participant`; retain |
+| Mixed/unknown state | refuse `mixed-state`; retain **both** stores; no auto-clear/replay |
+| Target identity unreadable | refuse; no implied handoff |
 
-## 9. Minimal acceptance plan for the next slice (not executed here)
+## 11. Decision tables (normal and adverse)
 
-Positive (design-level, then isolated):
-1. `observed → prepared` records a revision and digest, and a replay is a no-op.
-2. qualified outcome ⇒ `retained-ready`; then a named handoff advances revision by
-   exactly 1 and keeps the source record.
-3. explicit release is the **only** path that makes cleanup permissible.
+| Situation | Decision | Must not happen |
+|---|---|---|
+| Ordinary owned root, **never** any prepare intent/record | `ordinary-cleanup` — existing identity/liveness/credential cleanup runs unchanged | Must not be turned into permanent retention; must not require a `released` record |
+| Prepare intent observed, but the record is missing/corrupt/unreadable | `retain` + `refuse(record-expected-missing)` | Must not be treated as `ordinary-cleanup`; must not be "repaired" silently |
+| Two writers commit concurrently | Exactly one wins inside the lock (compare + atomic publish); the loser re-reads and retries with fresh inputs | No last-write-wins; no partially published record |
+| A reader asks to refuse an existing valid record | A refusal **decision** is returned to that reader | The reader may not overwrite the custody/release record |
+| Old/external sweeper reachable to the native dir and not qualifiable | refuse `unknown-sweeper` **before** `prepared`; if a record already exists, retain | Must not claim a state flag protects the root |
+| `{dev, ino}` missing (never observed) at prepare time | refuse: preparation needs both coordinates present | Absence may be *recorded* by observation but never *qualifies* preparation |
+| `{dev, ino}` drifted between prepare and outcome | `refused`, retain; both stores kept | No retry with stale coordinates |
+| Outcome incomplete (no `nativeExit` / `writerExclusion` / `credentialDisposition`) | Stay `prepared`; not `retained-ready` | A generic evidence digest must not stand in for these |
+| Coordinator generation exited, then something writes an outcome | refuse: writer generation must match the record's coordinator | A stale exited process may not author an outcome |
+| Credential cleanup needed while a root is retained | credential cleanup proceeds on its **own** path | Must not be disabled by retention; must not copy real auth to a target |
 
-Negative (each must be witnessed red):
-1. two concurrent prepares/handoffs ⇒ exactly one CAS wins, the loser re-reads.
-2. inode/digest drift between prepare and outcome ⇒ `refused`, root retained.
-3. crash after `prepare-requested` (before durable write) ⇒ no retention claim.
-4. crash mid-handoff ⇒ both stores retained (`retain-pending`).
-5. record with `schemaVersion+1` ⇒ `refused` (`schema-newer`).
-6. an external/old sweeper touching the root ⇒ retention survives; no adoption.
-7. empty `auth.json` on the root ⇒ credential cleanup is **still** performed on
-   its own path (retention must not suppress it).
+## 12. Acceptance plan for the next slice (not executed here)
+
+Positive: (1) `observed → prepared` commits a revision atomically and a replay is
+a no-op; (2) a complete `QualifiedOutcome` ⇒ `retained-ready`, then a named handoff
+with the #1238 gate satisfied advances the revision by exactly 1 while keeping the
+source record; (3) an explicit release with the #1239 gate satisfied is the only
+path that yields `released`.
+
+Negative (each witnessed red): (1) concurrent commits ⇒ one CAS wins, loser
+re-reads; (2) `{dev, ino}` drift ⇒ refuse + retain; (3) crash after
+`prepare-requested` before publish ⇒ no claim; (4) crash mid-handoff ⇒ both stores
+retained; (5) `schemaVersion+1` ⇒ refuse; (6) unqualifiable sweeper ⇒ refuse at
+prepare (and retention survives an external sweep when a record exists); (7)
+**never-prepared root still gets ordinary cleanup** (the regression that motivates
+§3); (8) incomplete outcome ⇒ never `retained-ready`; (9) empty `auth.json` ⇒
+credential cleanup still runs.
 
 None of these runs natively or on an original machine in this slice.
 
-## 10. What this document does not claim
+## 13. What this document does not claim
 
 It does not prove custody, writer exclusion, final native history, backup/restore
 or cutover qualification; it does not implement markers, cleanup, registry or
 startup changes; it does not release, migrate or publish anything; it does not
 turn registration, idle, a clean-shutdown flag or a process-reference scan into a
-lease. Those remain exactly as unproven as they are on `main` today.
+lease; and it does not claim to protect a root from arbitrary same-uid external
+programs (§6).
