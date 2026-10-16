@@ -22,7 +22,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
   const node = "windows-picker";
   const record = join(project, ".anet", "nodes", node, "windows-copresence.json");
   const globalConfig = join(userHome, ".anet", "config.json");
-  const projectConfig = join(project, ".anet", "config.json");
+  const nodeConfig = join(project, ".anet", "nodes", node, "config.json");
   const psLog = join(root, "test1337-ps.log");
   const tkLog = join(root, "test1337-tk.log");
   const hubRequests = [];
@@ -69,14 +69,14 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
       ANET_TEST1337_REAL_TASKKILL: process.env.ANET_TEST1337_REAL_TASKKILL,
     };
     setHub(globalConfig, proxyHub);
-    setHub(projectConfig, proxyHub);
+    setHub(nodeConfig, proxyHub);   // 节点自身 config 才是 stop 读取 hub 的那份
     hubRequests.length = 0;
     try {
       const res = spawnSync(process.env.ANET_TEST751_BUN, [cli, "node", "stop", node], { cwd: project, env: stopEnv, encoding: "utf8", timeout: 120_000 });
       return { rc: res.status, out: (res.stdout || "") + (res.stderr || ""), requests: [...hubRequests] };
     } finally {
       restoreHub(globalConfig);
-      restoreHub(projectConfig);
+      restoreHub(nodeConfig);
     }
   }
 
