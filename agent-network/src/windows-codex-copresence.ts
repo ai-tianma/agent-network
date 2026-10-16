@@ -93,7 +93,7 @@ export function probeWindowsOwnedLoopbackConnection(
       //    **新产生**的子孙会被看见;现在用的是一份快照。对这个用途这是更好的
       //    性质 —— 它是一次**归属判定**,一份一致的快照比跨轮拼接的视图更难被
       //    时序戏弄(root 的身份本来就由前后两次 birth 校验夹住)。
-      "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
+      "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId,CreationDate",
       "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
       `$hit=Get-NetTCPConnection -State Established -RemoteAddress 127.0.0.1 -RemotePort ${port} -ErrorAction SilentlyContinue|?{$ids.Contains([int]$_.OwningProcess)}`,
       `$after=try{[Diagnostics.Process]::GetProcessById(${rootPid}).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}`,
@@ -287,7 +287,9 @@ export function probeWindowsIdentity(
   pid: number,
   expectedCreationDate: string,
   runPowerShell: (script: string) => string = defaultPowerShellRunner,
+  kind: WindowsIdentityKind = "ticks",
 ): WindowsIdentityState {
+  if (kind === "creation") return probeWindowsCimIdentity(pid, expectedCreationDate, runPowerShell);
   if (!Number.isInteger(pid) || pid <= 0 || !/^\d+$/.test(expectedCreationDate)) return "unknown";
   const read = readWindowsIdentity(pid, runPowerShell);
   if (read.kind === "absent") return "gone";
@@ -295,10 +297,15 @@ export function probeWindowsIdentity(
   return "unknown";
 }
 
+export type WindowsIdentityKind = "ticks" | "creation";
+
 export interface WindowsManagedIdentity {
   role: string;
   pid: number;
   creationDate: string;
+  /** `ticks`（根，`[Diagnostics.Process]::StartTime` 的 .NET ticks）或
+   *  `creation`（后代，**同一份 CIM 枚举快照**里的 `CreationDate`）。两者**不混用**、各自精确相等比较。 */
+  kind?: WindowsIdentityKind;
 }
 
 export const WINDOWS_CAPTURE_PROTOCOL = "CAP:";
@@ -315,12 +322,12 @@ export function windowsCaptureScript(rootPid: number, expectedCreationDate: stri
     "function ReadBirthTicks([int]$p){try{[Diagnostics.Process]::GetProcessById($p).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}}",
     `$rb=ReadBirthTicks ${rootPid}`,
     `if($rb -ne $want){'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA=SKIP;D=;G=';exit 0}`,
-    "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
+    "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId,CreationDate",
     `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
     "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
     `[void]$ids.Remove(${rootPid})`,
     "$good=@();$bad=@()",
-    "foreach($id in $ids){$t=ReadBirthTicks $id;if($t){$good+=\"$id=$t\"}else{$bad+=\"$id\"}}",
+    "foreach($id in $ids){$hit=$procs|?{[int]$_.ProcessId -eq $id}|Select-Object -First 1;if($hit-and$hit.CreationDate){$good+=\"$id=$($hit.CreationDate.ToString('o'))\"}else{$bad+=\"$id\"}}",
     `$ra=ReadBirthTicks ${rootPid}`,
     `'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA='+$(if($ra){$ra}else{'ABSENT'})+';D='+($good -join ',')+';G='+($bad -join ',')`,
   ].join(";");
@@ -343,7 +350,7 @@ export function parseWindowsCapture(raw: string): { rootBefore: string; rootAfte
     const parts = text.split(",");
     const rows: Array<{ pid: number; ticks: string }> = [];
     for (const part of parts) {
-      const m = withTicks ? /^(\d+)=(\d+)$/.exec(part) : /^(\d+)$/.exec(part);
+      const m = withTicks ? /^(\d+)=([0-9T:.+\-Z]{8,64})$/.exec(part) : /^(\d+)$/.exec(part);
       if (!m) return null;
       rows.push({ pid: Number(m[1]), ticks: withTicks ? m[2] : "" });
     }
@@ -386,10 +393,41 @@ export function captureWindowsDescendantIdentities(
     return { identities: [], rootBefore: parsed.rootBefore, rootAfter: parsed.rootAfter, unknownReason: `descendant count ${parsed.descendants.length} exceeds cap ${cap} for ${label}` };
   }
   return {
-    identities: parsed.descendants.map((d) => ({ role: `${root.role}:desc`, pid: d.pid, creationDate: d.ticks })),
+    identities: parsed.descendants.map((d) => ({ role: `${root.role}:desc`, pid: d.pid, creationDate: d.ticks, kind: "creation" as const })),
     rootBefore: parsed.rootBefore,
     rootAfter: parsed.rootAfter,
   };
+}
+
+export const WINDOWS_CIM_PROTOCOL = "CIMSTATE:";
+
+/** 后代身份协议：**同一份快照**里的 CIM `CreationDate`（`ToString('o')`），精确相等比较。 */
+export function cimIdentityProbeScript(pid: number): string {
+  return [
+    "$ErrorActionPreference='Stop'",
+    "try{",
+    `$p=Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+    `if($p){'${WINDOWS_CIM_PROTOCOL}CREATED='+$p.CreationDate.ToString('o')}else{'${WINDOWS_CIM_PROTOCOL}ABSENT'}`,
+    `}catch{'${WINDOWS_CIM_PROTOCOL}ERROR'}`,
+  ].join(";");
+}
+
+export function parseCimIdentityState(raw: string, expectedCreationDate: string): WindowsIdentityState {
+  const out = String(raw ?? "").trim();
+  if (out === `${WINDOWS_CIM_PROTOCOL}ABSENT`) return "gone";
+  const matched = new RegExp(`^${WINDOWS_CIM_PROTOCOL}CREATED=(.{8,64})$`).exec(out);
+  if (!matched) return "unknown";
+  return matched[1] === expectedCreationDate ? "alive" : "pid-reused";
+}
+
+export function probeWindowsCimIdentity(
+  pid: number,
+  expectedCreationDate: string,
+  runPowerShell: (script: string) => string = defaultPowerShellRunner,
+): WindowsIdentityState {
+  if (!Number.isInteger(pid) || pid <= 0 || !expectedCreationDate) return "unknown";
+  try { return parseCimIdentityState(runPowerShell(cimIdentityProbeScript(pid)), expectedCreationDate); }
+  catch { return "unknown"; }
 }
 
 export interface WindowsStopOrchestrationDeps {
@@ -430,7 +468,7 @@ export function orchestrateWindowsManagedStop(
   const killedPids: number[] = [];
   for (const root of [...roots].reverse()) {
     const label = `${root.role} pid=${root.pid}`;
-    const state = probeWindowsIdentity(root.pid, root.creationDate, runPowerShell);
+    const state = probeWindowsIdentity(root.pid, root.creationDate, runPowerShell, root.kind);
     if (state !== "alive") { notes.push(`kill withheld for ${label}: root identity ${state}`); continue; }
     killedPids.push(root.pid);
     kills.push({ label, outcome: runTaskkill(root.pid) });
@@ -440,7 +478,7 @@ export function orchestrateWindowsManagedStop(
     kills,
     notes,
     captureUnknown: gaps,
-    probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell),
+    probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind),
   });
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
