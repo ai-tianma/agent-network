@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
-  captureWindowsDescendantIdentities, decideWindowsStopVerdict, parseWindowsDescendantPids,
+  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture,
   probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr,
   type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity,
 } from "./windows-codex-copresence";
 
-// #1335 的见证：taskkill 非零**之后**，成败只由精确身份（PID + CreationDate）裁决。
-// 正负见证必须互相有分辨力 —— 同一场景只翻转一个探针结果，裁决必须翻转。
+// #1335 见证。🔴 关键：正负见证走 **CLI 实际使用的那一份编排**
+// （`orchestrateWindowsManagedStop`，注入 runner/executor），并**观测 kill 调用**；
+// 纯协议解析的用例保留，但**不**当作 CLI/原生证据的替身。
 
-const root: WindowsManagedIdentity = { role: "bridge", pid: 8100, creationDate: "639000000000000000" };
-const descendant: WindowsManagedIdentity = { role: "bridge:desc", pid: 8744, creationDate: "639000000000000100" };
+const root: WindowsManagedIdentity = { role: "bridge", pid: 8100, creationDate: "999" };
 
 // 现场 run 38587525619 / job 115933379757 的 taskkill stderr 原文（两行 ERROR + 两行 Reason）。
-// ⚠️ 数值 status 是**代表值**：现场日志保留了文案，但没有保留退出码。
+// ⚠️ status 数值是**代表值**：现场日志保留了文案，未保留退出码。
 const liveSampleStderr = [
   "ERROR: The process with PID 8744 (child process of PID 7656) could not be terminated.",
   "Reason: There is no running instance of the task.",
@@ -21,116 +21,129 @@ const liveSampleStderr = [
   "Reason: There is no running instance of the task.",
 ].join("\r\n");
 
-const nonZero = (label: string): { label: string; outcome: TaskkillOutcome } => {
-  const { summary, droppedBytes } = summarizeTaskkillStderr(liveSampleStderr);
-  return { label, outcome: { status: 128, signal: null, stderrSummary: summary, stderrDroppedBytes: droppedBytes } };
-};
+const { summary } = summarizeTaskkillStderr(liveSampleStderr);
+const nonZeroKill = (pid: number): TaskkillOutcome => ({ status: 128, signal: null, stderrSummary: summary, stderrDroppedBytes: 0 });
 
-const verdict = (
-  identities: WindowsManagedIdentity[],
-  states: WindowsIdentityState[],
-  extra: { captureUnknown?: string[] } = {},
-) => decideWindowsStopVerdict({
-  identities,
-  kills: [nonZero("bridge pid=8100")],
-  probe: (() => { let i = 0; return () => states[i++]; })(),
-  ...extra,
-});
+/** 脚本化环境：按「脚本形状」路由响应，并把**调用序列**记下来（控制流见证）。 */
+function scriptedEnv(opts: { capture: string; probes: string[] }) {
+  const calls: string[] = [];
+  const killed: number[] = [];
+  let probeIndex = 0;
+  const runPowerShell = (script: string): string => {
+    if (script.includes("CAP:RB=")) { calls.push("capture"); return opts.capture; }
+    const pid = Number(/GetProcessById\((\d+)\)/.exec(script)![1]);
+    calls.push(`probe:${pid}`);
+    return opts.probes[probeIndex++];
+  };
+  const runTaskkill = (pid: number): TaskkillOutcome => { calls.push(`kill:${pid}`); killed.push(pid); return nonZeroKill(pid); };
+  return { runPowerShell, runTaskkill, calls, killed };
+}
 
-describe("#1335 taskkill 非零后的精确身份裁决", () => {
-  test("正向：非零 + 所有原身份已退出 ⇒ 成功，且**保留**原始 status / 受控 stderr 诊断", () => {
-    const v = verdict([root, descendant], ["gone", "gone"]);
-    expect(v.kind).toBe("stopped");
-    expect(v.retainedDiagnostics.length).toBeGreaterThan(0);
-    const diagnostic = v.retainedDiagnostics.join("\n");
-    expect(diagnostic).toContain("taskkill non-zero for bridge pid=8100");
-    expect(diagnostic).toContain("status=128");
-    expect(diagnostic).toContain("There is no running instance of the task.");
-  });
-
-  test("分辨力：同一场景只把探针从 gone 翻成 alive ⇒ 必须变成 survived（不得绿）", () => {
-    expect(verdict([root], ["gone"]).kind).toBe("stopped");
-    expect(verdict([root], ["alive"]).kind).toBe("survived");
-  });
-
-  test("负控：**已捕获的后代**仍存活也必须失败（不能只证明根退出）", () => {
-    const v = verdict([root, descendant], ["gone", "alive"]);
-    expect(v.kind).toBe("survived");
-    expect(v.kind === "survived" && v.alive).toEqual(["bridge:desc pid=8744"]);
-  });
-
-  test("负控：查询 unknown（权限拒绝/超时/非法输出）不得绿 ⇒ unverifiable", () => {
-    const v = verdict([root, descendant], ["gone", "unknown"]);
-    expect(v.kind).toBe("unverifiable");
-    expect(v.kind === "unverifiable" && v.unknown).toEqual(["bridge:desc pid=8744"]);
-    expect(v.kind).not.toBe("stopped");
-  });
-
-  test("负控：取证缺口（后代出生身份取不到）不得绿 ⇒ unverifiable", () => {
-    const v = verdict([root], ["gone"], { captureUnknown: ["descendant enumeration failed for bridge pid=8100"] });
-    expect(v.kind).toBe("unverifiable");
-  });
-
-  test("PID 复用：该身份视为已退出、**不触碰**无关进程，且留下告警", () => {
-    const v = verdict([root], ["pid-reused"]);
-    expect(v.kind).toBe("stopped");
-    expect(v.retainedDiagnostics.join("\n")).toContain("pid reused; unrelated process left untouched");
-    // 复用与存活同时存在时，存活优先 ⇒ 仍失败。
-    expect(verdict([root, descendant], ["pid-reused", "alive"]).kind).toBe("survived");
-  });
-
-  test("受控 stderr：已知形状保留，形状不识别只记字节数（不泄露文本）", () => {
-    const { summary, droppedBytes } = summarizeTaskkillStderr(`${liveSampleStderr}\r\nsome-unshaped-line-with=secret`);
-    expect(summary).toContain("ERROR: The process with PID 8744");
-    expect(summary).toContain("Reason: There is no running instance of the task.");
-    expect(summary).not.toContain("secret");
-    expect(droppedBytes).toBeGreaterThan(0);
-  });
-});
-
-describe("#1335 身份查询协议（不解析本地化文案）", () => {
-  const script = "IDSTATE:";
-  test("ABSENT ⇒ gone；TICKS 相同 ⇒ alive；TICKS 不同 ⇒ pid-reused", () => {
-    expect(probeWindowsIdentity(8100, "639", () => `${script}ABSENT`)).toBe("gone");
-    expect(probeWindowsIdentity(8100, "639", () => `${script}TICKS=639`)).toBe("alive");
-    expect(probeWindowsIdentity(8100, "639", () => `${script}TICKS=640`)).toBe("pid-reused");
-  });
-
-  test("空输出 / 多行 / 非法形状 / 抛错 / 非法入参 ⇒ unknown（**不折成 gone**）", () => {
-    expect(probeWindowsIdentity(8100, "639", () => "")).toBe("unknown");
-    expect(probeWindowsIdentity(8100, "639", () => `${script}TICKS=639\nnoise`)).toBe("unknown");
-    expect(probeWindowsIdentity(8100, "639", () => "ERROR: not a protocol")).toBe("unknown");
-    expect(probeWindowsIdentity(8100, "639", () => { throw new Error("access denied"); })).toBe("unknown");
-    expect(probeWindowsIdentity(0, "639", () => `${script}TICKS=639`)).toBe("unknown");
-    expect(probeWindowsIdentity(8100, "not-a-tick", () => `${script}TICKS=639`)).toBe("unknown");
-  });
-
-  test("readWindowsIdentity 区分 ticks / absent / unknown", () => {
-    expect(readWindowsIdentity(8100, () => `${script}TICKS=639`)).toEqual({ kind: "ticks", ticks: "639" });
-    expect(readWindowsIdentity(8100, () => `${script}ABSENT`)).toEqual({ kind: "absent" });
-    expect(readWindowsIdentity(8100, () => "garbage")).toEqual({ kind: "unknown" });
-  });
-
-  test("后代枚举输出解析：合法 / 空 / 垃圾", () => {
-    expect(parseWindowsDescendantPids("DESC:8744,7656")).toEqual([8744, 7656]);
-    expect(parseWindowsDescendantPids("DESC:")).toEqual([]);
-    expect(parseWindowsDescendantPids("DESC:abc")).toBeNull();
-    expect(parseWindowsDescendantPids("ERROR: something")).toBeNull();
-    expect(parseWindowsDescendantPids("")).toBeNull();
-  });
-
-  test("后代取证：取到出生身份 / 空列表 / 垃圾输出 / 超上限 / 出生身份不可查 ⇒ 缺口", () => {
-    const captured = captureWindowsDescendantIdentities("bridge", 8100, {
-      runPowerShell: (s) => (s.includes("DESC:") ? "DESC:8744,7656" : `${script}TICKS=639000000000000${s.match(/GetProcessById\((\d+)\)/)![1]}`),
+describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
+  test("正向：非零 taskkill + 原身份（含已捕获后代）均已 gone ⇒ stopped，且诊断保留", () => {
+    const env = scriptedEnv({
+      capture: "CAP:RB=999;RA=999;D=8744=777;G=",
+      // 顺序 = 终止紧前重验根 → 裁决期再探 根、后代
+      probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "IDSTATE:ABSENT"],
     });
-    expect(captured.unknownReason).toBeUndefined();
-    expect(captured.identities.map((i) => i.pid)).toEqual([8744, 7656]);
-    expect(captured.identities.every((i) => i.role === "bridge:desc")).toBe(true);
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("stopped");
+    expect(stop.mustKeepRecord).toBe(false);
+    expect(stop.killedPids).toEqual([8100]);
+    expect(stop.identities.map((i) => i.pid)).toEqual([8100, 8744]);
+    const diagnostics = stop.verdict.retainedDiagnostics.join("\n");
+    expect(diagnostics).toContain("status=128");
+    expect(diagnostics).toContain("There is no running instance of the task.");
+    // 控制流见证：终止之前**先**重验根身份，且只发一次终止命令。
+    expect(env.calls).toEqual(["capture", "probe:8100", "kill:8100", "probe:8100", "probe:8744"]);
+  });
 
-    expect(captureWindowsDescendantIdentities("bridge", 8100, { runPowerShell: () => "DESC:" }).identities).toEqual([]);
-    expect(captureWindowsDescendantIdentities("bridge", 8100, { runPowerShell: () => "nonsense" }).unknownReason).toContain("not understood");
-    expect(captureWindowsDescendantIdentities("bridge", 8100, { runPowerShell: (s) => (s.includes("DESC:") ? "DESC:1,2,3" : `${script}TICKS=1`), cap: 2 }).unknownReason).toContain("exceeds cap");
-    expect(captureWindowsDescendantIdentities("bridge", 8100, { runPowerShell: (s) => (s.includes("DESC:") ? "DESC:8744" : "unreadable") }).unknownReason).toContain("not queryable");
-    expect(captureWindowsDescendantIdentities("bridge", 8100, { runPowerShell: () => { throw new Error("powershell missing"); } }).unknownReason).toContain("enumeration failed");
+  test("负控：根 gone 但**已捕获同身份后代 alive** ⇒ 必须非零，且**不发**终止命令", () => {
+    const env = scriptedEnv({
+      capture: "CAP:RB=999;RA=999;D=8744=777;G=",
+      probes: ["IDSTATE:ABSENT", "IDSTATE:ABSENT", "IDSTATE:TICKS=777"],
+    });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.killedPids).toEqual([]);
+    expect(env.killed).toEqual([]);
+    expect(stop.verdict.kind).toBe("survived");
+    expect(stop.verdict.kind === "survived" && stop.verdict.alive).toEqual(["bridge:desc pid=8744"]);
+    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("kill withheld for bridge pid=8100: root identity gone");
+    expect(stop.mustKeepRecord).toBe(true);
+  });
+
+  test("负控：查询 unknown ⇒ 必须非零、保留记录、不通知离线", () => {
+    const env = scriptedEnv({
+      capture: "CAP:RB=999;RA=999;D=8744=777;G=",
+      probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "garbage-not-a-protocol"],
+    });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("unverifiable");
+    expect(stop.verdict.kind === "unverifiable" && stop.verdict.unknown).toEqual(["bridge:desc pid=8744"]);
+    expect(stop.mustKeepRecord).toBe(true);
+  });
+
+  test("负控：初检匹配→**取证期间根复用** ⇒ kill 调用为 0，无关身份不被触碰", () => {
+    const env = scriptedEnv({
+      capture: "CAP:RB=999;RA=888;D=;G=",               // 根在取证期间被复用（RA≠期望）
+      probes: ["IDSTATE:TICKS=888", "IDSTATE:TICKS=888"],
+    });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.killedPids).toEqual([]);
+    expect(env.killed).toEqual([]);                     // 🔴 观测到 kill 调用为 0
+    expect(stop.verdict.kind).toBe("unverifiable");
+    const diagnostics = stop.verdict.retainedDiagnostics.join("\n");
+    expect(diagnostics).toContain("root identity changed during capture");
+    expect(diagnostics).toContain("pid reused; unrelated process left untouched");
+  });
+
+  test("分辨力：同一场景只把后代探针 gone 翻成 alive ⇒ 裁决翻转", () => {
+    const gone = scriptedEnv({ capture: "CAP:RB=999;RA=999;D=8744=777;G=", probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "IDSTATE:ABSENT"] });
+    const alive = scriptedEnv({ capture: "CAP:RB=999;RA=999;D=8744=777;G=", probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "IDSTATE:TICKS=777"] });
+    expect(orchestrateWindowsManagedStop([root], gone).verdict.kind).toBe("stopped");
+    expect(orchestrateWindowsManagedStop([root], alive).verdict.kind).toBe("survived");
+  });
+});
+
+describe("#1335 取证绑定根身份（同一枚举读后代出生身份 + 前后核根代际）", () => {
+  const run = (out: string) => () => out;
+  test("根代际漂移 ⇒ unknown（不猜），且不返回后代", () => {
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=888;RA=888;D=8744=777;G=") }).unknownReason).toContain("before capture");
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=888;D=8744=777;G=") }).unknownReason).toContain("changed during capture");
+  });
+  test("后代出生身份在枚举中读不到（G 非空）⇒ unknown；超上限 ⇒ unknown；输出非法/抛错 ⇒ unknown", () => {
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=999;D=;G=8744") }).unknownReason).toContain("unreadable during capture");
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=999;D=1=1,2=2,3=3;G="), cap: 2 }).unknownReason).toContain("exceeds cap");
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("nonsense") }).unknownReason).toContain("not understood");
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: () => { throw new Error("powershell missing"); } }).unknownReason).toContain("capture query failed");
+  });
+  test("合规取证：返回后代身份（出生身份来自同一枚举）", () => {
+    const captured = captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=999;D=8744=777,7656=555;G=") });
+    expect(captured.unknownReason).toBeUndefined();
+    expect(captured.identities).toEqual([
+      { role: "bridge:desc", pid: 8744, creationDate: "777" },
+      { role: "bridge:desc", pid: 7656, creationDate: "555" },
+    ]);
+    expect(parseWindowsCapture("CAP:RB=999;RA=SKIP;D=;G=")).toEqual({ rootBefore: "999", rootAfter: "SKIP", descendants: [], gaps: [] });
+  });
+});
+
+describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据替身）", () => {
+  const p = "IDSTATE:";
+  test("ABSENT ⇒ gone；TICKS 相同 ⇒ alive；不同 ⇒ pid-reused；空/多行/非法/抛错/非法入参 ⇒ unknown", () => {
+    expect(probeWindowsIdentity(8100, "999", () => `${p}ABSENT`)).toBe("gone");
+    expect(probeWindowsIdentity(8100, "999", () => `${p}TICKS=999`)).toBe("alive");
+    expect(probeWindowsIdentity(8100, "999", () => `${p}TICKS=888`)).toBe("pid-reused");
+    expect(probeWindowsIdentity(8100, "999", () => "")).toBe("unknown");
+    expect(probeWindowsIdentity(8100, "999", () => `${p}TICKS=999\nnoise`)).toBe("unknown");
+    expect(probeWindowsIdentity(8100, "999", () => { throw new Error("access denied"); })).toBe("unknown");
+    expect(probeWindowsIdentity(8100, "not-a-tick", () => `${p}TICKS=999`)).toBe("unknown");
+    expect(readWindowsIdentity(8100, () => `${p}ABSENT`)).toEqual({ kind: "absent" });
+  });
+  test("受控 stderr：已知形状保留，形状不识别只记字节数（不泄露文本）", () => {
+    const { summary: kept, droppedBytes } = summarizeTaskkillStderr(`${liveSampleStderr}\r\nunshaped-line-with=secret`);
+    expect(kept).toContain("ERROR: The process with PID 8744");
+    expect(kept).not.toContain("secret");
+    expect(droppedBytes).toBeGreaterThan(0);
   });
 });

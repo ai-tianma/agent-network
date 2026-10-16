@@ -201,9 +201,8 @@ export function taskkillWindowsProcessTree(pid: number): void {
 // #1335 —— taskkill 非零之后：保留诊断，按**精确身份**裁决 gone / alive / unknown
 //
 // 现场（run 38587525619 / job 115933379757）：`taskkill.exe /PID 8100 /T /F` 非零，
-// 自报原因 `Reason: There is no running instance of the task.`（PID 8744、7656 两个
-// **后代**）——被枚举到的后代在终止前已退出。那只证明**那一次命令的报告**，**不能**推定
-// 所有受管身份都已退出，也不同于同 stage 的 `The operation attempted is not supported`。
+// 自报 `Reason: There is no running instance of the task.`（PID 8744、7656）——它**只**
+// 报告「被枚举到的后代此刻已不在」，**不**证明所有原身份都已退出（历史红不改写）。
 //
 // 旧代码把 taskkill **退出码**放在身份判据之前（非零即 exit(1)），使按 PID+CreationDate
 // 的残留判据不可达，良性竞态被当成硬失败。本段：① 非零保留 status/signal 与**受控** stderr
@@ -304,56 +303,145 @@ export interface WindowsManagedIdentity {
   creationDate: string;
 }
 
-/** 单次 CIM 枚举（同 `probeWindowsOwnedLoopbackConnection` 手法）；**只**用于取证，不用于杀进程。 */
-export function windowsDescendantEnumerationScript(rootPid: number): string {
+export const WINDOWS_CAPTURE_PROTOCOL = "CAP:";
+
+/**
+ * 一次 PowerShell 里完成**绑定根身份**的取证：先核根出生身份 == 期望，再枚举后代并在
+ * **同一次枚举**中读它们的出生身份，最后**再核一次**根身份。根代际漂移 ⇒ 整次取证作废。
+ * 只用于取证，**不**用于杀进程。
+ */
+export function windowsCaptureScript(rootPid: number, expectedCreationDate: string): string {
   return [
     "$ErrorActionPreference='Stop'",
+    `$want='${expectedCreationDate}'`,
+    "function R([int]$p){try{[Diagnostics.Process]::GetProcessById($p).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}}",
+    `$rb=R ${rootPid}`,
+    `if($rb -ne $want){'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA=SKIP;D=;G=';exit 0}`,
     "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
     `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
     "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
     `[void]$ids.Remove(${rootPid})`,
-    "'DESC:'+($ids-join',')",
+    "$good=@();$bad=@()",
+    "foreach($id in $ids){$t=R $id;if($t){$good+=\"$id=$t\"}else{$bad+=\"$id\"}}",
+    `$ra=R ${rootPid}`,
+    `'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA='+$(if($ra){$ra}else{'ABSENT'})+';D='+($good -join ',')+';G='+($bad -join ',')`,
   ].join(";");
-}
-
-export function parseWindowsDescendantPids(raw: string): number[] | null {
-  const matched = /^DESC:(\d+(,\d+)*)?$/.exec(String(raw ?? "").trim());
-  if (!matched) return null;
-  if (!matched[1]) return [];
-  const pids = matched[1].split(",").map(Number);
-  return pids.every((pid) => Number.isInteger(pid) && pid > 0) ? pids : null;
 }
 
 export interface WindowsDescendantCapture {
   identities: WindowsManagedIdentity[];
-  /** 非空 ⇒ 取证不完整，调用方**必须**按 unknown 处理，不得当成功。 */
+  rootBefore?: string;
+  rootAfter?: string;
+  /** 非空 ⇒ 取证不完整/根代际漂移，调用方**必须**按 unknown 处理，不得当成功。 */
   unknownReason?: string;
 }
 
+export function parseWindowsCapture(raw: string): { rootBefore: string; rootAfter: string; descendants: Array<{ pid: number; ticks: string }>; gaps: number[] } | null {
+  const out = String(raw ?? "").trim();
+  const matched = new RegExp(`^${WINDOWS_CAPTURE_PROTOCOL}RB=(ABSENT|\\d+);RA=(ABSENT|SKIP|\\d+);D=([^;]*);G=([^;]*)$`).exec(out);
+  if (!matched) return null;
+  const parseList = (text: string, withTicks: boolean) => {
+    if (!text) return [] as Array<{ pid: number; ticks: string }>;
+    const parts = text.split(",");
+    const rows: Array<{ pid: number; ticks: string }> = [];
+    for (const part of parts) {
+      const m = withTicks ? /^(\d+)=(\d+)$/.exec(part) : /^(\d+)$/.exec(part);
+      if (!m) return null;
+      rows.push({ pid: Number(m[1]), ticks: withTicks ? m[2] : "" });
+    }
+    return rows;
+  };
+  const descendants = parseList(matched[3], true);
+  const gaps = parseList(matched[4], false);
+  if (!descendants || !gaps) return null;
+  return { rootBefore: matched[1], rootAfter: matched[2], descendants, gaps: gaps.map((g) => g.pid) };
+}
+
 /**
- * 终止前**现取**后代出生身份：记录里只有 appsrv/bridge，**没有**后代。拿不到 ⇒
- * unknownReason（不猜）。只用于**验证**；杀进程仍走根 PID 的既存出生身份。
+ * 绑定**期望根身份**的取证：根在取证前/后都必须仍是期望代际；后代出生身份取自**同一次枚举**。
+ * 任何漂移/缺口 ⇒ unknownReason（不猜）。只用于**验证**；杀进程仍走根 PID 的既存出生身份。
  */
 export function captureWindowsDescendantIdentities(
-  rootRole: string,
-  rootPid: number,
+  root: WindowsManagedIdentity,
   opts: { cap?: number; runPowerShell?: (script: string) => string } = {},
 ): WindowsDescendantCapture {
   const cap = opts.cap ?? 16;
   const run = opts.runPowerShell ?? defaultPowerShellRunner;
-  let pids: number[] | null = null;
-  try { pids = parseWindowsDescendantPids(run(windowsDescendantEnumerationScript(rootPid))); }
-  catch { return { identities: [], unknownReason: `descendant enumeration failed for ${rootRole} pid=${rootPid}` }; }
-  if (!pids) return { identities: [], unknownReason: `descendant enumeration output not understood for ${rootRole} pid=${rootPid}` };
-  if (pids.length > cap) return { identities: [], unknownReason: `descendant count ${pids.length} exceeds cap ${cap} for ${rootRole} pid=${rootPid}` };
-  const identities: WindowsManagedIdentity[] = [];
-  for (const pid of pids) {
-    const read = readWindowsIdentity(pid, run);
-    if (read.kind === "ticks") identities.push({ role: `${rootRole}:desc`, pid, creationDate: read.ticks });
-    else if (read.kind === "unknown") return { identities, unknownReason: `descendant ${pid} of ${rootRole} pid=${rootPid} birth identity not queryable` };
-    // absent：取证时已不存在，没有需要后续验证的身份。
+  const label = `${root.role} pid=${root.pid}`;
+  let parsed: ReturnType<typeof parseWindowsCapture> = null;
+  try { parsed = parseWindowsCapture(run(windowsCaptureScript(root.pid, root.creationDate))); }
+  catch { return { identities: [], unknownReason: `capture query failed for ${label}` }; }
+  if (!parsed) return { identities: [], unknownReason: `capture output not understood for ${label}` };
+  if (parsed.rootBefore !== root.creationDate) {
+    return { identities: [], rootBefore: parsed.rootBefore, unknownReason: `root identity was already ${parsed.rootBefore} before capture for ${label}` };
   }
-  return { identities };
+  if (parsed.rootAfter !== root.creationDate) {
+    return { identities: [], rootBefore: parsed.rootBefore, rootAfter: parsed.rootAfter, unknownReason: `root identity changed during capture for ${label}` };
+  }
+  if (parsed.gaps.length > 0) {
+    return { identities: [], rootBefore: parsed.rootBefore, rootAfter: parsed.rootAfter, unknownReason: `descendant birth identity unreadable during capture for ${label}: ${parsed.gaps.join(",")}` };
+  }
+  if (parsed.descendants.length > cap) {
+    return { identities: [], rootBefore: parsed.rootBefore, rootAfter: parsed.rootAfter, unknownReason: `descendant count ${parsed.descendants.length} exceeds cap ${cap} for ${label}` };
+  }
+  return {
+    identities: parsed.descendants.map((d) => ({ role: `${root.role}:desc`, pid: d.pid, creationDate: d.ticks })),
+    rootBefore: parsed.rootBefore,
+    rootAfter: parsed.rootAfter,
+  };
+}
+
+export interface WindowsStopOrchestrationDeps {
+  runPowerShell?: (script: string) => string;
+  runTaskkill?: (pid: number) => TaskkillOutcome;
+}
+
+export interface WindowsStopOrchestration {
+  verdict: WindowsStopVerdict;
+  /** 实际发出 taskkill 的根 PID —— 负控可断言为 **0**。 */
+  killedPids: number[];
+  identities: WindowsManagedIdentity[];
+  /** 非 `stopped` 时调用方**必须**保留记录、**不得**通知 Hub 离线。 */
+  mustKeepRecord: boolean;
+}
+
+/**
+ * 停止编排（CLI 实际使用的那一份，注入 runner/executor 以便见证）：
+ * ① 对每个受管根做**绑定根身份**的取证（含后代出生身份与前后根代际核对）；
+ * ② 每个根在**终止紧前**重验 PID+CreationDate —— `gone`/`pid-reused`/`unknown` 一律**不发**终止命令；
+ * ③ 按精确身份裁决 gone/alive/unknown。过期 `safe` **不**构成终止授权。
+ */
+export function orchestrateWindowsManagedStop(
+  roots: WindowsManagedIdentity[],
+  deps: WindowsStopOrchestrationDeps = {},
+): WindowsStopOrchestration {
+  const runPowerShell = deps.runPowerShell;
+  const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
+  const identities: WindowsManagedIdentity[] = [...roots];
+  const gaps: string[] = [];
+  const notes: string[] = [];
+  for (const root of roots) {
+    const captured = captureWindowsDescendantIdentities(root, { runPowerShell });
+    if (captured.unknownReason) gaps.push(captured.unknownReason);
+    identities.push(...captured.identities);
+  }
+  const kills: Array<{ label: string; outcome: TaskkillOutcome }> = [];
+  const killedPids: number[] = [];
+  for (const root of [...roots].reverse()) {
+    const label = `${root.role} pid=${root.pid}`;
+    const state = probeWindowsIdentity(root.pid, root.creationDate, runPowerShell);
+    if (state !== "alive") { notes.push(`kill withheld for ${label}: root identity ${state}`); continue; }
+    killedPids.push(root.pid);
+    kills.push({ label, outcome: runTaskkill(root.pid) });
+  }
+  const verdict = decideWindowsStopVerdict({
+    identities,
+    kills,
+    notes,
+    captureUnknown: gaps,
+    probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell),
+  });
+  return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 
 export type WindowsStopVerdict =
@@ -371,8 +459,12 @@ export function decideWindowsStopVerdict(opts: {
   kills: Array<{ label: string; outcome: TaskkillOutcome }>;
   probe: (identity: WindowsManagedIdentity) => WindowsIdentityState;
   captureUnknown?: string[];
+  notes?: string[];
 }): WindowsStopVerdict {
-  const retainedDiagnostics: string[] = [];
+  const retainedDiagnostics: string[] = [
+    ...(opts.notes ?? []),
+    ...(opts.captureUnknown ?? []).map((reason) => `capture gap: ${reason}`),
+  ];
   for (const kill of opts.kills) {
     const { outcome } = kill;
     if (outcome.status === 0 && !outcome.signal) continue;

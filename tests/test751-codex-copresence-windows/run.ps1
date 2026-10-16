@@ -9,7 +9,9 @@ $fakeHash = (Get-FileHash -Algorithm SHA256 $fakeCodex).Hash.ToLowerInvariant()
 $threadReadWire = (Select-String -Path $fakeCodex -SimpleMatch 'msg.method === "thread/read"').Line.Trim()
 @("source_commit: $sourceCommit", "fake_codex_sha256: $fakeHash", "fake_thread_read_wire: $threadReadWire") | Tee-Object -FilePath $report -Append
 bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
-bun test src/copresence-deps.test.ts src/windows-codex-copresence.test.ts src/codex-copresence-thread.test.ts 2>&1 | Tee-Object -FilePath $report -Append
+bun test src/copresence-deps.test.ts src/windows-codex-copresence.test.ts src/codex-copresence-thread.test.ts src/windows-stop-identity.test.ts 2>&1 | Tee-Object -FilePath $report -Append
+# #1335 —— 这一行的退出码此前**没有被检查**(`| Tee-Object` 之后没有任何判定),会让新见证的红被后面命令的退出码覆盖。显式判定:
+if ($LASTEXITCODE -ne 0) { throw "Codex co-presence unit tests failed" }
 bun run typecheck 2>&1 | Tee-Object -FilePath $report -Append
 Set-Location (Join-Path $PSScriptRoot "..\..\agent-node")
 bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
