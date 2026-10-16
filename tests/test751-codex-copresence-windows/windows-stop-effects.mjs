@@ -243,6 +243,20 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
           }
         }
         if (!handled) throw new Error(`test1337 A: could not parse a successful MCP result for report_status from upstream body: ${JSON.stringify(raw.slice(0, 300))}`);
+        // 🔴 还要校验 MCP result **内层** JSON（Hub 的 report_status 返回 content[0].text = JSON({ok:true, alias, …})）：
+        //    必须 ok:true，且返回的 alias/resume_id 与本 fixture 的**期望目标一致** —— 仅"有 result"不够。
+        let inner = null;
+        for (const c of (Array.isArray(handled.content) ? handled.content : [])) {
+          if (typeof c?.text !== "string") continue;
+          try { const j = JSON.parse(c.text); if (j && typeof j === "object") { inner = j; break; } } catch {}
+        }
+        if (!inner) throw new Error(`test1337 A: MCP result carried no parsable inner JSON: ${JSON.stringify(handled).slice(0, 300)}`);
+        if (inner.ok !== true) throw new Error(`test1337 A: Hub report_status not ok:true (${JSON.stringify(inner).slice(0, 300)})`);
+        if (inner.alias !== expected.alias) throw new Error(`test1337 A: returned alias mismatch (got ${inner.alias}, expected ${expected.alias})`);
+        if (inner.resume_id !== undefined && inner.resume_id !== expected.resumeId) {
+          throw new Error(`test1337 A: returned resume_id mismatch (got ${inner.resume_id}, expected ${expected.resumeId})`);
+        }
+        console.log(`       (A inner: Hub ok:true, alias=${inner.alias}, resume_id=${inner.resume_id ?? "(none)"} — matches expected target)`);
         console.log(`       (A: upstream responded ${status} to the target-bound offline notification)`);
         console.log(`       (A evidence: target-bound offline alias=${r.offline[0]?.alias} resumeId=${r.offline[0]?.resumeId}; upstream=${r.offline[0].upstreamStatus} (2xx); MCP result parsed=yes; unrelated-node notifications excluded by self-check)`);
         console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias}, upstream=${r.offline[0].upstreamStatus})`);
