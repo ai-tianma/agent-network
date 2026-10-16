@@ -81,9 +81,12 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
   const patchProfileHub = () => {
     hubPatch.original = readFileSync(nodeConfig);          // 原始字节
     const cfg = JSON.parse(hubPatch.original.toString());
-    cfg.profile = { ...(cfg.profile ?? {}), hub: proxyHub };
+    // 🔴 `Profile.hub` 是**顶层**键（`loadProfile()` 把 node config 读成 Profile，顶层 hub 即 profile.hub）；
+    //    上一版误写成嵌套 profile.hub ⇒ 代理收到 0 个请求（A 实测 saw []）。
+    cfg.hub = proxyHub;
+    if (cfg.profile && typeof cfg.profile === "object") cfg.profile.hub = proxyHub;
     writeFileSync(nodeConfig, JSON.stringify(cfg, null, 2));
-    console.log(`PHASE test1337: patched profile.hub -> ${proxyHub} (${nodeConfig})`);
+    console.log(`PHASE test1337: patched node-config hub -> ${proxyHub} (keys=${Object.keys(cfg).join(",")})`);
   };
   const restoreProfileHub = () => {
     if (hubPatch.original !== null) { writeFileSync(nodeConfig, hubPatch.original); hubPatch.original = null; }
