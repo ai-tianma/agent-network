@@ -307,11 +307,14 @@ import {
   probeWindowsCreationDate,
   probeWindowsOwnedLoopbackConnection,
   readWindowsCopresenceRecord,
+  orchestrateWindowsManagedStop,
+  settleWindowsManagedStop,
   taskkillWindowsProcessTree,
   windowsCopresenceLogPath,
   windowsCopresenceRecordPath,
   writeWindowsCopresenceRecord,
   decideWindowsManagedStop,
+  type WindowsManagedIdentity,
   type WindowsManagedProcess,
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
@@ -13113,20 +13116,32 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
         console.error(`[anet] STOP_TIMEOUT: Windows ownership could not be proven; hub was not notified offline.`);
         process.exit(1);
       }
-      for (const managedProcess of [...decision.safe].reverse()) {
-        try { taskkillWindowsProcessTree(managedProcess.pid); }
-        catch (e) {
-          console.error(`[anet] ❌ taskkill failed for ${managedProcess.role} pid=${managedProcess.pid}: ${(e as Error).message}`);
-          process.exit(1);
-        }
-      }
-      const windowsResiduals = decision.safe.filter(p => probeWindowsCreationDate(p.pid) === p.creationDate);
-      if (windowsResiduals.length > 0) {
-        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${windowsResiduals.map(p => `${p.role}:${p.pid}`).join(", ")}`);
+      // #1335 —— 停止编排（CLI 与见证**共用同一份实现**）：
+      // 绑定根身份的取证 → 终止紧前重验 → 按精确身份裁决 gone/alive/unknown。
+      // taskkill 非零**本身**不再判失败（旧代码在此提前 exit(1)，使身份判据不可达）；
+      // `survived`/`unverifiable` 都在删记录与通知 Hub 离线**之前**退出。
+      const stop = orchestrateWindowsManagedStop(
+        decision.safe.map((p) => ({ role: p.role, pid: p.pid, creationDate: p.creationDate })),
+      );
+      for (const diagnostic of stop.verdict.retainedDiagnostics) console.warn(`[anet] ⚠ ${diagnostic}`);
+      if (stop.verdict.kind === "survived") {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${stop.verdict.alive.join(", ")}`);
         process.exit(1);
       }
-      rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });
-      const pidResult = await stopNode(resolved.id);
+      if (stop.verdict.kind === "unverifiable") {
+        console.error(`[anet] STOP_TIMEOUT: could not prove Windows managed identity exited: ${stop.verdict.unknown.join(", ")}`);
+        process.exit(1);
+      }
+      // settle 门控记录删除与本地节点停止；Hub 通知仍须下方 pidResult 检查通过。
+      const settle = await settleWindowsManagedStop(stop, {
+        removeRecord: () => rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true }),
+        stopNode: () => stopNode(resolved.id),
+      });
+      if (settle.kept) {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed identity could not be settled; record kept, hub not notified offline.`);
+        process.exit(1);
+      }
+      const pidResult = settle.stopResult!;
       if (pidResult.status === "survived") {
         console.error(`[anet] STOP_TIMEOUT: Windows node pid ${pidResult.pid} survived; hub was not notified offline.`);
         process.exit(1);
