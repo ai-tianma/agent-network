@@ -32,6 +32,16 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
   /** 全部请求（诊断）+ **精确离线通知**计数。 */
   const requests = [];
   const offlineNotifications = [];
+  // 🔴 目标绑定：按 notifyServerOffline 的算法算期望 alias / resume_id，只有**本 fixture 的目标节点**
+  //    的 offline 通知才算数（与 main cli.ts 的 nodeDisplayName / `sdk-${node_id}` 一致）。
+  const expected = { alias: null, resumeId: null };
+  const computeExpectedTarget = () => {
+    const cfg = JSON.parse(readFileSync(nodeConfig, "utf8"));
+    const display = cfg.alias ?? cfg.node_name ?? node;
+    expected.alias = display;
+    expected.resumeId = cfg.node_id ? `sdk-${cfg.node_id}` : `sdk-${display}-0`;
+    console.log(`PHASE test1337: expected offline target alias=${expected.alias} resumeId=${expected.resumeId}`);
+  };
 
   const proxy = createServer((req, res) => {
     let body = "";
@@ -39,16 +49,25 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
     req.on("end", () => {
       const entry = { method: req.method, url: req.url, body };
       requests.push(entry);
+      let matchedOffline = null;
       if (req.method === "POST" && req.url === "/mcp") {
         try {
           const parsed = JSON.parse(body);
           const args = parsed?.params?.arguments ?? {};
           if (parsed?.method === "tools/call" && parsed?.params?.name === "report_status" && args.status === "offline") {
-            offlineNotifications.push({ alias: args.alias ?? null, resumeId: args.resume_id ?? null });
+            matchedOffline = { alias: args.alias ?? null, resumeId: args.resume_id ?? null };
+            // 只统计**目标节点**（精确 alias + resume_id）；任意节点/其它 alias 不算
+            if (args.alias === expected.alias && args.resume_id === expected.resumeId) {
+              offlineNotifications.push({ ...matchedOffline, upstreamStatus: null });
+            }
           }
         } catch { /* 非 JSON 体不计入 */ }
       }
       const up = httpRequest({ host: "127.0.0.1", port: realHubPort, path: req.url, method: req.method, headers: { ...req.headers, host: `127.0.0.1:${realHubPort}` } }, (r) => {
+        if (matchedOffline) {
+          const rec = offlineNotifications.find((n) => n.alias === matchedOffline.alias && n.resumeId === matchedOffline.resumeId);
+          if (rec) rec.upstreamStatus = r.statusCode ?? null;      // 上游实际响应状态
+        }
         res.writeHead(r.statusCode || 502, r.headers);
         r.pipe(res);
       });
@@ -67,12 +86,15 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
       const child = spawn(bun, [cli, ...args], { cwd: project, env: runEnv });
       let out = "";
       let timedOut = false;
+      let spawnError = null;
       child.stdout.on("data", (d) => { out += d; });
       child.stderr.on("data", (d) => { out += d; });
+      child.on("error", (e) => { spawnError = e; });
       const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
-      child.on("exit", (code, signal) => {
+      // 🔴 用 close（stdio 已收齐）而不是 exit，避免诊断被截断
+      child.on("close", (code, signal) => {
         clearTimeout(timer);
-        resolve({ rc: code, signal, out, timedOut });
+        resolve({ rc: code, signal, out, timedOut, spawnError: spawnError ? String(spawnError) : null });
       });
     });
   }
@@ -140,8 +162,11 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
       ANET_TEST1337_REAL_TASKKILL: process.env.ANET_TEST1337_REAL_TASKKILL,
     };
     patchProfileHub();
+    computeExpectedTarget();
     try {
       const res = await runCli(["node", "stop", node], stopEnv, 120_000);
+      if (res.spawnError) throw new Error(`test1337 ${label}: CLI failed to spawn: ${res.spawnError}`);
+      if (res.rc === null) throw new Error(`test1337 ${label}: CLI returned null rc (spawn/signal issue) — 不得当作预期非零\n${res.out}`);
       if (res.timedOut || res.signal) {
         throw new Error(`test1337 ${label}: CLI did not exit within budget (timedOut=${res.timedOut} signal=${res.signal}) — 不得当作预期非零\n${res.out}`);
       }
@@ -164,9 +189,12 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (existsSync(record)) throw new Error("test1337 A: record should be deleted after a settled stop");
         if (callLog(tkLog).trim() === "") throw new Error("test1337 A: taskkill wrapper never hit (no call log)");
         if (r.offline.length === 0) {
-          throw new Error(`test1337 A: no report_status(offline) observed through the proxy; saw ${JSON.stringify(r.requests.slice(0, 8))}`);
+          throw new Error(`test1337 A: no report_status(offline) for the target node through the proxy; saw ${JSON.stringify(r.requests.slice(0, 8))}`);
         }
-        console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias})`);
+        if (!(typeof r.offline[0].upstreamStatus === "number" && r.offline[0].upstreamStatus >= 200 && r.offline[0].upstreamStatus < 300)) {
+          throw new Error(`test1337 A: upstream hub did not accept the notification (status=${r.offline[0].upstreamStatus})`);
+        }
+        console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias}, upstream=${r.offline[0].upstreamStatus})`);
       } finally { cleanup(s.identities); }
     }
 
@@ -180,6 +208,12 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (!existsSync(record)) throw new Error("test1337 B: record must be retained");
         if (!readFileSync(record).equals(s.bytes)) throw new Error("test1337 B: record bytes changed");
         if (r.offline.length !== 0) throw new Error(`test1337 B: report_status(offline) must be 0, saw ${JSON.stringify(r.offline)}`);
+        // 🔴 必须确实是**本场景**：命中 nonzero-noop 包装器 **且** CLI 报 surviving 残留；
+        //    否则旧 ownership 拒绝等更早错误也能满足 rc!=0 + 记录不变 + 身份仍活。
+        if (!callLog(tkLog).includes("nonzero-noop")) throw new Error(`test1337 B: did not hit the nonzero-noop taskkill wrapper\n${callLog(tkLog)}`);
+        if (!r.out.includes("STOP_TIMEOUT: Windows managed processes survived")) {
+          throw new Error(`test1337 B: did not report surviving managed processes\n${r.out}`);
+        }
         const alive = s.identities.filter((p) => { try { return probeTicks(p.pid) === p.creationDate; } catch { return false; } });
         if (alive.length === 0) throw new Error("test1337 B: expected the real managed identities to still be alive");
         console.log(`PASS test1337 B: rc=${r.rc}, record retained, offline=0, alive=${alive.length}`);
@@ -194,6 +228,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         const r = await shimmedStop("C", "delegate", "illegal-identity");
         if (r.rc === 0) throw new Error(`test1337 C: expected non-zero rc, got 0\n${r.out}`);
         if (!existsSync(record)) throw new Error("test1337 C: record must be retained");
+        if (!readFileSync(record).equals(s.bytes)) throw new Error("test1337 C: record bytes changed (存在但内容已改 ≠ 保留)");
         if (r.offline.length !== 0) throw new Error(`test1337 C: report_status(offline) must be 0, saw ${JSON.stringify(r.offline)}`);
         const log = callLog(psLog);
         if (log.trim() === "") throw new Error("test1337 C: powershell wrapper never hit (no call log)");

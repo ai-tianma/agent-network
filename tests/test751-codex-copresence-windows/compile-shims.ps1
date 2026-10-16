@@ -37,10 +37,23 @@ Remove-Item $log -ErrorAction SilentlyContinue
 $env:ANET_TEST1337_PS_LOG = $log
 $env:ANET_TEST1337_PS_MODE = "illegal-identity"
 $env:ANET_TEST1337_REAL_POWERSHELL = $realPs
-$probe = & "$OutDir\powershell.exe" -NoProfile -Command 'Get-CimInstance Win32_Process -Filter "ProcessId = 1"'
-if ($probe -notmatch "CIMSTATE:CREATED=not-a-date") { throw "test1337 BLOCKER: 包装器未被命中（输出=$probe）" }
+# 🔴 命中探针必须用**真实新身份协议的形状**（包装器的注入条件要求同时含 `CIMSTATE:` 与 `Get-CimInstance`）——
+#    否则探针会被**委托**给真实程序，等于没验证注入路径。
+$newShape = "`$p=Get-CimInstance Win32_Process|Select-Object -First 1;'CIMSTATE:CREATED='+`$(`$p.CreationDate.ToString('o'))"
+$probeNew = & "$OutDir\powershell.exe" -NoProfile -Command $newShape
+if ($probeNew -notmatch "CIMSTATE:CREATED=not-a-date") { throw "test1337 BLOCKER: 包装器未被命中（新协议形状探针输出=$probeNew）" }
+
+# 🔴 非放宽探针：**旧 ownership 形状**（既不含 CIMSTATE: 也不含 Get-CimInstance）必须被**委托**给真实程序，
+#    输出应是真实 ticks（纯数字）——证明夹具没有把拦截放宽到旧的 ownership 查询。
+$oldShape = "[Diagnostics.Process]::GetProcessById($PID).StartTime.ToUniversalTime().Ticks.ToString()"
+$probeOld = & "$OutDir\powershell.exe" -NoProfile -Command $oldShape
+if ($probeOld -notmatch "^\d+$") { throw "test1337 BLOCKER: 拦截被放宽到旧 ownership 查询（输出=$probeOld）" }
+
 if (-not (Test-Path $log)) { throw "test1337 BLOCKER: 包装器命中但无调用日志" }
-Write-Host "test1337: shim hit proven by call log"
+$logText = Get-Content $log -Raw
+if ($logText -notmatch "illegal-identity\t.*CIMSTATE:") { throw "test1337 BLOCKER: 调用日志里没有新协议查询的命中记录" }
+if ($logText -notmatch "illegal-identity\t.*GetProcessById") { throw "test1337 BLOCKER: 调用日志里没有旧 ownership 查询的委托记录" }
+Write-Host "test1337: shim hit proven by new-protocol probe + old-ownership delegated (call log)"
 
 # 5) 供后续步骤使用（写文件而非改全局环境）
 $envFile = Join-Path $env:RUNNER_TEMP "anet-test1337-shim-env.ps1"
