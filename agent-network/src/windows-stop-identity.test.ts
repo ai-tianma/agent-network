@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript, windowsTreeReconciliationScript,
+  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript, windowsProcessSnapshotScript, parseWindowsProcessSnapshot, findUnaccountedDescendants,
   probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr, isCompleteCimCreationDate,
   type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity, type WindowsStopOrchestration,
 } from "./windows-codex-copresence";
@@ -28,17 +28,16 @@ const { summary } = summarizeTaskkillStderr(liveSampleStderr);
 const nonZeroKill = (): TaskkillOutcome => ({ status: 128, signal: null, stderrSummary: summary, stderrDroppedBytes: 0 });
 
 /** 脚本化环境：按脚本形状路由，并记录**调用序列**与 kill 调用（控制流见证）。 */
-function scriptedEnv(opts: { capture: string; probes: string[]; recon?: string | null }) {
+function scriptedEnv(opts: { capture: string; probes: string[]; snapshot?: string | null }) {
   const calls: string[] = [];
   const killed: number[] = [];
   let probeIndex = 0;
   const runPowerShell = (script: string): string => {
     if (script.includes("CAP:RB=")) { calls.push("capture"); return opts.capture; }
-    if (script.includes("RECON:")) {
-      const rootPid = Number(/HashSet\[int\]\]::new\(\);\[void\]\$ids\.Add\((\d+)\)/.exec(script)![1]);
-      calls.push(`recon:${rootPid}`);
-      if (opts.recon === null) throw new Error("recon failed");
-      return opts.recon ?? "RECON:";
+    if (script.includes("SNAP:")) {
+      calls.push("snapshot");
+      if (opts.snapshot === null) throw new Error("snapshot failed");
+      return opts.snapshot ?? "SNAP:";
     }
     const pid = Number(/GetProcessById\((\d+)\)|ProcessId = (\d+)/.exec(script)!.slice(1).filter(Boolean)[0]);
     calls.push(`probe:${pid}`);
@@ -64,8 +63,8 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(diagnostics).toContain("status=128");
     expect(diagnostics).toContain("There is no running instance of the task.");
     // 控制流见证：终止之前**先**重验根身份，且只发一次终止命令。
-    // 非零 kill ⇒ 终止后必须做一次「树已空」核对（RECON），再进入裁决探针。
-    expect(env.calls).toEqual(["capture", "probe:8100", "kill:8100", "recon:8100", "probe:8100", "probe:8744"]);
+    // 非零 kill ⇒ 终止后必须取一次进程快照并做**遍历**，再进入裁决探针。
+    expect(env.calls).toEqual(["capture", "probe:8100", "kill:8100", "snapshot", "probe:8100", "probe:8744"]);
   });
 
   test("负控：根 gone 但**已捕获同身份后代 alive** ⇒ 非零，且**不发**终止命令", () => {
@@ -117,31 +116,48 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(probeWindowsIdentity(8744, DESC_BIRTH, () => `CIMSTATE:CREATED=${OTHER_BIRTH}`, "creation")).toBe("pid-reused");
   });
 
-  test("🔴 [Codex P1] 非零 kill 且**树未空**（快照后才生出的后代）⇒ 必须 unknown，不得判 stopped", () => {
+  test("🔴 [评审 6207883011 反例] 后代在自己的**死父进程**下仍存活（快照 SNAP:9999=8744）⇒ 必须 unknown，不得判 stopped", () => {
     const env = scriptedEnv({
       capture: cap(`8744=${DESC_BIRTH}`),
       probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:ABSENT"],
-      recon: "RECON:9999",                                  // 终止后仍有一个后代在树上
+      snapshot: "SNAP:9999=8744,8100=0",        // 8100 已不可达，但 8744(已捕获) 下仍有 9999 存活
     });
     const stop = orchestrateWindowsManagedStop([root], env);
-    expect(stop.verdict.kind).toBe("unverifiable");
+    expect(stop.verdict.kind).toBe("unverifiable");     // 旧实现（只从 8100 BFS）会误判 stopped
     expect(stop.mustKeepRecord).toBe(true);
-    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("tree not proven empty after a non-zero taskkill");
+    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("unaccounted live descendants 9999");
   });
 
-  test("🔴 [Codex P1] 非零 kill 且树核对**无法取得** ⇒ 必须 unknown", () => {
-    const env = scriptedEnv({ capture: cap(`8744=${DESC_BIRTH}`), probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:ABSENT"], recon: null });
-    const stop = orchestrateWindowsManagedStop([root], env);
-    expect(stop.verdict.kind).toBe("unverifiable");
-    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("tree not reconciled");
-  });
-
-  test("🔴 [Codex P1] 取证/核对脚本不得使用与只读自动变量 `$PID` 同名的循环变量", () => {
-    for (const script of [windowsCaptureScript(8100, "999"), windowsTreeReconciliationScript(8100)]) {
-      expect(/foreach\(\$id\b/.test(script)).toBe(false);      // $id === $PID（大小写不敏感、只读）
-      expect(script).not.toMatch(/foreach\(\$PID\b/);
+  test("🔴 [Codex P1] 非零 kill 且快照**无法取得/不可解析** ⇒ 必须 unknown", () => {
+    for (const snapshot of [null, "nonsense"]) {
+      const env = scriptedEnv({ capture: cap(`8744=${DESC_BIRTH}`), probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:ABSENT"], snapshot });
+      const stop = orchestrateWindowsManagedStop([root], env);
+      expect(stop.verdict.kind).toBe("unverifiable");
+      expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("tree not reconciled");
     }
+  });
+
+  test("🔴 **遍历本身**的见证（不看根是否可达）：种子＝全部已捕获身份", () => {
+    // 他给的反例逐字：种子 {8100,8744}，快照只有 9999=8744 ⇒ 9999 未被记账
+    expect(findUnaccountedDescendants([{ pid: 9999, ppid: 8744 }], [8100, 8744])).toEqual([9999]);
+    // 旧实现只从根出发会得空 —— 同一快照下用 {8100} 作种子确实得空，正是那条断链
+    expect(findUnaccountedDescendants([{ pid: 9999, ppid: 8744 }], [8100])).toEqual([]);
+    // 全部退出 ⇒ 无可达者
+    expect(findUnaccountedDescendants([], [8100, 8744])).toEqual([]);
+    // 快照解析：合法/垃圾
+    expect(parseWindowsProcessSnapshot("SNAP:9999=8744,1=0")).toEqual([{ pid: 9999, ppid: 8744 }, { pid: 1, ppid: 0 }]);
+    expect(parseWindowsProcessSnapshot("SNAP:")).toEqual([]);
+    expect(parseWindowsProcessSnapshot("garbage")).toBeNull();
+    // 快照脚本**不**内建根种子（遍历在 JS 侧，种子由调用方给出）
+    expect(windowsProcessSnapshotScript()).toContain("Select-Object ProcessId,ParentProcessId");
+    expect(windowsProcessSnapshotScript()).not.toContain("8100");
+  });
+
+  test("回归：取证脚本的循环变量沿用 `$child`（**订正**：此前说的 `$id`≡只读 `$PID` 不成立——`$id` 与 `$pid` 是**不同**变量名，大小写不敏感只使 `$pid`=`$PID`）", () => {
+    // 保留改名（可读性与避免与自动变量族混淆），但不再据此声称"旧脚本必有该碰撞"：
+    // 新脚本绿**不能**证明旧脚本存在该碰撞。
     expect(windowsCaptureScript(8100, "999")).toContain("foreach($child in $ids)");
+    expect(windowsCaptureScript(8100, "999")).not.toMatch(/foreach\(\$PID\b/);
   });
 
   test("（编排层）查询 unknown ⇒ verdict 非零且 mustKeepRecord=true（收尾调用由下方 spy 见证验证）", () => {
