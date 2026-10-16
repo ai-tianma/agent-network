@@ -24,6 +24,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
   const node = "windows-picker";
   const record = join(project, ".anet", "nodes", node, "windows-copresence.json");
   const nodeConfig = join(project, ".anet", "nodes", node, "config.json");
+  const nodeDir = join(project, ".anet", "nodes", node);
   const globalConfig = join(userHome, ".anet", "config.json");
   const psLog = join(root, "test1337-ps.log");
   const tkLog = join(root, "test1337-tk.log");
@@ -92,7 +93,21 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
     if (hubPatch.original !== null) { writeFileSync(nodeConfig, hubPatch.original); hubPatch.original = null; }
   };
 
+  /** 夹具级清理：上一次**失败**的 stop 会留下 `state:"stopping"`／`stopInvokedAt` 的生命周期标记，
+   *  守卫会以 NODE_START_CANCELLED_BY_CONCURRENT_STOP 取消下一次 start（实测 C 场景即此）。
+   *  这里只清**本夹具自己**在 RUNNER_TEMP 隔离项目里产生的状态。 */
+  const clearFixtureLifecycleState = (label) => {
+    const owner = join(nodeDir, ".lifecycle-owner.json");
+    const lock = join(nodeDir, ".lifecycle-lock");
+    if (existsSync(owner) || existsSync(lock)) {
+      console.log(`PHASE test1337 ${label}: clearing fixture lifecycle state (owner=${existsSync(owner)} lock=${existsSync(lock)})`);
+    }
+    rmSync(owner, { force: true });
+    rmSync(lock, { recursive: true, force: true });
+  };
+
   async function startNode(label) {
+    clearFixtureLifecycleState(label);
     rmSync(record, { force: true });
     const out = await terminal(["node", "start", node, "--no-inherit-codex-home"], undefined, 120_000);
     if (!existsSync(record)) throw new Error(`test1337 ${label}: ${node} did not start\n${out}`);
@@ -104,6 +119,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
     for (const p of identities || []) {
       try { if (probeTicks(p.pid) === p.creationDate) spawnSync("taskkill.exe", ["/PID", String(p.pid), "/T", "/F"], { encoding: "utf8" }); } catch {}
     }
+    clearFixtureLifecycleState("cleanup");
     rmSync(record, { force: true });
   };
 
