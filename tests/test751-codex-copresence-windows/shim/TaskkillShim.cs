@@ -10,9 +10,28 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 
 internal static class TaskkillShim
 {
+
+    /// <summary>Windows 命令行引号（.NET Framework 无 ProcessStartInfo.ArgumentList）。</summary>
+    private static string QuoteArgument(string a)
+    {
+        if (a.Length > 0 && a.IndexOfAny(new char[] { ' ', '\t', '"' }) < 0) return a;
+        var sb = new System.Text.StringBuilder("\"");
+        int backslashes = 0;
+        foreach (char c in a)
+        {
+            if (c == '\\') { backslashes++; sb.Append(c); }
+            else if (c == '"') { sb.Append('\\', backslashes * 2 + 1); sb.Append('"'); backslashes = 0; }
+            else { backslashes = 0; sb.Append(c); }
+        }
+        sb.Append('\\', backslashes * 2);
+        sb.Append('"');
+        return sb.ToString();
+    }
+
     private static int Main(string[] args)
     {
         string log = Environment.GetEnvironmentVariable("ANET_TEST1337_TK_LOG");
@@ -38,8 +57,7 @@ internal static class TaskkillShim
             return 127;
         }
 
-        var psi = new ProcessStartInfo(real) { UseShellExecute = false };
-        foreach (string a in args) psi.ArgumentList.Add(a);
+        var psi = new ProcessStartInfo(real) { UseShellExecute = false, Arguments = string.Join(" ", Array.ConvertAll(args, QuoteArgument)) };
         int realExit;
         using (var p = Process.Start(psi))
         {
