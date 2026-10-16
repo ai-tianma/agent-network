@@ -120,6 +120,20 @@ advance the revision:
 | after `current` rename, before dir fsync, before ACK | pointer maybe replaced | retain + re-read | authority re-runs step 3 only |
 | after ACK | committed | committed | none |
 
+### 4.1 Write permissions — named writers; a refusal is a **decision**, not a write
+
+(Reviewed-and-accepted contract from revision 3, restated here so it is not lost.)
+
+| Write | Sole named writer | Rule |
+|---|---|---|
+| `fence/<allocationId>.json` | the **coordinator generation** of this allocation | any other writer ⇒ `refuse(unqualified-participant)`; nothing is written |
+| `records/<rev>-<digest>.json` + `current` | the coordinator whose **generation still matches** the record | CAS on the complete current record digest under `lock`; a loser re-reads |
+| `confirmation/<rev>-<digest>.json` | the commit path, or the **named recovery authority** | only for the **same** `(revision, digest)`; never a new revision |
+| `reservation/<allocationId>.json` | a cleanup participant that passed §3 | after it exists, prepare **must fail** |
+| retract an **uncommitted** fence | the **named recovery authority**, with evidence | only when no confirmation ever existed and the generation is gone |
+| `released` record | the current holder, with #1239 evidence | never producible by a reader |
+| **a refusal** | **nobody** | A refusal is a **decision returned to the caller**, not a record. Readers may never overwrite a valid record with a refusal. |
+
 ## 5. Types: separate exit from a real admission barrier
 
 ```ts
@@ -158,6 +172,10 @@ type CommitReceipt = { recordRef: { revision: number; digest: string };
 
 Requirements that make the barrier usable:
 
+- **Coordinator generation ≠ native generation** (accepted in revision 3). `coordinator:
+  GenRef` and `nativeExit: NativeExit` are **different** identities: "the coordinator
+  exited" says nothing about the native child, and a stale process can never write an
+  outcome because §4.1 admits only the matching coordinator generation.
 - **Existing writers** need their own `nativeExit` (or independent exclusion) evidence;
   the barrier only stops **new** launch/adoption.
 - **Fail-closed admission**: while a barrier is claimed, participating launchers default
@@ -204,6 +222,9 @@ function reserveCleanup(opts: { allocationId: string; rootId: FsId; actor: Parti
   Promise<{ reservationRef: string }>;
 
 // Prepare: first durable step is the fence (temp→fsync→rename→fsync dir); then the commit.
+// Precondition (accepted in revision 3): the root **directory must exist** and re-read to
+// the same `{dev, ino}`; a bare inode is ambiguous across filesystems. Absent ⇒
+// `refuse(root-absent)`; drifted ⇒ `refuse(fs-identity-drift)`. Never prepare blind.
 function requestRetentionPrepare(opts: { allocationId: string; rootId: FsId;
   actor: ParticipantIdentity }): Promise<{ revision: number; digest: string } | { refuse: RefusalReason }>;
 
@@ -230,8 +251,8 @@ permits the existing flow.
 
 `no-participation-proof`, `cleanup-reserved`, `record-expected-missing`,
 `commit-unconfirmed`, `chain-broken`, `schema-newer`, `generation-mismatch`,
-`fs-identity-drift`, `barrier-epoch-mismatch`, `participant-unknown`, `unknown-sweeper`,
-`mixed-state`, `unqualified-participant`.
+`fs-identity-drift`, `root-absent`, `barrier-epoch-mismatch`, `participant-unknown`,
+`unknown-sweeper`, `mixed-state`, `unqualified-participant`.
 
 ## 9. Responsibility boundaries (unchanged scope)
 
@@ -253,6 +274,8 @@ permits the existing flow.
 | Concurrent commits | exactly one wins: CAS on the **complete current record digest** under `lock` | No last-write-wins; no replaced/rewritten record file |
 | Record durable but confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | Must not be read as durable; no "probably fsynced" |
 | Chain's older record missing | `unknown` ⇒ retain + refuse | No silent re-anchoring of the chain |
+| Prepare with an absent directory or drifted `{dev,ino}` | `refuse(root-absent)` / `refuse(fs-identity-drift)` | Never prepare against a bare inode or a missing root |
+| A write by a participant other than the named writer (§4.1) | `refuse(unqualified-participant)`; nothing is written | Permission is checked **before** any write |
 | A reader wants a record to be refused | a refusal **decision** is returned | Readers may not overwrite a valid record |
 | Barrier controller crashed / version mismatch | admission still refuses new writers | No time-based or null-`heldUntil` exclusion claim |
 | Metadata lock free (holder died) | no takeover authority | Must not claim a dead pid still holds the kernel lock |
