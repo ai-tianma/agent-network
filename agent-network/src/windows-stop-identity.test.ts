@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript,
+  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript, windowsTreeReconciliationScript,
   probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr, isCompleteCimCreationDate,
   type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity, type WindowsStopOrchestration,
 } from "./windows-codex-copresence";
@@ -28,12 +28,18 @@ const { summary } = summarizeTaskkillStderr(liveSampleStderr);
 const nonZeroKill = (): TaskkillOutcome => ({ status: 128, signal: null, stderrSummary: summary, stderrDroppedBytes: 0 });
 
 /** 脚本化环境：按脚本形状路由，并记录**调用序列**与 kill 调用（控制流见证）。 */
-function scriptedEnv(opts: { capture: string; probes: string[] }) {
+function scriptedEnv(opts: { capture: string; probes: string[]; recon?: string | null }) {
   const calls: string[] = [];
   const killed: number[] = [];
   let probeIndex = 0;
   const runPowerShell = (script: string): string => {
     if (script.includes("CAP:RB=")) { calls.push("capture"); return opts.capture; }
+    if (script.includes("RECON:")) {
+      const rootPid = Number(/HashSet\[int\]\]::new\(\);\[void\]\$ids\.Add\((\d+)\)/.exec(script)![1]);
+      calls.push(`recon:${rootPid}`);
+      if (opts.recon === null) throw new Error("recon failed");
+      return opts.recon ?? "RECON:";
+    }
     const pid = Number(/GetProcessById\((\d+)\)|ProcessId = (\d+)/.exec(script)!.slice(1).filter(Boolean)[0]);
     calls.push(`probe:${pid}`);
     return opts.probes[probeIndex++];
@@ -58,7 +64,8 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(diagnostics).toContain("status=128");
     expect(diagnostics).toContain("There is no running instance of the task.");
     // 控制流见证：终止之前**先**重验根身份，且只发一次终止命令。
-    expect(env.calls).toEqual(["capture", "probe:8100", "kill:8100", "probe:8100", "probe:8744"]);
+    // 非零 kill ⇒ 终止后必须做一次「树已空」核对（RECON），再进入裁决探针。
+    expect(env.calls).toEqual(["capture", "probe:8100", "kill:8100", "recon:8100", "probe:8100", "probe:8744"]);
   });
 
   test("负控：根 gone 但**已捕获同身份后代 alive** ⇒ 非零，且**不发**终止命令", () => {
@@ -110,6 +117,33 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(probeWindowsIdentity(8744, DESC_BIRTH, () => `CIMSTATE:CREATED=${OTHER_BIRTH}`, "creation")).toBe("pid-reused");
   });
 
+  test("🔴 [Codex P1] 非零 kill 且**树未空**（快照后才生出的后代）⇒ 必须 unknown，不得判 stopped", () => {
+    const env = scriptedEnv({
+      capture: cap(`8744=${DESC_BIRTH}`),
+      probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:ABSENT"],
+      recon: "RECON:9999",                                  // 终止后仍有一个后代在树上
+    });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("unverifiable");
+    expect(stop.mustKeepRecord).toBe(true);
+    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("tree not proven empty after a non-zero taskkill");
+  });
+
+  test("🔴 [Codex P1] 非零 kill 且树核对**无法取得** ⇒ 必须 unknown", () => {
+    const env = scriptedEnv({ capture: cap(`8744=${DESC_BIRTH}`), probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:ABSENT"], recon: null });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("unverifiable");
+    expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("tree not reconciled");
+  });
+
+  test("🔴 [Codex P1] 取证/核对脚本不得使用与只读自动变量 `$PID` 同名的循环变量", () => {
+    for (const script of [windowsCaptureScript(8100, "999"), windowsTreeReconciliationScript(8100)]) {
+      expect(/foreach\(\$id\b/.test(script)).toBe(false);      // $id === $PID（大小写不敏感、只读）
+      expect(script).not.toMatch(/foreach\(\$PID\b/);
+    }
+    expect(windowsCaptureScript(8100, "999")).toContain("foreach($child in $ids)");
+  });
+
   test("（编排层）查询 unknown ⇒ verdict 非零且 mustKeepRecord=true（收尾调用由下方 spy 见证验证）", () => {
     const env = scriptedEnv({
       capture: cap(`8744=${DESC_BIRTH}`),
@@ -153,7 +187,7 @@ describe("#1335 取证：后代出生身份必须来自**同一份枚举快照**
   test("（结构见证）快照同时给出父子关系与出生身份；后代不再二次读取", () => {
     const script = windowsCaptureScript(8100, "999");
     expect(script).toContain("Select-Object ProcessId,ParentProcessId,CreationDate");
-    expect(script).toContain("$hit=$procs|?{[int]$_.ProcessId -eq $id}");
+    expect(script).toContain("$hit=$procs|?{[int]$_.ProcessId -eq $child}");
     expect(script).toContain("$hit.CreationDate.ToString('o')");
     // 旧形态（枚举 PID → 再逐 PID 读出生身份）必须**不再出现**：正是复审指出的窗口。
     expect(script.includes("ReadBirthTicks $id")).toBe(false);
@@ -282,6 +316,24 @@ describe("#1335 记录清理／本地节点停止回调门控（spy；真实文�
 });
 
 describe("#1335 原生验证：后代身份协议在真机上精确可往返（Windows runner 才跑）", () => {
+  test.skipIf(process.platform !== "win32")("（原生）**有真实子进程**时 capture 仍返回合法 CAP 并能枚举到后代（Codex P1：`$id`≡只读 `$PID` 的碰撞已消除）", () => {
+    const parent = spawn("cmd.exe", ["/c", "start /b ping -n 30 127.0.0.1 > nul & ping -n 30 127.0.0.1 > nul"], { windowsHide: true });
+    const ps = (script: string) => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 30_000,
+    }).trim();
+    try {
+      const birth = ps(`[Diagnostics.Process]::GetProcessById(${parent.pid}).StartTime.ToUniversalTime().Ticks.ToString()`);
+      const wait = Date.now() + 1500;
+      while (Date.now() < wait) { /* 让 cmd 把子进程拉起来 */ }
+      const parsed = parseWindowsCapture(ps(windowsCaptureScript(parent.pid, birth)));
+      expect(parsed).not.toBeNull();                       // 旧实现（$id）在此会抛错 ⇒ 取证失败
+      expect(parsed!.rootBefore).toBe(birth);
+      expect(parsed!.descendants.length).toBeGreaterThan(0); // 循环体确实执行过
+    } finally {
+      try { execFileSync("taskkill.exe", ["/PID", String(parent.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch {}
+    }
+  });
+
   test.skipIf(process.platform !== "win32")("CIM `CreationDate` 对同一进程两次读数**完全相同**（不截短／不近似），且与根的 ticks 协议不同域", () => {
     const child = spawn("cmd.exe", ["/c", "ping -n 30 127.0.0.1 > nul"], { windowsHide: true });
     const ps = (script: string) => execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {

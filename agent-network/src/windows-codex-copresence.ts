@@ -327,7 +327,7 @@ export function windowsCaptureScript(rootPid: number, expectedCreationDate: stri
     "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
     `[void]$ids.Remove(${rootPid})`,
     "$good=@();$bad=@()",
-    "foreach($id in $ids){$hit=$procs|?{[int]$_.ProcessId -eq $id}|Select-Object -First 1;if($hit-and$hit.CreationDate){$good+=\"$id=$($hit.CreationDate.ToString('o'))\"}else{$bad+=\"$id\"}}",
+    "foreach($child in $ids){$hit=$procs|?{[int]$_.ProcessId -eq $child}|Select-Object -First 1;if($hit-and$hit.CreationDate){$good+=\"$child=$($hit.CreationDate.ToString('o'))\"}else{$bad+=\"$child\"}}",
     `$ra=ReadBirthTicks ${rootPid}`,
     `'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA='+$(if($ra){$ra}else{'ABSENT'})+';D='+($good -join ',')+';G='+($bad -join ',')`,
   ].join(";");
@@ -480,6 +480,8 @@ export function orchestrateWindowsManagedStop(
 ): WindowsStopOrchestration {
   const runPowerShell = deps.runPowerShell;
   const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
+  const runPowerShellOrThrow = (rootPid: number): string =>
+    (runPowerShell ?? defaultPowerShellRunner)(windowsTreeReconciliationScript(rootPid));
   const identities: WindowsManagedIdentity[] = [...roots];
   const gaps: string[] = [];
   const notes: string[] = [];
@@ -497,14 +499,53 @@ export function orchestrateWindowsManagedStop(
     killedPids.push(root.pid);
     kills.push({ label, outcome: runTaskkill(root.pid) });
   }
+  // 🔴 非零 kill ⇒ 必须证明「树已空」：否则快照之后才生出的后代可能仍存活，
+  //    而 pre-captured 身份全 gone 会让裁决误判 stopped（Codex P1）。
+  const reconGaps: string[] = [];
+  if (kills.some((kill) => kill.outcome.status !== 0 || kill.outcome.signal)) {
+    for (const root of roots) {
+      const label = `${root.role} pid=${root.pid}`;
+      let remaining: number[] | null = null;
+      try { remaining = parseWindowsRecon(runPowerShellOrThrow(root.pid)); }
+      catch { remaining = null; }
+      if (remaining === null) reconGaps.push(`tree not reconciled for ${label}: output not understood`);
+      else if (remaining.length > 0) reconGaps.push(`tree not proven empty after a non-zero taskkill for ${label}: ${remaining.join(",")}`);
+    }
+  }
   const verdict = decideWindowsStopVerdict({
     identities,
     kills,
     notes,
-    captureUnknown: gaps,
+    captureUnknown: [...gaps, ...reconGaps],
     probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate, runPowerShell, identity.kind),
   });
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
+}
+
+export const WINDOWS_RECON_PROTOCOL = "RECON:";
+
+/**
+ * 终止**之后**的树核对：重新枚举该根 pid 的后代（BFS 于一份新的 CIM 快照）。
+ * 非空 ⇒ 证明「树未空」（含**快照之后才生出**的后代）⇒ 调用方必须判 unknown。
+ * 只用于取证，不用于杀进程。
+ */
+export function windowsTreeReconciliationScript(rootPid: number): string {
+  return [
+    "$ErrorActionPreference='Stop'",
+    "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
+    `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
+    "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
+    `[void]$ids.Remove(${rootPid})`,
+    `'${WINDOWS_RECON_PROTOCOL}'+($ids-join',')`,
+  ].join(";");
+}
+
+export function parseWindowsRecon(raw: string): number[] | null {
+  const matched = new RegExp(`^${WINDOWS_RECON_PROTOCOL}(\\d+(,\\d+)*)?$`).exec(String(raw ?? "").trim());
+  if (!matched) return null;
+  if (!matched[1]) return [];
+  const pids = matched[1].split(",").map(Number);
+  return pids.every((pid) => Number.isInteger(pid) && pid > 0) ? pids : null;
 }
 
 export interface WindowsStopContinuation<TStopResult> {
