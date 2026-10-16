@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync, spawn } from "node:child_process";
 import {
   captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, settleWindowsManagedStop, windowsCaptureScript,
-  probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr,
+  probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr, isCompleteCimCreationDate,
   type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity, type WindowsStopOrchestration,
 } from "./windows-codex-copresence";
 
@@ -84,7 +84,28 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("pid reused; unrelated process left untouched");
   });
 
-  test("（编排层）查询 unknown ⇒ verdict 非零且 mustKeepRecord=true（副作用门控由下方 spy 见证验证）", () => {
+  test("🔴 creation 分支：读回值是**非法 CreationDate** ⇒ 必须 unknown（unverifiable + mustKeepRecord），**不得**当 pid-reused 放行", () => {
+    const env = scriptedEnv({
+      capture: cap(`8744=${DESC_BIRTH}`),
+      probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:CREATED=definitely-not-a-date"],
+    });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("unverifiable");                 // 曾误判为 pid-reused ⇒ stopped（误绿）
+    expect(stop.mustKeepRecord).toBe(true);
+    expect(probeWindowsIdentity(8744, DESC_BIRTH, () => "CIMSTATE:CREATED=definitely-not-a-date", "creation")).toBe("unknown");
+  });
+
+  test("🔴 creation 分支对照：**合法**但不同的出生时间 ⇒ pid-reused（合法不同才可判复用）", () => {
+    const env = scriptedEnv({
+      capture: cap(`8744=${DESC_BIRTH}`),
+      probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", `CIMSTATE:CREATED=${OTHER_BIRTH}`],
+    });
+    const stop = orchestrateWindowsManagedStop([root], env);
+    expect(stop.verdict.kind).toBe("stopped");
+    expect(probeWindowsIdentity(8744, DESC_BIRTH, () => `CIMSTATE:CREATED=${OTHER_BIRTH}`, "creation")).toBe("pid-reused");
+  });
+
+  test("（编排层）查询 unknown ⇒ verdict 非零且 mustKeepRecord=true（收尾调用由下方 spy 见证验证）", () => {
     const env = scriptedEnv({
       capture: cap(`8744=${DESC_BIRTH}`),
       probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "garbage-not-a-protocol"],
@@ -141,7 +162,7 @@ describe("#1335 取证：后代出生身份必须来自**同一份枚举快照**
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=888;RA=888;D=;G=") }).unknownReason).toContain("before capture");
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=888;D=;G=") }).unknownReason).toContain("changed during capture");
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: run(`CAP:RB=999;RA=999;D=;G=8744`) }).unknownReason).toContain("unreadable during capture");
-    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run(cap("1=2026-10-16T02:41:37.1+00:00,2=2026-10-16T02:41:37.2+00:00,3=2026-10-16T02:41:37.3+00:00")), cap: 2 }).unknownReason).toContain("exceeds cap");
+    expect(captureWindowsDescendantIdentities(root, { runPowerShell: run(cap("1=2026-10-16T02:41:37.1000001+00:00,2=2026-10-16T02:41:37.2000002+00:00,3=2026-10-16T02:41:37.3000003+00:00")), cap: 2 }).unknownReason).toContain("exceeds cap");
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("nonsense") }).unknownReason).toContain("not understood");
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: () => { throw new Error("powershell missing"); } }).unknownReason).toContain("capture query failed");
   });
@@ -169,6 +190,14 @@ describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据�
     for (const bad of ["", `${p}TICKS=999\nnoise`, "not-a-protocol", "CIMSTATE:ERROR"]) {
       expect(probeWindowsIdentity(8100, "999", () => bad)).toBe("unknown");
     }
+    // creation 分支的**非法值**必须是 unknown（曾误判 pid-reused）；期望值非法同样 unknown。
+    for (const bad of ["CIMSTATE:CREATED=definitely-not-a-date", "CIMSTATE:CREATED=2026-13-45T99:99:99.1234567+00:00", "CIMSTATE:CREATED=", "CIMSTATE:CREATED=2026-10-16T02:41:37.1234567+00:00\nnoise"]) {
+      expect(probeWindowsIdentity(8744, DESC_BIRTH, () => bad, "creation")).toBe("unknown");
+    }
+    expect(probeWindowsIdentity(8744, "not-a-date", () => `CIMSTATE:CREATED=${DESC_BIRTH}`, "creation")).toBe("unknown");
+    expect(isCompleteCimCreationDate(DESC_BIRTH)).toBe(true);
+    expect(isCompleteCimCreationDate("2026-02-30T00:00:00.1234567+00:00")).toBe(false);   // 非法日期
+    expect(isCompleteCimCreationDate("")).toBe(false);
     expect(probeWindowsIdentity(8100, "999", () => { throw new Error("access denied"); })).toBe("unknown");
     expect(readWindowsIdentity(8100, () => `${p}ABSENT`)).toEqual({ kind: "absent" });
     const { summary: kept, droppedBytes } = summarizeTaskkillStderr(`${liveSampleStderr}\r\nunshaped-line-with=secret`);
@@ -178,7 +207,7 @@ describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据�
   });
 });
 
-describe("#1335 副作用门控：**实际观测**「记录仍在／未通知离线」（spy，非布尔）", () => {
+describe("#1335 停止收尾门控：**实际观测**「记录仍在／未调用 stopNode」（spy，非布尔）\n// ⚠️ Hub 离线通知（`notifyServerOffline`）**不在**本门控内，本片仍记为**欠项（未验）**。", () => {
   const orchestrationWith = (kind: "stopped" | "survived" | "unverifiable"): WindowsStopOrchestration => ({
     verdict: kind === "stopped"
       ? { kind: "stopped", retainedDiagnostics: [] }
@@ -188,37 +217,38 @@ describe("#1335 副作用门控：**实际观测**「记录仍在／未通知离
     killedPids: [], identities: [], mustKeepRecord: kind !== "stopped",
   });
 
-  test("survived / unverifiable ⇒ 删记录 0 次、通知离线 0 次（两种失败副作用**确实没发生**）", async () => {
+  test("survived / unverifiable ⇒ 删记录 0 次、stopNode 0 次（两种失败**确实没发生这些调用**）", async () => {
     for (const kind of ["survived", "unverifiable"] as const) {
       const calls: string[] = [];
       const settle = await settleWindowsManagedStop(orchestrationWith(kind), {
         removeRecord: () => { calls.push("removeRecord"); },
-        notifyOffline: async () => { calls.push("notifyOffline"); return "notified"; },
+        stopNode: async () => { calls.push("stopNode"); return "stopped"; },
       });
       expect(calls).toEqual([]);
-      expect(settle).toEqual({ kept: true, notified: false });
+      expect(settle).toEqual({ kept: true, nodeStopped: false });
     }
   });
 
-  test("stopped ⇒ 删记录 1 次、通知离线 1 次，且顺序为 删记录→通知（分辨力：同场景翻转 verdict 即翻转副作用）", async () => {
+  test("stopped ⇒ 删记录 1 次、stopNode 1 次，顺序为 删记录→stopNode（分辨力：同场景翻转 verdict 即翻转调用）", async () => {
     const calls: string[] = [];
     const settle = await settleWindowsManagedStop(orchestrationWith("stopped"), {
       removeRecord: () => { calls.push("removeRecord"); },
-      notifyOffline: async () => { calls.push("notifyOffline"); return { status: "stopped", pid: 8100 }; },
+      stopNode: async () => { calls.push("stopNode"); return { status: "stopped", pid: 8100 }; },
     });
-    expect(calls).toEqual(["removeRecord", "notifyOffline"]);
+    expect(calls).toEqual(["removeRecord", "stopNode"]);
     expect(settle.kept).toBe(false);
-    expect(settle.notified).toBe(true);
-    expect(settle.notification).toEqual({ status: "stopped", pid: 8100 });
+    expect(settle.nodeStopped).toBe(true);
+    expect(settle.stopResult).toEqual({ status: "stopped", pid: 8100 });
   });
 
-  test("（结构见证）CLI 的 Hub 离线通知只可能在 settle 之后（非 green 提前退出）", () => {
+  test("（结构见证）CLI 的 stopNode 只可能在 settle 之后（非 green 提前退出）；Hub 通知在更后（本片未验）", () => {
     const cli = readFileSync(new URL("../bin/cli.ts", import.meta.url), "utf8");
     const settleAt = cli.indexOf("await settleWindowsManagedStop(stop,");
     expect(settleAt).toBeGreaterThan(0);
-    const notifyAt = cli.indexOf("notifyServerOffline(resolved.profile, resolved.id)", settleAt);
-    expect(notifyAt).toBeGreaterThan(settleAt);
-    expect(cli.slice(settleAt, notifyAt)).toContain("if (settle.kept)");
+    expect(cli.slice(settleAt)).toContain("if (settle.kept)");
+    // 真正的 Hub 离线通知（notifyServerOffline）在 settle **之外/之后** ⇒ 本片仍记欠项。
+    const hubAt = cli.indexOf("notifyServerOffline(resolved.profile, resolved.id)", settleAt);
+    expect(hubAt).toBeGreaterThan(settleAt);
   });
 });
 

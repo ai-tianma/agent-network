@@ -93,7 +93,7 @@ export function probeWindowsOwnedLoopbackConnection(
       //    **新产生**的子孙会被看见;现在用的是一份快照。对这个用途这是更好的
       //    性质 —— 它是一次**归属判定**,一份一致的快照比跨轮拼接的视图更难被
       //    时序戏弄(root 的身份本来就由前后两次 birth 校验夹住)。
-      "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId,CreationDate",
+      "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
       "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
       `$hit=Get-NetTCPConnection -State Established -RemoteAddress 127.0.0.1 -RemotePort ${port} -ErrorAction SilentlyContinue|?{$ids.Contains([int]$_.OwningProcess)}`,
       `$after=try{[Diagnostics.Process]::GetProcessById(${rootPid}).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}`,
@@ -350,8 +350,9 @@ export function parseWindowsCapture(raw: string): { rootBefore: string; rootAfte
     const parts = text.split(",");
     const rows: Array<{ pid: number; ticks: string }> = [];
     for (const part of parts) {
-      const m = withTicks ? /^(\d+)=([0-9T:.+\-Z]{8,64})$/.exec(part) : /^(\d+)$/.exec(part);
+      const m = withTicks ? /^(\d+)=(.+)$/.exec(part) : /^(\d+)$/.exec(part);
       if (!m) return null;
+      if (withTicks && !isCompleteCimCreationDate(m[2])) return null;   // 非法出生身份 ⇒ 交由调用方判 unknown
       rows.push({ pid: Number(m[1]), ticks: withTicks ? m[2] : "" });
     }
     return rows;
@@ -412,11 +413,33 @@ export function cimIdentityProbeScript(pid: number): string {
   ].join(";");
 }
 
+const CIM_CREATION_SHAPE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{7})[+-]\d{2}:\d{2}$/;
+
+/**
+ * 本协议下**合法且完整**的 `CreationDate`（`ToString('o')` 形态，含 7 位小数与偏移）。
+ * 🔴 非法格式/非法日期一律 **false** ⇒ 调用方必须判 unknown，**不得**当"已退出"或"被复用"。
+ */
+export function isCompleteCimCreationDate(value: string): boolean {
+  const matched = CIM_CREATION_SHAPE.exec(String(value ?? ""));
+  if (!matched) return false;
+  const [, year, month, day, hour, minute, second] = matched;
+  const y = Number(year), mo = Number(month), d = Number(day), h = Number(hour), mi = Number(minute), se = Number(second);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60) return false;
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  return y >= 1601 && d <= daysInMonth;
+}
+
+/**
+ * 🔴 只有**期望值与读回值均为合法完整** `CreationDate`，且二者**精确不等**时才是 `pid-reused`；
+ * 任何一侧非法（格式/日期/多行/空白畸形）⇒ **unknown** —— 不得因"读不懂"而放宽成"已退出/被复用"。
+ * 比较保留全部精度：不做 `Date.parse`、不截断、不近似。
+ */
 export function parseCimIdentityState(raw: string, expectedCreationDate: string): WindowsIdentityState {
+  if (!isCompleteCimCreationDate(expectedCreationDate)) return "unknown";
   const out = String(raw ?? "").trim();
   if (out === `${WINDOWS_CIM_PROTOCOL}ABSENT`) return "gone";
-  const matched = new RegExp(`^${WINDOWS_CIM_PROTOCOL}CREATED=(.{8,64})$`).exec(out);
-  if (!matched) return "unknown";
+  const matched = new RegExp(`^${WINDOWS_CIM_PROTOCOL}CREATED=(.+)$`).exec(out);
+  if (!matched || !isCompleteCimCreationDate(matched[1])) return "unknown";
   return matched[1] === expectedCreationDate ? "alive" : "pid-reused";
 }
 
@@ -483,26 +506,29 @@ export function orchestrateWindowsManagedStop(
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 
-export interface WindowsStopSideEffects<TNotification> {
+export interface WindowsStopContinuation<TStopResult> {
   /** 删除 Windows 归属记录（`rmSync(windowsCopresenceRecordPath(…))`）。 */
   removeRecord: () => void;
-  /** 通知 Hub 该节点离线（含其前的 pid 收敛）。 */
-  notifyOffline: () => Promise<TNotification>;
+  /** CLI 的 `stopNode(resolved.id)` —— **只是停止节点并返回其结果**。 */
+  stopNode: () => Promise<TStopResult>;
 }
 
 /**
- * 🔴 副作用的**唯一门控**（CLI 与见证共用）：只有 `stopped` 才删记录并通知离线；
- * `survived`/`unverifiable` **既不删记录也不通知离线**（并把两者如实回报给调用方，
- * 便于用 spy 观测"实际发生了什么"，而不是只看一个布尔）。
+ * 🔴 停止收尾的**唯一门控**（CLI 与见证共用）：只有 `stopped` 才删记录、才调用 `stopNode`；
+ * `survived`/`unverifiable` 两者都不做，并把 `{kept, nodeStopped, stopResult?}` 如实回报，
+ * 便于用 spy 观测**实际发生了什么调用**（而不是只看一个布尔）。
+ *
+ * ⚠️ **不含 Hub 离线通知**：真正的 `notifyServerOffline` 在 `stopNode` 之后、由 CLI 自行调用，
+ * **不在**本门控内；因此「Hub 未收到离线通知」在本片**仍是欠项（未验）**。
  */
-export async function settleWindowsManagedStop<TNotification>(
+export async function settleWindowsManagedStop<TStopResult>(
   outcome: WindowsStopOrchestration,
-  effects: WindowsStopSideEffects<TNotification>,
-): Promise<{ kept: boolean; notified: boolean; notification?: TNotification }> {
-  if (outcome.verdict.kind !== "stopped") return { kept: true, notified: false };
-  effects.removeRecord();
-  const notification = await effects.notifyOffline();
-  return { kept: false, notified: true, notification };
+  continuation: WindowsStopContinuation<TStopResult>,
+): Promise<{ kept: boolean; nodeStopped: boolean; stopResult?: TStopResult }> {
+  if (outcome.verdict.kind !== "stopped") return { kept: true, nodeStopped: false };
+  continuation.removeRecord();
+  const stopResult = await continuation.stopNode();
+  return { kept: false, nodeStopped: true, stopResult };
 }
 
 export type WindowsStopVerdict =
