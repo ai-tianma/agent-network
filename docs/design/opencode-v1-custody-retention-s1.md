@@ -1,13 +1,15 @@
-# Versioned custody state, CAS authority and cleanup contract for V1 retention (S1 design, #1334)
+# Versioned custody state, identity schema, permission contract and cleanup contract for V1 retention (S1 design, #1334)
 
-Status: **design draft only** (revision 5, after review of `f9910dc3`). This document
-defines the persistent structures, the cleanup decision, the commit authority and the
-permission contract for a future V1 exact-instance retention/custody protocol. It is
-**not** a runtime implementation, **not** a custody proof, and it changes no runtime file.
+Status: **design draft only** (revision 8; the direction of `3886e156` — root-external
+basis/fence, immutable revision files, full-record-digest CAS and the single
+`cohort-admission-barrier` — is accepted and not reverted). This document defines the
+persistent structures, the identity schema, the state machine, the cleanup decision, the
+commit authority and the permission contract for a future V1 exact-instance
+retention/custody protocol. It is **not** a runtime implementation and changes no runtime
+file.
 
-Lineage: first design slice of #1269 (prerequisite line of #1238; #1269 is **not**
-moved and its contract/native/main items remain **unfinished**). S2/S3 are not
-dispatched; #1272 and #1239 are not taken here. Design delivery time, not a migration ETA.
+Lineage: first design slice of #1269 (which keeps its three items unfinished and is **not**
+moved). #1238 and #1239 are preconditions referenced here, not taken over.
 
 ## 1. Verified source baseline (current `main`)
 
@@ -28,294 +30,344 @@ Re-read from `main` at `6ed5b6859fad31ab65449c79d98bfb22f119169c` on 2026-10-16:
 Registration, idle, a clean-shutdown flag or a process-reference scan are **never**
 accepted as custody, writer exclusion, final history or a qualified release.
 
-## 2. Persistent structures (names are the contract)
+## 2. Identity schema and persistent structures
 
-All of these live in the owning uid's private state, **outside the root being cleaned**:
+### 2.1 Identity schema (restored from the accepted revision)
+
+A record binds **named participants** to **precise running instances**. Nothing weaker may
+be written into it.
+
+| Group | Fields | Why required |
+|---|---|---|
+| Schema | `schemaVersion` (int, from 1), `recordId`, `createdAt` | A higher version is refused, never guessed |
+| Source coordinator | `coordinatorNodeId`, `coordinatorAlias`, `coordinatorNetworkId` | A named participant, not "some node" |
+| **Coordinator generation** | `coordinator: GenRef` (`pid`, `startTicks`, `uid`, `exeDigest`) | Binds *who may durably write*; a bare pid is reusable |
+| **Native generation** | `native: { pid, startTicks, uid, exeDigest, runtimeVersion }` | The server/TUI child is a **different** generation from the coordinator; keeping them apart is what makes "the coordinator exited" ≠ "a stale process may write an outcome" |
+| Capability | `sourceGeneration` (`v1`), `capability[]` | A declared config version is not capability proof |
+| Requested coordinate | `requested.directory`, `requested.rootId` = `{dev, ino}`, `requested.configDigest` | `{dev, ino}` is the filesystem identity; a bare ino is ambiguous across filesystems |
+| Native coordinate | `nativeCoord.directory`, `nativeCoord.dataId`, `nativeCoord.workspaceId`, `nativeCoord.launchId` (each `{dev, ino}`), `nativeCoord.checkpointDigest` | Exact identity of the native tree |
+| Request / target | `requestId`, `target?{nodeId, alias, confirmedBy}` | Handoff must be named, never implied |
+| Commit inputs | `revision` (monotonic), `prevRecordDigest`, `writerId` | Comparison inputs for §4 — **not** a lock by themselves |
+| State | `state` (§6), `evidenceRefs` (`nativeExit`, `barrier`, `credential`, `release`) | A state without its typed evidence is not a state |
+
+Explicitly **not** stored: credentials, tokens, passwords, provider keys, model session
+content, message bodies. Digests and `{dev, ino}` only.
+
+### 2.2 Persistent structures (all outside the root being cleaned)
 
 | Path | Kind | Rule |
 |---|---|---|
-| `lock` | stable inode, **created once, never replaced** | Every phase (cleanup decision, reservation, prepare, commit, release) serializes on this inode |
-| `participation/<allocationId>.json` | **participation basis** — immutable per allocation | Written by the allocation flow **before** any retention preparation. Carries `{allocationId, rootId {dev,ino}, generation, nonParticipation: bool, at}`. An affirmative `nonParticipation: true` attestation for **this exact allocation/root generation** is the **only** thing that licenses ordinary cleanup |
-| `fence/<allocationId>.json` | retention fence | Written (temp → fsync → rename → **fsync dir**) as prepare's first durable step. Presence ⇒ retain/refuse, regardless of any record |
-| `reservation/<allocationId>.json` | **irrevocable** cleanup reservation | Written before any deletion. Presence ⇒ **prepare must fail** |
-| `records/<revision>-<digest>.json` | **immutable** record — full old versions are kept, never replaced | Each record carries `chain: {previousRevision, previousDigest}` which must resolve to a **readable, still-present** file `records/<previousRevision>-<previousDigest>.json` |
-| `current` | pointer file | Names `{revision, digest}` of the current record; published atomically |
-| `confirmation/<revision>-<digest>.json` | **commit confirmation** | `{recordRef:{revision,digest}, chainHead, at}`; the durable evidence that publish completed |
-| `receipts/<revision>-<digest>.json` | **commit receipt** | Returned to the writer by the commit function; binds `{recordRef, confirmationRef, chainHead}` |
+| `lock` | stable inode, **created once, never replaced** | Every phase serializes on this inode |
+| `participation/<allocationId>.json` | participation basis, immutable | Written by the allocation flow **before** any retention preparation. `nonParticipation: true` for **this exact allocation/root generation** is the **only** thing that licenses ordinary cleanup |
+| `fence/<allocationId>.json` | retention fence | Prepare's first durable step. Presence ⇒ retain/refuse, regardless of any record |
+| `reservation/<allocationId>.json` | **irrevocable** cleanup reservation | Written before any deletion; then prepare **must fail** |
+| `records/<revision>-<digest>.json` | **immutable** record; old versions kept | `prevRecordDigest` must resolve to a **readable, still-present** file |
+| `confirmation/<revision>-<digest>.json` | commit confirmation | `{recordRef:{revision,digest}, chainHead, at}` |
+| `receipts/<revision>-<digest>.json` | commit receipt | Published by the commit protocol (§4); bound to the record + confirmation |
+| `current` | pointer file | Names `{revision, digest}` of the current record |
 
-Credential material is **never** stored here (no tokens, passwords, provider keys, model
-session content). An empty `auth.json` is not evidence that a root holds no secrets.
+## 3. The cleanup decision — one mutually exclusive order
 
-## 3. The cleanup decision (replaces the earlier conflicting rules)
+`cleanupDecision(allocationId, rootId, participant)` is asked **while holding `lock`** and
+evaluates the following **in order**; the first matching row wins:
 
-`cleanupDecision(allocationId, rootId, participant)` is asked **while holding `lock`**,
-and returns exactly one of:
-
-| Outcome | Condition (all evaluated under `lock`) | Effect |
+| # | Condition (under `lock`) | Decision |
 |---|---|---|
-| `retain` | a **fence** exists, or a record exists in any state other than `released`, or a reservation exists without a completed cleanup | Keep root and artifacts; no cleanup |
-| `retain` + `refuse(record-expected-missing)` | the fence or participation basis shows retention **was** prepared (or a confirmation exists) while the record is missing, corrupt, or its chain does not resolve | Keep everything; refuse |
-| `ordinary-cleanup` | the participation basis holds **`nonParticipation: true` for this exact allocation/root generation**, **no fence**, **no reservation**, and no record | Identity + liveness checks, then credential cleanup on their current paths |
-| `refuse(...)` | none of the above is provable (no basis entry, newer schema, unreadable artifacts, unqualified participant) | Keep everything; refuse with a reason code |
+| 1 | consistency/qualification unknown (unreadable, `schema-newer`, `chain-broken`, `mixed`, `fs-identity-drift`) | `retain` + refuse |
+| 2 | **this actor already holds a valid cleanup reservation** for this allocation | Continue **only** that authorized action; refuse any new prepare (`cleanup-reserved`) |
+| 3 | a **current, complete, confirmed `released` record**, #1239 gate satisfied, **exact root/fence/allocation match** | Establish the retained-root **cleanup reservation** (`authorizedAction: released-cleanup`) — the release cleanup proceeds |
+| 4 | any other state: a fence, an intent without a qualified release, or active custody (`prepare-requested`/`prepared`/`retain-pending`/`retained-ready`/`handed-off`) | `retain` + refuse |
+| 5 | affirmative **non-participation proof** (`nonParticipation: true` for this exact allocation/root generation) **and no participation history** | `ordinary-cleanup` reservation |
+| 6 | otherwise | `refuse(...)` |
 
-Three rules replace the conflicting sentences of revisions 1–4:
+Rules that replace the conflicting sentences of revisions 1–4:
 
-1. **A durable fence/intent always means retain/refuse.** Missing acknowledgement (no
-   confirmation, no ACK) **never** reverts to ordinary — *no confirmation is not proof
-   that the allocation never entered the retention flow*. An uncommitted fence is
-   resolved **only** by (i) completing the **same** revision from originally valid
-   evidence, or (ii) an **explicit named `abandon` decision** that carries its own
-   evidence and its own named writer (§4.1). Neither is ever derived from a missing
-   confirmation artifact.
-   **Invariant: a fence existing implies `nonParticipation: false` for that
-   allocation** (the fence is only ever written by a retention preparation). Such an
-   allocation therefore **can never** be ordinary-cleaned; only an explicit named
-   decision can close it.
-2. **`absent` grants nothing.** "No basis entry" ⇒ `refuse(no-participation-proof)`,
-   **not** ordinary. Ordinary requires the affirmative non-participation attestation of
-   §2. Allocations created before the participation basis exists therefore **refuse**;
-   the profile must not silently treat them as ordinary.
-3. **Cleanup never reads, releases the lock, then deletes.** It either (a) holds `lock`
-   until the delete has completed, or (b) first persists the **irrevocable reservation**
-   `reservation/<allocationId>.json`. After a reservation exists, **prepare must fail**
-   (`cleanup-reserved`); a reservation is never revoked by a later prepare.
+1. **A durable fence/intent without a qualified release always means retain/refuse.**
+   Missing acknowledgement never reverts to ordinary — *no confirmation is not proof that
+   the allocation never entered the retention flow*. **S1 does not support removing a
+   fence**: there is no retraction/abandon exception. A fence is closed only by a
+   qualified `released` record (§4, §6). **Invariant: a fence existing implies
+   `nonParticipation: false` for that allocation.**
+2. **`absent` grants nothing.** No basis entry ⇒ `refuse(no-participation-proof)`.
+   Allocations created before the participation basis exists therefore refuse.
+3. **Cleanup never reads, releases the lock, then deletes.** It either holds `lock` until
+   the delete completes, or first persists the **irrevocable reservation**. After a
+   reservation exists, prepare must fail (`cleanup-reserved`).
+4. **`released` is terminal.** The same allocation can **never** be prepared again; the
+   record, history and terminal state stay on disk. Cleanup removes the *root*, never the
+   fence/history (deleting history to make ordinary hold is forbidden).
 
-Required outcomes for the two orderings he named:
+## 4. Commit protocol, receipt, chain, confirmation and crash points
 
-| Ordering | Result |
-|---|---|
-| cleanup first obtains ordinary (reservation written), then a prepare arrives | **Prepare fails** `cleanup-reserved`. The root is cleaned normally; no retention is ever claimed |
-| retention was prepared but the record is lost | `retain` + `refuse(record-expected-missing)` — provable **without** the record, because the fence/participation basis was persisted outside the root **before** preparation |
-
-## 4. Commit protocol, chain, confirmation and crash points
-
-`revision` / `previousDigest` are **comparison inputs**; the authority and the commit
-boundary are:
-
-- **Serialization**: every phase holds `lock` (§2), the stable inode that is never
-  replaced. **CAS compares the current complete record digest** (`digest` of
-  `current`'s target file), not just the revision number.
-- **Publish protocol** (each step includes the durability of the *new directory entry*):
-  1. write record temp in `records/` → `fsync` file → `rename` to
-     `records/<revision>-<digest>.json` → **`fsync` the `records/` directory**;
-  2. write confirmation temp → `fsync` file → `rename` to
-     `confirmation/<revision>-<digest>.json` → **`fsync` that directory**;
-  3. write `current` temp → `fsync` file → `rename` over `current` → **`fsync` its dir**;
-  4. **ACK** the caller only after step 3's directory fsync.
-- **Chain**: `previousDigest` points at a **readable, still-present** immutable record
-  file; `chainHead` in the confirmation is the digest of the oldest retained revision of
-  the chain. A chain whose older file is missing ⇒ the record is `unknown` ⇒ retain+refuse.
+- **Serialization**: every phase holds `lock`. **CAS compares the current complete record
+  digest** (the `digest` of `current`'s target file), not just the revision number.
+- **Publish protocol** — each step includes the durability of the *new directory entry*:
+  1. record temp → `fsync` file → `rename` → `records/<revision>-<digest>.json` → **`fsync`
+     `records/`**;
+  2. confirmation temp → `fsync` → `rename` → `confirmation/…` → **`fsync` that dir**;
+  3. `current` temp → `fsync` → `rename` over `current` → **`fsync` its dir**;
+  4. **receipt** temp → `fsync` → `rename` → `receipts/<revision>-<digest>.json` →
+     **`fsync` that dir**;
+  5. **ACK** the caller only after step 4's directory fsync.
+  The receipt is a **persistent artifact** (not a pure return value): it is what a later
+  reader verifies against record + confirmation.
+- **Chain**: `prevRecordDigest` points at a **readable, still-present** immutable record
+  file; `chainHead` in the confirmation is the digest of the oldest retained revision. A
+  chain whose older file is missing ⇒ `unknown` ⇒ retain+refuse.
 - **No self-reference**: an outcome may **not** carry its own commit evidence. The commit
-  function **consumes** the `QualifiedOutcome` and **returns a separate `CommitReceipt`**;
-  readers verify the binding `record ↔ outcome ↔ confirmation ↔ receipt` (§5).
+  function **consumes** the `QualifiedOutcome` and **returns a separate `CommitReceipt`**
+  (which it has just published); readers verify the binding
+  `record ↔ outcome ↔ confirmation ↔ receipt`.
 - **Lock semantics honesty**: a POSIX advisory lock is **released by the kernel when the
-  holder dies**. A dead pid does **not** still hold `lock`. Therefore a free `lock` is
-  **not** takeover authority: takeover requires the named recovery authority + the
-  evidence in the table below.
+  holder dies**; a dead pid does not still hold `lock`. A free `lock` is **not** takeover
+  authority — takeover requires the named recovery authority and the evidence below.
 
-**Recovery by physical crash point** (each row is a physical point, not an abstract
-"missing" group). The recovery authority may **only re-persist the same revision with its
-originally valid evidence**; it may **never** manufacture qualification, never advance the
-revision, and **never derive `ordinary-cleanup` from an absent confirmation** (an absent
-confirmation is not evidence that the allocation never entered retention):
+**Recovery by physical crash point.** The recovery authority may **only re-persist the
+same revision with its originally valid evidence**; it may never manufacture
+qualification, never advance the revision, and **never derive `ordinary-cleanup` from an
+absent confirmation or a missing fence**:
 
 | Crash point | On-disk state | Verdict | Allowed recovery |
 |---|---|---|---|
-| after fence written, before any record temp | fence only | `retain` + `refuse(record-expected-missing)` | authority may re-persist the **same revision** from the original outcome, **or** record an **explicit named `abandon` decision** (own writer + own evidence). The missing confirmation is **never** a basis for `ordinary-cleanup` |
-| during record temp write | partial temp file | retain | ignore the temp (it is not a record); fence stands |
-| after record rename, before `records/` dir fsync | record maybe present, no confirmation | `unknown` ⇒ retain | authority re-publishes the **same revision** through the protocol, using the original outcome |
-| after `records/` fsync, before confirmation | record durable, confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | authority writes the confirmation for the **same revision/digest** (original evidence exists) |
-| after confirmation, before `current` rename | record + confirmation exist, pointer stale | retain | authority advances `current` to the already-confirmed `{revision,digest}` (no new qualification) |
-| after `current` rename, before dir fsync, before ACK | pointer maybe replaced | retain + re-read | authority re-runs step 3 only |
+| after fence written, before any record temp | fence only | `retain` + `refuse(record-expected-missing)` | authority may re-persist the **same revision** from the original outcome. **No retraction** of the fence exists in S1 |
+| during record temp write | partial temp | retain | ignore the temp (it is not a record); fence stands |
+| after record rename, before `records/` fsync | record maybe present, no confirmation | `unknown` ⇒ retain | authority re-publishes the **same revision** through the full protocol |
+| after `records/` fsync, before confirmation | record durable, confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | authority writes the confirmation for the **same revision/digest** |
+| after confirmation, before `current` rename | record + confirmation, pointer stale | retain | authority advances `current` to the already-confirmed `{revision,digest}` |
+| after `current` rename, before receipt publish | committed but no receipt | `unknown` ⇒ retain | authority re-publishes the **same receipt** (derived from the durable record + confirmation); never a new revision |
+| ACK lost after the receipt was published | fully committed, caller unaware | committed | the caller **re-reads**: CAS sees the same current digest ⇒ **returns the same receipt**; an observed ACK is never disk-recovery evidence |
 | after ACK | committed | committed | none |
 
-### 4.1 Write permissions — named writers; a refusal is a **decision**, not a write
+### 4.1 Write permissions — named writers and writable ranges
 
-(Reviewed-and-accepted contract from revision 3, restated here so it is not lost.)
-
-| Write | Sole named writer | Rule |
+| Writable state / artifact | Sole named writer | Range and rule |
 |---|---|---|
-| `fence/<allocationId>.json` | the **coordinator generation** of this allocation | any other writer ⇒ `refuse(unqualified-participant)`; nothing is written |
-| `records/<rev>-<digest>.json` + `current` | the coordinator whose **generation still matches** the record | CAS on the complete current record digest under `lock`; a loser re-reads |
-| `confirmation/<rev>-<digest>.json` | the commit path, or the **named recovery authority** | only for the **same** `(revision, digest)`; never a new revision |
-| `reservation/<allocationId>.json` | a cleanup participant that passed §3 | after it exists, prepare **must fail** |
-| resolve an **uncommitted** fence | the named recovery authority | by completing the **same** revision from original evidence, or by an **explicit named `abandon` decision**; never by "the confirmation is absent" |
-| `released` record | the current holder, with #1239 evidence | never producible by a reader |
-| **a refusal** | **nobody** | A refusal is a **decision returned to the caller**, not a record. Readers may never overwrite a valid record with a refusal. |
+| `fence/<allocationId>.json` | the **coordinator generation** of this allocation | any other writer ⇒ `refuse(unqualified-participant)`, nothing written |
+| `records/…` + `current` | the coordinator whose **generation still matches** | CAS on the complete current digest under `lock`; a loser re-reads |
+| `confirmation/…` | the commit path, or the named recovery authority | only for the **same** `(revision, digest)` |
+| `receipts/…` | the commit path, or the named recovery authority | only for the **same** `(revision, digest)` |
+| `prepare-requested`/`prepared`/`retained-ready` | the coordinator whose generation matches | nobody else may write these states |
+| `retain-pending` (from `prepared`) | the coordinator, or the named recovery authority | never overwrites another record's custody |
+| `handed-off` | the **named target**, CAS against the coordinator's revision | the source record is kept; a losing target re-reads |
+| `released` | the current **holder** (coordinator or target), with `ReleaseEvidence` + #1239 | never producible by a reader; **terminal** |
+| repair of a torn publication (same revision only) | the named recovery authority | may never write `retained-ready`, `handed-off` or `released` |
+| `reservation/<allocationId>.json` | the cleanup actor that passed §3 | irrevocable; after it exists, prepare fails |
+| **a refusal** | **nobody** | A refusal is a **decision returned to the caller**, never a record; a reader may never overwrite a valid record with a refusal |
 
-## 5. Types: separate exit from a real admission barrier
+## 5. Types
 
 ```ts
 type GenRef = { pid: number; startTicks: string; uid: number; exeDigest: string };
-type FsId   = { dev: string; ino: string };              // exact filesystem identity
+type FsId   = { dev: string; ino: string };                 // exact filesystem identity
+type ParticipantIdentity = { kind: "node" | "user" | "recovery-authority"; id: string };
+
+type CustodyState = "observed" | "prepare-requested" | "prepared" | "retain-pending"
+                  | "retained-ready" | "handed-off" | "released";
 
 // The native child having exited is ONE fact; it is never an exclusion proof.
 type NativeExit = { pid: number; startTicks: string; observedAt: string; ref: string };
 
 // The ONLY accepted write-exclusion contract: a named controller refuses NEW
 // launch/adoption for this cohort, bound to allocation/root identity and an epoch.
-// (Metadata locks and "no writer was visible" are NOT barriers and were removed.)
+// (Metadata locks and "no writer was visible" were removed — they cannot stop a
+// native process from writing the database.)
 type CohortAdmissionBarrier = {
   kind: "cohort-admission-barrier";
-  controller: GenRef;            // the named participant enforcing admission
-  allocationId: string;          // bound identity
-  rootId: FsId;                  // bound identity
-  epoch: number;                 // barrier epoch; a mismatch invalidates the claim
-  coveredParticipants: string[]; // which launchers/adopters the audit proved are covered
-  ref: string;                   // evidence artifact for the admission refusals
+  controller: GenRef; allocationId: string; rootId: FsId; epoch: number;
+  coveredParticipants: string[]; ref: string;
 };
 type CredentialDisposition = { mode: "unchanged" | "cleaned"; ref: string };
+type ReleaseEvidence = { ref: string; gate1239: string; devIno: FsId; at: string };
 
-type QualifiedOutcome = {
-  kind: "qualified";
-  coordinator: GenRef;                 // the writer must still be this generation
-  nativeExit: NativeExit;              // existing writers: independent exit evidence
-  barrier: CohortAdmissionBarrier;     // new writers: the admission barrier above
+type QualifiedOutcome = {                       // NO `commit` field — see §4
+  kind: "qualified"; coordinator: GenRef;
+  nativeExit: NativeExit;                       // existing writers: independent exit evidence
+  barrier: CohortAdmissionBarrier;              // new writers: the admission barrier
   credentialDisposition: CredentialDisposition;
   target?: { nodeId: string; alias: string; confirmedBy: string };
-};                                     // NOTE: no `commit` field — see §4
-
+};
 type CommitReceipt = { recordRef: { revision: number; digest: string };
                        confirmationRef: string; chainHead: string };
+
+type Record = {                                 // §2.1, verbatim fields
+  schemaVersion: number; recordId: string; createdAt: string;
+  coordinatorNodeId: string; coordinatorAlias: string; coordinatorNetworkId: string;
+  coordinator: GenRef; native: { pid: number; startTicks: string; uid: number;
+    exeDigest: string; runtimeVersion: string };
+  sourceGeneration: "v1"; capability: string[];
+  requested: { directory: string; rootId: FsId; configDigest: string };
+  nativeCoord: { directory: string; dataId: FsId; workspaceId: FsId; launchId: FsId;
+    checkpointDigest: string };
+  requestId: string; target?: { nodeId: string; alias: string; confirmedBy: string };
+  state: CustodyState;
+  revision: number; prevRecordDigest: string | null; writerId: string;
+  evidenceRefs: { nativeExit?: string; barrier?: string; credential?: string; release?: string };
+};
+
+type ParticipationBasis = { allocationId: string; rootId: FsId; generation: string;
+                            nonParticipation: boolean; at: string };
+type Fence = { allocationId: string; rootId: FsId; generation: string; at: string };
+type CleanupReservation = { allocationId: string; rootId: FsId; actor: ParticipantIdentity;
+  authorizedAction: "ordinary-cleanup" | "released-cleanup"; at: string };
 ```
 
 Requirements that make the barrier usable:
 
-- **Coordinator generation ≠ native generation** (accepted in revision 3). `coordinator:
-  GenRef` and `nativeExit: NativeExit` are **different** identities: "the coordinator
-  exited" says nothing about the native child, and a stale process can never write an
-  outcome because §4.1 admits only the matching coordinator generation.
+- **Coordinator generation ≠ native generation** (§2.1): "the coordinator exited" says
+  nothing about the native child, and a stale process can never write an outcome because
+  §4.1 admits only the matching coordinator generation.
 - **Existing writers** need their own `nativeExit` (or independent exclusion) evidence;
   the barrier only stops **new** launch/adoption.
 - **Fail-closed admission**: while a barrier is claimed, participating launchers default
-  to **refusing new writers**; if the barrier's controller crashed or its version
-  mismatches, admission still refuses — a barrier does not expire.
-- **No time-based exclusion**: `heldUntil: null`, a timestamp, or a window is **not**
-  proof of maintaining exclusion. A barrier is lifted **only by a named handoff or
-  release** event (published like any other state change), never by time.
-- **Audit is evidence, not the barrier**: the participant audit/`coveredParticipants`
-  proves *which* participants the barrier covers (§6); it is never itself the barrier.
-- Consistent with §6's limited-cooperation model: a profile whose participants cannot be
-  covered **refuses**; no claim of protecting arbitrary same-uid external programs.
+  to refusing new writers; if the controller crashed or versions mismatch, admission
+  still refuses — a barrier does not expire.
+- **No time-based exclusion**: `heldUntil: null`, a timestamp or a window is not proof. A
+  barrier is lifted **only by a named handoff or release** event.
+- **Audit is evidence, not the barrier** (§7): it proves *which* participants are covered.
 
-## 6. Prepare eligibility requires an auditable participant set
+## 6. State machine and preconditions
+
+`observed` → `prepare-requested` → `prepared` → (`retain-pending` | `retained-ready`) →
+`handed-off` → `released`; plus the terminal decision `refused` (returned, not written).
+
+| From → To | Executor | Precondition (exact evidence consumed) | Idempotency / concurrency | Crash |
+|---|---|---|---|---|
+| `observed` → `prepare-requested` | coordinator | identity group of §2.1 complete; **both coordinates present** with their `{dev, ino}` (absent inodes do not qualify); §7 audit passed | replay yields the same digest; concurrent prepares conflict on the lock | nothing durable ⇒ back to `observed` |
+| `prepare-requested` → `prepared` | coordinator | durable commit per §4 with `revision=1`, `prevRecordDigest=null` | second writer loses the compare; identical replay is a no-op | torn write ⇒ `unknown` ⇒ retain + refuse |
+| `prepared` → `retained-ready` | coordinator (generation must still match) | a `QualifiedOutcome` whose `coordinator` == the record's generation, with `nativeExit` **and** a separate `CohortAdmissionBarrier` held through the retention window (a native exit alone is **not** exclusion), plus `credentialDisposition`; any re-read of `{dev, ino}` that differs ⇒ refuse | duplicate outcomes collapse to one revision | re-read failure ⇒ `refused` |
+| `prepared` → `retain-pending` | coordinator, or the named recovery authority | native child no longer matches its generation **and** no qualified outcome exists | idempotent (pessimistic) | this *is* the crash path |
+| `retained-ready` → `handed-off` | named target | **#1238's intent journal and all-launcher refusal gate satisfied** (precondition); target identity read independently; CAS on `revision+1` | exactly one CAS wins; losers re-read | crash mid-handoff ⇒ both stores retained |
+| `handed-off`/`retained-ready` → `released` | current holder | **#1239's final-history / lossless-restore gate satisfied** (precondition); `ReleaseEvidence`; `{dev, ino}` unchanged since the revision read | idempotent per `(recordId, revision)` | crash before durable release ⇒ still retained |
+| `released` → cleanup reservation (§3 row 3) | any participant | complete + confirmed `released`; #1239 satisfied; **exact** root/fence/allocation match | exactly one reservation; **terminal** — no re-prepare for this allocation | crash before deletion ⇒ reservation stands; prepare still fails |
+| any → `refused` (decision) | any participant | missing/contradictory/mixed/newer evidence | idempotent; **never writes a record** | never auto-clears; never replays |
+
+## 7. Prepare eligibility requires an auditable participant set
 
 A state flag does not stop old code: an old/external sweeper that ignores these artifacts
 will delete the native directory anyway. Protection must be established **before**
-promising `prepared`:
+promising `prepared`: for every relevant cleanup participant and every launcher/adopter
+that could write, the profile must show **protocol-awareness** (a version that reads the
+fence / asks `cleanupDecision` / honours the barrier), **provable exclusion** (its
+configured roots cannot reach the native directory), or **coordinated out** (stopped with
+evidence). Any unknown participant ⇒ **refuse at prepare** (`participant-unknown`); if a
+fence already exists, `retain` + `refuse(unknown-sweeper)`.
 
-For every relevant cleanup participant and every launcher/adopter that could write,
-the profile must show **protocol-awareness** (a version/code path that reads the fence /
-asks `cleanupDecision` / honours the barrier), **provable exclusion** (its configured
-roots/patterns cannot reach the native directory), or **coordinated out** (stopped with
-evidence). Any unknown participant ⇒ **refuse at prepare** (`participant-unknown`).
-
-Where a participant cannot be covered, the correct answers are: refuse to prepare; and if
-a fence already exists, `retain` + `refuse(unknown-sweeper)`.
-
-## 7. API draft (executors named, no self-reference)
+## 8. API draft
 
 ```ts
-// All of these run while holding `lock` (§2). None may be implemented as a permanent throw.
-function readStructures(opts: { allocationId: string }):
-  | { kind: "absent" }                  // ⇒ refuse(no-participation-proof); NOT ordinary
+// All of these run while holding `lock` (§2.2). None may be a permanent throw.
+function readStructures(allocationId: string):
+  | { kind: "absent" }                 // ⇒ refuse(no-participation-proof); NOT ordinary
   | { kind: "readable"; basis?: ParticipationBasis; fence?: Fence; record?: Record;
-      confirmation?: Confirmation; reservation?: Reservation }
+      confirmation?: Confirmation; receipt?: CommitReceipt; reservation?: CleanupReservation }
   | { kind: "unknown"; reason: "unreadable" | "schema-newer" | "chain-broken" | "mixed" };
 
-function cleanupDecision(opts: { allocationId: string; rootId: FsId; participant: ParticipantIdentity }):
-  "ordinary-cleanup" | "retain" | "released" | { refuse: RefusalReason };
+function cleanupDecision(opts: { allocationId: string; rootId: FsId;
+  participant: ParticipantIdentity }):
+  "ordinary-cleanup" | "retain" | "released-cleanup" | { refuse: RefusalReason };   // §3 order
 
-// Irrevocable, written before any deletion. After it exists, prepare fails.
-function reserveCleanup(opts: { allocationId: string; rootId: FsId; actor: ParticipantIdentity }):
-  Promise<{ reservationRef: string }>;
+function reserveCleanup(opts: { allocationId: string; rootId: FsId;
+  actor: ParticipantIdentity; authorizedAction: "ordinary-cleanup" | "released-cleanup" }):
+  Promise<{ reservationRef: string }>;                   // irrevocable; then prepare fails
 
 // Prepare: first durable step is the fence (temp→fsync→rename→fsync dir); then the commit.
-// Precondition (accepted in revision 3): the root **directory must exist** and re-read to
-// the same `{dev, ino}`; a bare inode is ambiguous across filesystems. Absent ⇒
-// `refuse(root-absent)`; drifted ⇒ `refuse(fs-identity-drift)`. Never prepare blind.
+// Precondition: the root **directory must exist** and re-read to the same `{dev, ino}`
+// (a bare inode is ambiguous across filesystems): absent ⇒ `refuse(root-absent)`,
+// drifted ⇒ `refuse(fs-identity-drift)`. Never prepare blind.
 function requestRetentionPrepare(opts: { allocationId: string; rootId: FsId;
-  actor: ParticipantIdentity }): Promise<{ revision: number; digest: string } | { refuse: RefusalReason }>;
+  actor: ParticipantIdentity }): Promise<{ revision: number; digest: string }
+  | { refuse: RefusalReason }>;
 
-// Consumes the outcome, returns an INDEPENDENT receipt (§4).
 function commitOutcome(opts: { allocationId: string; expectedRevision: number;
   expectedRecordDigest: string; actor: ParticipantIdentity; outcome: QualifiedOutcome;
-}): Promise<CommitReceipt>;
+}): Promise<CommitReceipt>;              // consumes the outcome; publishes record+confirmation+receipt
 
 function handOffCustody(opts: { allocationId: string; expectedRevision: number;
   expectedRecordDigest: string; actor: ParticipantIdentity; target: CustodyTarget;
-}): Promise<CommitReceipt>;                    // precondition: #1238 gate satisfied
+}): Promise<CommitReceipt>;              // precondition: #1238 gate satisfied
 
 function releaseCustody(opts: { allocationId: string; expectedRevision: number;
   expectedRecordDigest: string; actor: ParticipantIdentity; evidence: ReleaseEvidence;
-}): Promise<CommitReceipt>;                    // precondition: #1239 gate satisfied
+}): Promise<CommitReceipt>;              // precondition: #1239 gate satisfied; terminal
 ```
 
-Wiring: close and the error path (one shared cleanup closure) call `cleanupDecision`
-under `lock` **before** their existing predicate; `retain`, `refuse` and `absent` all
-mean keep. Only `ordinary-cleanup` (with its affirmative attestation) or `released`
-permits the existing flow.
+Wiring: close and the error path (one shared cleanup closure) call `cleanupDecision` under
+`lock` **before** their existing predicate. `retain`, `refuse` and `absent` all mean keep;
+only `ordinary-cleanup` (affirmative attestation) or `released-cleanup` (valid terminal
+`released` + reservation) permits the existing flow.
 
-## 8. Refusal reason codes
+## 9. Refusal reason codes
 
 `no-participation-proof`, `cleanup-reserved`, `record-expected-missing`,
 `commit-unconfirmed`, `chain-broken`, `schema-newer`, `generation-mismatch`,
 `fs-identity-drift`, `root-absent`, `barrier-epoch-mismatch`, `participant-unknown`,
-`unknown-sweeper`, `mixed-state`, `unqualified-participant`.
+`unknown-sweeper`, `mixed-state`, `unqualified-participant`, `release-incomplete`.
 
-## 9. Responsibility boundaries (unchanged scope)
+## 10. Responsibility boundaries (unchanged scope)
 
 - **#1272** owns the persistent marker/CAS/fsync **implementation** and source-owned
-  preparation mechanics; S1 defines the structures (§2), the cleanup decision (§3) and
-  the commit boundary (§4) they must satisfy.
+  preparation mechanics; S1 defines the structures (§2), the decision (§3) and the commit
+  boundary (§4) they must satisfy.
 - **#1238** owns the intent journal and the all-launcher refusal gate: a **precondition of
   `handOffCustody`**. **#1239** owns the final-history / lossless-restore gate: a
   **precondition of `releaseCustody`**. **#1269** keeps its three items unfinished.
 
-## 10. Decision tables
+## 11. Decision tables and worked examples
 
 | Situation | Decision | Must not happen |
 |---|---|---|
-| Ordinary root with `nonParticipation: true` for this allocation/root generation, no fence/reservation/record | `ordinary-cleanup` | Must not be turned into permanent retention |
-| No basis entry (`absent`) | `refuse(no-participation-proof)` | Must not be treated as ordinary (pre-basis allocations refuse) |
-| Fence exists, record missing/corrupt/chain-broken | `retain` + `refuse(record-expected-missing)` | Must not revert to ordinary except via the explicit named `abandon` decision of §4 |
-| Fence exists, confirmation **never** existed, coordinator generation gone | `retain` + `refuse(record-expected-missing)` | Must **not** conclude `ordinary-cleanup` from the missing confirmation; a fence implies `nonParticipation: false` |
-| Cleanup holds the lock through deletion, then prepare arrives | prepare **fails** (`cleanup-reserved`) if a reservation exists | A later prepare may not revoke a reservation |
-| Concurrent commits | exactly one wins: CAS on the **complete current record digest** under `lock` | No last-write-wins; no replaced/rewritten record file |
-| Record durable but confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | Must not be read as durable; no "probably fsynced" |
-| Chain's older record missing | `unknown` ⇒ retain + refuse | No silent re-anchoring of the chain |
-| Prepare with an absent directory or drifted `{dev,ino}` | `refuse(root-absent)` / `refuse(fs-identity-drift)` | Never prepare against a bare inode or a missing root |
-| A write by a participant other than the named writer (§4.1) | `refuse(unqualified-participant)`; nothing is written | Permission is checked **before** any write |
-| A reader wants a record to be refused | a refusal **decision** is returned | Readers may not overwrite a valid record |
-| Barrier controller crashed / version mismatch | admission still refuses new writers | No time-based or null-`heldUntil` exclusion claim |
+| Ordinary root with `nonParticipation: true`, no fence/reservation/record | `ordinary-cleanup` | Must not be turned into permanent retention |
+| No basis entry (`absent`) | `refuse(no-participation-proof)` | Must not be treated as ordinary |
+| Fence or intent, no qualified release | `retain` + refuse | **No retraction/abandon**; must not delete the fence/history to make ordinary hold |
+| Complete + confirmed `released`, #1239 satisfied, exact match | `released-cleanup` reservation | History and terminal state must survive the cleanup; the allocation must not re-prepare |
+| `released` but `{dev, ino}` drifted or match inexact | `retain` + `refuse(release-incomplete)` | Must not clean a root that is not the released one |
+| This actor already holds a valid reservation | Continue that action only | New prepares must fail (`cleanup-reserved`) |
+| Concurrent commits | one wins: CAS on the complete current digest under `lock` | No last-write-wins; no replaced record file |
+| Record durable but confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | No "probably fsynced" |
+| Committed but receipt absent | `unknown` ⇒ retain | Authority re-publishes the **same** receipt; never a new revision |
+| Repeated commit after a lost ACK | same receipt returned | Must not advance the revision; an observed ACK is not disk evidence |
+| Prepare with an absent directory or drifted `{dev,ino}` | `refuse(root-absent)` / `refuse(fs-identity-drift)` | Never prepare against a bare inode |
+| A write by a participant other than the named writer (§4.1) | `refuse(unqualified-participant)` | Permission is checked **before** any write |
+| Barrier controller crashed / version mismatch | admission still refuses new writers | No time-based or null-`heldUntil` exclusion |
 | Metadata lock free (holder died) | no takeover authority | Must not claim a dead pid still holds the kernel lock |
 | Native exit observed, no barrier | stay `prepared` | Exit must never stand in for exclusion |
-| Credential cleanup needed while a root is retained | credential cleanup runs on its own path | Must not be disabled by retention; no real auth to a target |
+| Credential cleanup needed while a root is retained | credential cleanup runs on its own path | Must not be disabled by retention |
 
-## 11. Acceptance plan for the next slice (not executed here)
+Worked examples.
 
-Positive: (1) basis with `nonParticipation: true` ⇒ ordinary cleanup proceeds unchanged;
-(2) fence + commit ⇒ record + confirmation + `current` consistent, and the receipt binds
-to them; (3) a named handoff with the #1238 gate satisfied advances the revision by one
-while keeping every old record file; (4) release with the #1239 gate satisfied is the only
-path to `released`.
+- **(+) `released` completes one cleanup, history kept.** Record reaches `released` with
+  `ReleaseEvidence` and the #1239 gate; §3 row 3 matches root/fence/allocation exactly ⇒
+  exactly one reservation is written and the root is removed. The record chain,
+  confirmation, receipt and the `released` terminal state remain; a second cleanup attempt
+  finds the reservation and continues only it; a prepare request for this allocation fails.
+- **(−) fence-only crash stays retained.** A process dies after writing the fence and
+  before any record temp. Nothing on disk shows a release and no confirmation exists. §3
+  row 4 ⇒ `retain` + `refuse(record-expected-missing)`. S1 offers **no** path from "the
+  confirmation is absent" to `ordinary-cleanup`; only a qualified `released` record closes
+  the fence.
+
+## 12. Acceptance plan for the next slice (not executed here)
+
+Positive: (1) basis with `nonParticipation: true` ⇒ ordinary cleanup unchanged; (2) fence +
+commit ⇒ record + confirmation + receipt + `current` consistent and bound; (3) a named
+handoff with the #1238 gate satisfied advances the revision by one while keeping every old
+record file; (4) release with the #1239 gate satisfied is the only path to `released`, and
+it yields exactly one cleanup.
 
 Negative (each witnessed red): (1) concurrent commits ⇒ one CAS wins; (2) cleanup vs
-in-flight prepare ⇒ prepare fails after a reservation, and the root is cleaned normally;
-(3) fence with a lost record ⇒ retain + refuse; (4) each physical crash point of §4
-produces its listed verdict; (5) record without confirmation ⇒ `unknown`; (6) chain gap ⇒
-`unknown`; (7) `absent` ⇒ refuse (not ordinary); (8) unqualifiable sweeper/launcher ⇒
-refuse at prepare; (9) metadata lock free after a crash ⇒ **no** takeover without the
-authority; (10) exit without a barrier ⇒ never `retained-ready`; (11) barrier epoch
-mismatch or crashed controller ⇒ admission still refuses; (12) empty `auth.json` ⇒
-credential cleanup still runs; (13) fence present, confirmation **never** existed and the
-coordinator generation is gone ⇒ **retain + refuse** (never `ordinary-cleanup`); (14) an
-explicit named `abandon` decision is the **only** thing that closes an uncommitted fence.
+in-flight prepare ⇒ prepare fails after a reservation; (3) fence with a lost record ⇒
+retain + refuse; (4) each physical crash point of §4 produces its listed verdict; (5)
+record without confirmation ⇒ `unknown`; (6) committed without receipt ⇒ `unknown`, then
+the same receipt may be re-published; (7) lost ACK ⇒ same receipt, no new revision; (8)
+chain gap ⇒ `unknown`; (9) `absent` ⇒ refuse (not ordinary); (10) fence-only crash ⇒
+retain (never ordinary); (11) `released` with inexact match ⇒ retain; (12) a released
+allocation cannot re-prepare; (13) metadata lock free ⇒ no takeover; (14) exit without a
+barrier ⇒ never `retained-ready`; (15) barrier epoch mismatch or crashed controller ⇒
+admission still refuses.
 
-## 12. What this document does not claim
+## 13. What this document does not claim
 
-No custody, writer exclusion, final native history, backup/restore or cutover
-qualification is claimed. No runtime, marker, cleanup, registry or startup change is
-made. Nothing is released, migrated or published. Registration, idle, clean shutdown and
-process scans are never leases. Protection from arbitrary same-uid external programs is
-**not** claimed (§6).
+No custody, writer exclusion, final native history, backup/restore or cutover qualification
+is claimed. No runtime, marker, cleanup, registry or startup change is made. Nothing is
+released, migrated or published. Registration, idle, clean shutdown and process scans are
+never leases. Protection from arbitrary same-uid external programs is **not** claimed (§7).
