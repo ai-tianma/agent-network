@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture,
+  captureWindowsDescendantIdentities, orchestrateWindowsManagedStop, parseWindowsCapture, windowsCaptureScript,
   probeWindowsIdentity, readWindowsIdentity, summarizeTaskkillStderr,
   type TaskkillOutcome, type WindowsIdentityState, type WindowsManagedIdentity,
 } from "./windows-codex-copresence";
@@ -116,6 +116,14 @@ describe("#1335 取证绑定根身份（同一枚举读后代出生身份 + 前�
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=999;D=1=1,2=2,3=3;G="), cap: 2 }).unknownReason).toContain("exceeds cap");
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: run("nonsense") }).unknownReason).toContain("not understood");
     expect(captureWindowsDescendantIdentities(root, { runPowerShell: () => { throw new Error("powershell missing"); } }).unknownReason).toContain("capture query failed");
+  });
+  test("取证脚本不自撞 PowerShell 内置别名（`R` = Invoke-History，别名优先于函数）", () => {
+    const script = windowsCaptureScript(8100, "999");
+    expect(script).toContain("function ReadBirthTicks([int]$p)");
+    expect(script).toContain("ReadBirthTicks 8100");
+    // 回归：曾经命名为 R，被别名 Invoke-History 抢走 ⇒ 真机 PowerShell 报错 ⇒ 取证全线失败。
+    expect(/[;\s(=]R\s+\d/.test(script)).toBe(false);
+    expect(/=\s*R\s/.test(script)).toBe(false);
   });
   test("合规取证：返回后代身份（出生身份来自同一枚举）", () => {
     const captured = captureWindowsDescendantIdentities(root, { runPowerShell: run("CAP:RB=999;RA=999;D=8744=777,7656=555;G=") });

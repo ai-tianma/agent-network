@@ -267,7 +267,7 @@ export type WindowsIdentityRead = { kind: "ticks"; ticks: string } | { kind: "ab
 
 function defaultPowerShellRunner(script: string): string {
   return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 15_000,
+    encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 30_000,
   });
 }
 
@@ -312,16 +312,16 @@ export function windowsCaptureScript(rootPid: number, expectedCreationDate: stri
   return [
     "$ErrorActionPreference='Stop'",
     `$want='${expectedCreationDate}'`,
-    "function R([int]$p){try{[Diagnostics.Process]::GetProcessById($p).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}}",
-    `$rb=R ${rootPid}`,
+    "function ReadBirthTicks([int]$p){try{[Diagnostics.Process]::GetProcessById($p).StartTime.ToUniversalTime().Ticks.ToString()}catch{''}}",
+    `$rb=ReadBirthTicks ${rootPid}`,
     `if($rb -ne $want){'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA=SKIP;D=;G=';exit 0}`,
     "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
     `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
     "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
     `[void]$ids.Remove(${rootPid})`,
     "$good=@();$bad=@()",
-    "foreach($id in $ids){$t=R $id;if($t){$good+=\"$id=$t\"}else{$bad+=\"$id\"}}",
-    `$ra=R ${rootPid}`,
+    "foreach($id in $ids){$t=ReadBirthTicks $id;if($t){$good+=\"$id=$t\"}else{$bad+=\"$id\"}}",
+    `$ra=ReadBirthTicks ${rootPid}`,
     `'${WINDOWS_CAPTURE_PROTOCOL}RB='+$(if($rb){$rb}else{'ABSENT'})+';RA='+$(if($ra){$ra}else{'ABSENT'})+';D='+($good -join ',')+';G='+($bad -join ',')`,
   ].join(";");
 }
@@ -368,7 +368,10 @@ export function captureWindowsDescendantIdentities(
   const label = `${root.role} pid=${root.pid}`;
   let parsed: ReturnType<typeof parseWindowsCapture> = null;
   try { parsed = parseWindowsCapture(run(windowsCaptureScript(root.pid, root.creationDate))); }
-  catch { return { identities: [], unknownReason: `capture query failed for ${label}` }; }
+  catch (e) {
+    const detail = String((e as Error)?.message ?? "").split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 3).join(" | ").slice(0, 300);
+    return { identities: [], unknownReason: `capture query failed for ${label}${detail ? ` (${detail})` : ""}` };
+  }
   if (!parsed) return { identities: [], unknownReason: `capture output not understood for ${label}` };
   if (parsed.rootBefore !== root.creationDate) {
     return { identities: [], rootBefore: parsed.rootBefore, unknownReason: `root identity was already ${parsed.rootBefore} before capture for ${label}` };
