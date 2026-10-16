@@ -84,9 +84,11 @@ Rules that replace the conflicting sentences of revisions 1–4:
 
 1. **A durable fence/intent without a qualified release always means retain/refuse.**
    Missing acknowledgement never reverts to ordinary — *no confirmation is not proof that
-   the allocation never entered the retention flow*. **S1 does not support removing a
-   fence**: there is no retraction/abandon exception. A fence is closed only by a
-   qualified `released` record (§4, §6). **Invariant: a fence existing implies
+   the allocation never entered the retention flow*. **Once a fence is written it is never
+   removed, downgraded or ignored**: no evidence state — and in particular no missing
+   confirmation — can remove it, and no function, operator or admin action in S1 removes a
+   fence. A fence stops requiring retain/refuse **only** after a **qualified `released`**
+   record exists (§3 row 3, §6). **Invariant: a fence existing implies
    `nonParticipation: false` for that allocation.**
 2. **`absent` grants nothing.** No basis entry ⇒ `refuse(no-participation-proof)`.
    Allocations created before the participation basis exists therefore refuse.
@@ -124,12 +126,12 @@ Rules that replace the conflicting sentences of revisions 1–4:
 
 **Recovery by physical crash point.** The recovery authority may **only re-persist the
 same revision with its originally valid evidence**; it may never manufacture
-qualification, never advance the revision, and **never derive `ordinary-cleanup` from an
-absent confirmation or a missing fence**:
+qualification, never advance the revision, **never derive `ordinary-cleanup` from an
+absent confirmation**, and **no row below removes or downgrades a fence**:
 
 | Crash point | On-disk state | Verdict | Allowed recovery |
 |---|---|---|---|
-| after fence written, before any record temp | fence only | `retain` + `refuse(record-expected-missing)` | authority may re-persist the **same revision** from the original outcome. **No retraction** of the fence exists in S1 |
+| after fence written, before any record temp | fence only | `retain` + `refuse(record-expected-missing)` | authority may re-persist the **same revision** from the original outcome. The fence **stays**: nothing in S1 removes or downgrades it |
 | during record temp write | partial temp | retain | ignore the temp (it is not a record); fence stands |
 | after record rename, before `records/` fsync | record maybe present, no confirmation | `unknown` ⇒ retain | authority re-publishes the **same revision** through the full protocol |
 | after `records/` fsync, before confirmation | record durable, confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | authority writes the confirmation for the **same revision/digest** |
@@ -318,7 +320,7 @@ only `ordinary-cleanup` (affirmative attestation) or `released-cleanup` (valid t
 |---|---|---|
 | Ordinary root with `nonParticipation: true`, no fence/reservation/record | `ordinary-cleanup` | Must not be turned into permanent retention |
 | No basis entry (`absent`) | `refuse(no-participation-proof)` | Must not be treated as ordinary |
-| Fence or intent, no qualified release | `retain` + refuse | **No retraction/abandon**; must not delete the fence/history to make ordinary hold |
+| Fence or intent, no qualified release | `retain` + refuse | **The fence is never removed**; must not delete the fence/history to make ordinary hold |
 | Complete + confirmed `released`, #1239 satisfied, exact match | `released-cleanup` reservation | History and terminal state must survive the cleanup; the allocation must not re-prepare |
 | `released` but `{dev, ino}` drifted or match inexact | `retain` + `refuse(release-incomplete)` | Must not clean a root that is not the released one |
 | This actor already holds a valid reservation | Continue that action only | New prepares must fail (`cleanup-reserved`) |
@@ -343,8 +345,8 @@ Worked examples.
 - **(−) fence-only crash stays retained.** A process dies after writing the fence and
   before any record temp. Nothing on disk shows a release and no confirmation exists. §3
   row 4 ⇒ `retain` + `refuse(record-expected-missing)`. S1 offers **no** path from "the
-  confirmation is absent" to `ordinary-cleanup`; only a qualified `released` record closes
-  the fence.
+  confirmation is absent" to `ordinary-cleanup`, and **no path that removes the fence**;
+  only a qualified `released` record ends its retain/refuse effect.
 
 ## 12. Acceptance plan for the next slice (not executed here)
 
