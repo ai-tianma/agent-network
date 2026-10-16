@@ -305,13 +305,19 @@ import {
   measurePowerShellStartupMs,
   openPrivateAppendLog,
   probeWindowsCreationDate,
+  probeWindowsIdentity,
   probeWindowsOwnedLoopbackConnection,
   readWindowsCopresenceRecord,
+  runTaskkillWindowsProcessTree,
+  captureWindowsDescendantIdentities,
+  decideWindowsStopVerdict,
   taskkillWindowsProcessTree,
   windowsCopresenceLogPath,
   windowsCopresenceRecordPath,
   writeWindowsCopresenceRecord,
   decideWindowsManagedStop,
+  type TaskkillOutcome,
+  type WindowsManagedIdentity,
   type WindowsManagedProcess,
 } from "../src/windows-codex-copresence";
 import { normalizeBatchWorkdir } from "../src/batch-workdir";
@@ -13113,16 +13119,37 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
         console.error(`[anet] STOP_TIMEOUT: Windows ownership could not be proven; hub was not notified offline.`);
         process.exit(1);
       }
-      for (const managedProcess of [...decision.safe].reverse()) {
-        try { taskkillWindowsProcessTree(managedProcess.pid); }
-        catch (e) {
-          console.error(`[anet] ❌ taskkill failed for ${managedProcess.role} pid=${managedProcess.pid}: ${(e as Error).message}`);
-          process.exit(1);
-        }
+      // #1335 —— 先取证（受管身份 + 终止前现取的后代出生身份）→ 再终止 → 最后按**精确身份**裁决。
+      // 记录里只有 appsrv/bridge 两个身份（**无**后代身份）；后代身份在此现取，取不到即 unknown。
+      const stopIdentities: WindowsManagedIdentity[] = decision.safe.map((p) => ({ role: p.role, pid: p.pid, creationDate: p.creationDate }));
+      const captureGaps: string[] = [];
+      for (const managedProcess of decision.safe) {
+        const captured = captureWindowsDescendantIdentities(managedProcess.role, managedProcess.pid);
+        if (captured.unknownReason) captureGaps.push(captured.unknownReason);
+        stopIdentities.push(...captured.identities);
       }
-      const windowsResiduals = decision.safe.filter(p => probeWindowsCreationDate(p.pid) === p.creationDate);
-      if (windowsResiduals.length > 0) {
-        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${windowsResiduals.map(p => `${p.role}:${p.pid}`).join(", ")}`);
+      const stopKills: Array<{ label: string; outcome: TaskkillOutcome }> = [];
+      for (const managedProcess of [...decision.safe].reverse()) {
+        stopKills.push({
+          label: `${managedProcess.role} pid=${managedProcess.pid}`,
+          outcome: runTaskkillWindowsProcessTree(managedProcess.pid),
+        });
+      }
+      // taskkill 非零**本身**不再判失败：成败只由身份裁决（旧代码在此提前 exit(1)，
+      // 使按 PID+CreationDate 的残留判据不可达 —— 现场 38587525619 正是这种良性竞态）。
+      const stopVerdict = decideWindowsStopVerdict({
+        identities: stopIdentities,
+        kills: stopKills,
+        captureUnknown: captureGaps,
+        probe: (identity) => probeWindowsIdentity(identity.pid, identity.creationDate),
+      });
+      for (const diagnostic of stopVerdict.retainedDiagnostics) console.warn(`[anet] ⚠ ${diagnostic}`);
+      if (stopVerdict.kind === "survived") {
+        console.error(`[anet] STOP_TIMEOUT: Windows managed processes survived: ${stopVerdict.alive.join(", ")}`);
+        process.exit(1);
+      }
+      if (stopVerdict.kind === "unverifiable") {
+        console.error(`[anet] STOP_TIMEOUT: could not prove Windows managed identity exited: ${stopVerdict.unknown.join(", ")}`);
         process.exit(1);
       }
       rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true });

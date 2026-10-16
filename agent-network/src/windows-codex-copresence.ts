@@ -1,6 +1,6 @@
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { atomicWritePrivateJson, ensurePrivateDirectory } from "./private-state";
 
 export type WindowsCopresenceRole = "appsrv" | "bridge";
@@ -186,7 +186,214 @@ export function decideWindowsManagedStop(record: WindowsCopresenceRecord, probe:
 }
 
 export function taskkillWindowsProcessTree(pid: number): void {
-  execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
-    stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+  const outcome = runTaskkillWindowsProcessTree(pid);
+  if (outcome.status === 0) return;
+  const detail = [
+    outcome.status !== null ? `status=${outcome.status}` : null,
+    outcome.signal ? `signal=${outcome.signal}` : null,
+    outcome.stderrSummary ? `stderr=${outcome.stderrSummary}` : null,
+    outcome.stderrDroppedBytes > 0 ? `stderrOmitted=${outcome.stderrDroppedBytes}B` : null,
+  ].filter(Boolean).join(" ");
+  throw new Error(`taskkill.exe /PID ${pid} /T /F did not report success${detail ? ` (${detail})` : ""}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #1335 —— taskkill 非零之后：保留诊断，按**精确身份**裁决 gone / alive / unknown
+//
+// 现场（run 38587525619 / job 115933379757）：`taskkill.exe /PID 8100 /T /F` 非零，
+// 自报原因 `Reason: There is no running instance of the task.`（PID 8744、7656 两个
+// **后代**）——被枚举到的后代在终止前已退出。那只证明**那一次命令的报告**，**不能**推定
+// 所有受管身份都已退出，也不同于同 stage 的 `The operation attempted is not supported`。
+//
+// 旧代码把 taskkill **退出码**放在身份判据之前（非零即 exit(1)），使按 PID+CreationDate
+// 的残留判据不可达，良性竞态被当成硬失败。本段：① 非零保留 status/signal 与**受控** stderr
+// 摘要；② 用**可区分**的身份查询判 gone/alive/unknown；③ 由 ② 裁决 —— **不**解析本地化
+// 文案，也**不**按 PID 裸杀。
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TaskkillOutcome {
+  status: number | null;
+  signal: string | null;
+  /** 受控摘要：仅保留 taskkill 自身固定形状的行，≤4 行 / 400 字符。 */
+  stderrSummary: string;
+  /** 被丢弃的 stderr 字节数——保留「有输出但形状不识别」这一事实，不泄露文本。 */
+  stderrDroppedBytes: number;
+}
+
+const TASKKILL_STDERR_SHAPE = /^(ERROR|SUCCESS|INFO|Reason):[^\n]{0,160}$/;
+
+/** 受控诊断：只放行已知形状（`ERROR:` / `Reason:` …），其余只记字节数。 */
+export function summarizeTaskkillStderr(raw: string): { summary: string; droppedBytes: number } {
+  const lines = String(raw ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const kept: string[] = [];
+  let droppedBytes = 0;
+  for (const line of lines) {
+    const printable = line.replace(/[\u0000-\u001f\u007f]/g, "");
+    if (kept.length < 4 && TASKKILL_STDERR_SHAPE.test(printable)) kept.push(printable);
+    else droppedBytes += Buffer.byteLength(line, "utf8");
+  }
+  return { summary: kept.join(" | ").slice(0, 400), droppedBytes };
+}
+
+/** 非零**不再**丢弃诊断：拿回 status/signal 与受控 stderr，交给身份裁决。 */
+export function runTaskkillWindowsProcessTree(pid: number): TaskkillOutcome {
+  const result = spawnSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], windowsHide: true, timeout: 30_000,
   });
+  const { summary, droppedBytes } = summarizeTaskkillStderr(String(result.stderr ?? ""));
+  return {
+    status: typeof result.status === "number" ? result.status : null,
+    signal: (result.signal as string | null) ?? null,
+    stderrSummary: summary,
+    stderrDroppedBytes: droppedBytes,
+  };
+}
+
+export type WindowsIdentityState = "alive" | "gone" | "pid-reused" | "unknown";
+
+/** 结构化协议：判定只读这个协议，**不**读本地化的错误文案。 */
+export const WINDOWS_IDENTITY_PROTOCOL = "IDSTATE:";
+
+/** gone 用 .NET 的 `ArgumentException`（进程不存在）辨认——**异常类型**不随语言变化。 */
+export function windowsIdentityProbeScript(pid: number): string {
+  return [
+    "$ErrorActionPreference='Stop'",
+    "try{",
+    `$p=[Diagnostics.Process]::GetProcessById(${pid})`,
+    "$t=$p.StartTime.ToUniversalTime().Ticks.ToString()",
+    `'${WINDOWS_IDENTITY_PROTOCOL}TICKS='+$t`,
+    `}catch [System.ArgumentException]{'${WINDOWS_IDENTITY_PROTOCOL}ABSENT'}catch{'${WINDOWS_IDENTITY_PROTOCOL}ERROR'}`,
+  ].join(";");
+}
+
+export type WindowsIdentityRead = { kind: "ticks"; ticks: string } | { kind: "absent" } | { kind: "unknown" };
+
+function defaultPowerShellRunner(script: string): string {
+  return execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 15_000,
+  });
+}
+
+/** 空输出 / 多行 / 非法形状 / 异常 ⇒ unknown（**不能**折成 gone）。 */
+export function readWindowsIdentity(pid: number, runPowerShell: (script: string) => string = defaultPowerShellRunner): WindowsIdentityRead {
+  if (!Number.isInteger(pid) || pid <= 0) return { kind: "unknown" };
+  try {
+    const out = String(runPowerShell(windowsIdentityProbeScript(pid)) ?? "").trim();
+    if (out === `${WINDOWS_IDENTITY_PROTOCOL}ABSENT`) return { kind: "absent" };
+    const matched = new RegExp(`^${WINDOWS_IDENTITY_PROTOCOL}TICKS=(\\d+)$`).exec(out);
+    return matched ? { kind: "ticks", ticks: matched[1] } : { kind: "unknown" };
+  } catch { return { kind: "unknown" }; }
+}
+
+/** 三向：alive(出生身份仍在) / gone(该身份已不存在) / pid-reused(同 PID 已被无关进程占用) / unknown。 */
+export function probeWindowsIdentity(
+  pid: number,
+  expectedCreationDate: string,
+  runPowerShell: (script: string) => string = defaultPowerShellRunner,
+): WindowsIdentityState {
+  if (!Number.isInteger(pid) || pid <= 0 || !/^\d+$/.test(expectedCreationDate)) return "unknown";
+  const read = readWindowsIdentity(pid, runPowerShell);
+  if (read.kind === "absent") return "gone";
+  if (read.kind === "ticks") return read.ticks === expectedCreationDate ? "alive" : "pid-reused";
+  return "unknown";
+}
+
+export interface WindowsManagedIdentity {
+  role: string;
+  pid: number;
+  creationDate: string;
+}
+
+/** 单次 CIM 枚举（同 `probeWindowsOwnedLoopbackConnection` 手法）；**只**用于取证，不用于杀进程。 */
+export function windowsDescendantEnumerationScript(rootPid: number): string {
+  return [
+    "$ErrorActionPreference='Stop'",
+    "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
+    `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
+    "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
+    `[void]$ids.Remove(${rootPid})`,
+    "'DESC:'+($ids-join',')",
+  ].join(";");
+}
+
+export function parseWindowsDescendantPids(raw: string): number[] | null {
+  const matched = /^DESC:(\d+(,\d+)*)?$/.exec(String(raw ?? "").trim());
+  if (!matched) return null;
+  if (!matched[1]) return [];
+  const pids = matched[1].split(",").map(Number);
+  return pids.every((pid) => Number.isInteger(pid) && pid > 0) ? pids : null;
+}
+
+export interface WindowsDescendantCapture {
+  identities: WindowsManagedIdentity[];
+  /** 非空 ⇒ 取证不完整，调用方**必须**按 unknown 处理，不得当成功。 */
+  unknownReason?: string;
+}
+
+/**
+ * 终止前**现取**后代出生身份：记录里只有 appsrv/bridge，**没有**后代。拿不到 ⇒
+ * unknownReason（不猜）。只用于**验证**；杀进程仍走根 PID 的既存出生身份。
+ */
+export function captureWindowsDescendantIdentities(
+  rootRole: string,
+  rootPid: number,
+  opts: { cap?: number; runPowerShell?: (script: string) => string } = {},
+): WindowsDescendantCapture {
+  const cap = opts.cap ?? 16;
+  const run = opts.runPowerShell ?? defaultPowerShellRunner;
+  let pids: number[] | null = null;
+  try { pids = parseWindowsDescendantPids(run(windowsDescendantEnumerationScript(rootPid))); }
+  catch { return { identities: [], unknownReason: `descendant enumeration failed for ${rootRole} pid=${rootPid}` }; }
+  if (!pids) return { identities: [], unknownReason: `descendant enumeration output not understood for ${rootRole} pid=${rootPid}` };
+  if (pids.length > cap) return { identities: [], unknownReason: `descendant count ${pids.length} exceeds cap ${cap} for ${rootRole} pid=${rootPid}` };
+  const identities: WindowsManagedIdentity[] = [];
+  for (const pid of pids) {
+    const read = readWindowsIdentity(pid, run);
+    if (read.kind === "ticks") identities.push({ role: `${rootRole}:desc`, pid, creationDate: read.ticks });
+    else if (read.kind === "unknown") return { identities, unknownReason: `descendant ${pid} of ${rootRole} pid=${rootPid} birth identity not queryable` };
+    // absent：取证时已不存在，没有需要后续验证的身份。
+  }
+  return { identities };
+}
+
+export type WindowsStopVerdict =
+  | { kind: "stopped"; retainedDiagnostics: string[] }
+  | { kind: "survived"; alive: string[]; retainedDiagnostics: string[] }
+  | { kind: "unverifiable"; unknown: string[]; retainedDiagnostics: string[] };
+
+/**
+ * 成败只由**精确身份**裁决（不解析 taskkill 文案）：任一 `alive` ⇒ survived；否则任一
+ * `unknown`（含取证缺口）⇒ unverifiable（两者**都不得绿**）；全部 gone 或 pid-reused
+ * ⇒ stopped，并把非零 taskkill 的 status/signal/受控 stderr 作为**保留诊断**带出。
+ */
+export function decideWindowsStopVerdict(opts: {
+  identities: WindowsManagedIdentity[];
+  kills: Array<{ label: string; outcome: TaskkillOutcome }>;
+  probe: (identity: WindowsManagedIdentity) => WindowsIdentityState;
+  captureUnknown?: string[];
+}): WindowsStopVerdict {
+  const retainedDiagnostics: string[] = [];
+  for (const kill of opts.kills) {
+    const { outcome } = kill;
+    if (outcome.status === 0 && !outcome.signal) continue;
+    retainedDiagnostics.push([
+      `taskkill non-zero for ${kill.label}`,
+      `status=${outcome.status === null ? "null" : outcome.status}`,
+      `signal=${outcome.signal ?? "null"}`,
+      outcome.stderrSummary ? `stderr=${outcome.stderrSummary}` : null,
+      outcome.stderrDroppedBytes > 0 ? `stderrOmitted=${outcome.stderrDroppedBytes}B` : null,
+    ].filter(Boolean).join(" "));
+  }
+  const alive: string[] = [];
+  const unknown: string[] = [...(opts.captureUnknown ?? [])];
+  for (const identity of opts.identities) {
+    const state = opts.probe(identity);
+    const label = `${identity.role} pid=${identity.pid}`;
+    if (state === "alive") alive.push(label);
+    else if (state === "unknown") unknown.push(label);
+    else if (state === "pid-reused") retainedDiagnostics.push(`${label} pid reused; unrelated process left untouched`);
+  }
+  if (alive.length > 0) return { kind: "survived", alive, retainedDiagnostics };
+  if (unknown.length > 0) return { kind: "unverifiable", unknown, retainedDiagnostics };
+  return { kind: "stopped", retainedDiagnostics };
 }
