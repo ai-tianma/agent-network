@@ -12935,7 +12935,7 @@ async function notifyServerOffline(profile: Profile, nodeId: string) {
     // MCP call: report_status offline
     await fetch(`${hub}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json", ...authHeaders(profile.token || gc.token) },
+      headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream", ...authHeaders(profile.token || gc.token) },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 1, method: "initialize",
         params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "anet-cli", version: "1.0" } },
@@ -12943,7 +12943,7 @@ async function notifyServerOffline(profile: Profile, nodeId: string) {
     });
     await fetch(`${hub}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json", ...authHeaders(profile.token || gc.token) },
+      headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream", ...authHeaders(profile.token || gc.token) },
       body: JSON.stringify({
         jsonrpc: "2.0", id: 2, method: "tools/call",
         params: { name: "report_status", arguments: { resume_id: resumeId, alias: displayName, status: "offline" } },
