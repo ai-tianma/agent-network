@@ -221,8 +221,9 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         //    （对照 `agent-network/src/client.ts:85`）。这是**产品侧事实**，本片不改产品；
         //    因此这里只断言"到达上游且上游有响应"，并把状态码打进诊断，交由通信牛裁定是否算接收成功。
         const status = r.offline[0].upstreamStatus;
-        if (typeof status !== "number") {
-          throw new Error(`test1337 A: offline notification did not reach the upstream hub (no status recorded)`);
+        // 🔴 必须是**真实上游响应**：502 是代理自身的上游失败码、null 表示没到上游 —— 两者都不得算 A 成功。
+        if (typeof status !== "number" || status === 502 || status < 200 || status >= 500) {
+          throw new Error(`test1337 A: offline notification did not get a real upstream response (status=${status})`);
         }
         console.log(`       (A: upstream responded ${status} to the target-bound offline notification)`);
         console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias}, upstream=${r.offline[0].upstreamStatus})`);
@@ -241,7 +242,13 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (r.offline.length !== 0) throw new Error(`test1337 B: report_status(offline) must be 0, saw ${JSON.stringify(r.offline)}`);
         // 🔴 必须确实是**本场景**：命中 nonzero-noop 包装器 **且** CLI 报 surviving 残留；
         //    否则旧 ownership 拒绝等更早错误也能满足 rc!=0 + 记录不变 + 身份仍活。
-        if (!callLog(tkLog).includes("nonzero-noop")) throw new Error(`test1337 B: did not hit the nonzero-noop taskkill wrapper\n${callLog(tkLog)}`);
+        const tk = callLog(tkLog);
+        if (!tk.includes("nonzero-noop")) throw new Error(`test1337 B: did not hit the nonzero-noop taskkill wrapper\n${tk}`);
+        // 🔴 绑定到**该场景的受管 PID**：否则别的进程/别的调用也能让"字符串存在"成立。
+        for (const p of s.identities) {
+          const bound = tk.split("\n").some((line) => line.includes("nonzero-noop") && line.includes(String(p.pid)));
+          if (!bound) throw new Error(`test1337 B: nonzero-noop call log not bound to managed pid=${p.pid}\n${tk}`);
+        }
         if (!r.out.includes("STOP_TIMEOUT: Windows managed processes survived")) {
           throw new Error(`test1337 B: did not report surviving managed processes\n${r.out}`);
         }
