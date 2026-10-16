@@ -68,8 +68,11 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
       ANET_TEST1337_REAL_POWERSHELL: process.env.ANET_TEST1337_REAL_POWERSHELL,
       ANET_TEST1337_REAL_TASKKILL: process.env.ANET_TEST1337_REAL_TASKKILL,
     };
+    // ⚠️ 已知障碍（如实保留，不静默降级）：把 CLI 的 hub 指到本 loopback 代理会让 `stop`
+    //    **挂起超时（rc=null）** —— 该 CLI 的 hub 流量不是朴素 HTTP 反代可透明承载的形状
+    //    （疑为 WS/SSE 升级或长连）。因此这里**只**切 global config 作计数尝试；
+    //    若计数仍为 0 即打印明确失败信息，而不是把"没观测到"当成"没有请求"。
     setHub(globalConfig, proxyHub);
-    setHub(nodeConfig, proxyHub);   // 节点自身 config 才是 stop 读取 hub 的那份
     hubRequests.length = 0;
     try {
       const res = spawnSync(process.env.ANET_TEST751_BUN, [cli, "node", "stop", node], { cwd: project, env: stopEnv, encoding: "utf8", timeout: 120_000 });
