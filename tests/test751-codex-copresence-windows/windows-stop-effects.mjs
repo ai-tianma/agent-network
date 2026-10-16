@@ -64,9 +64,14 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         } catch { /* 非 JSON 体不计入 */ }
       }
       const up = httpRequest({ host: "127.0.0.1", port: realHubPort, path: req.url, method: req.method, headers: { ...req.headers, host: `127.0.0.1:${realHubPort}` } }, (r) => {
-        if (matchedOffline) {
-          const rec = offlineNotifications.find((n) => n.alias === matchedOffline.alias && n.resumeId === matchedOffline.resumeId);
-          if (rec) rec.upstreamStatus = r.statusCode ?? null;      // 上游实际响应状态
+        const rec = matchedOffline
+          ? offlineNotifications.find((n) => n.alias === matchedOffline.alias && n.resumeId === matchedOffline.resumeId)
+          : null;
+        if (rec) {
+          rec.upstreamStatus = r.statusCode ?? null;               // 上游实际响应状态
+          let body = "";                                            // 上游**响应体**（有界）——用于解析 MCP 结果
+          r.on("data", (c) => { if (body.length < 4096) body += c; });
+          r.on("end", () => { rec.upstreamBody = body.slice(0, 4096); });
         }
         res.writeHead(r.statusCode || 502, r.headers);
         r.pipe(res);
@@ -221,12 +226,28 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         //    （对照 `agent-network/src/client.ts:85`）。这是**产品侧事实**，本片不改产品；
         //    因此这里只断言"到达上游且上游有响应"，并把状态码打进诊断，交由通信牛裁定是否算接收成功。
         const status = r.offline[0].upstreamStatus;
-        // 🔴 必须是**真实上游响应**：502 是代理自身的上游失败码、null 表示没到上游 —— 两者都不得算 A 成功。
-        if (typeof status !== "number" || status === 502 || status < 200 || status >= 500) {
-          throw new Error(`test1337 A: offline notification did not get a real upstream response (status=${status})`);
+        // 🔴 严格：上游必须 **2xx**（#1344 已修产品 Accept ⇒ 406 不应再出现）。
+        if (typeof status !== "number" || status < 200 || status >= 300) {
+          throw new Error(`test1337 A: upstream did not accept the notification (status=${status})`);
         }
+        // 🔴 并**解析 MCP 响应**，确认精确 alias/resume_id 的 report_status 处理成功（不是只看状态码）。
+        const raw = r.offline[0].upstreamBody ?? "";
+        const frames = raw.split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => l.slice(6));
+        const candidates = (frames.length ? frames : [raw]).filter((x) => x && x.trim().startsWith("{"));
+        let handled = null;
+        for (const c of candidates) {
+          try {
+            const j = JSON.parse(c);
+            if (Object.prototype.hasOwnProperty.call(j, "error")) throw new Error(`MCP error reply: ${JSON.stringify(j.error)}`);
+            if (j.result && j.result.isError === true) throw new Error(`MCP tool reported isError: ${JSON.stringify(j.result)}`);
+            if (j.result) handled = j.result;
+          } catch (e) {
+            if (String(e).startsWith("Error: MCP")) throw e;
+          }
+        }
+        if (!handled) throw new Error(`test1337 A: could not parse a successful MCP result for report_status from upstream body: ${JSON.stringify(raw.slice(0, 300))}`);
         console.log(`       (A: upstream responded ${status} to the target-bound offline notification)`);
-        console.log(`       (A evidence: target-bound offline alias=${r.offline[0]?.alias} resumeId=${r.offline[0]?.resumeId}; upstream=${r.offline[0].upstreamStatus}; unrelated-node notifications excluded by self-check)`);
+        console.log(`       (A evidence: target-bound offline alias=${r.offline[0]?.alias} resumeId=${r.offline[0]?.resumeId}; upstream=${r.offline[0].upstreamStatus} (2xx); MCP result parsed=yes; unrelated-node notifications excluded by self-check)`);
         console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias}, upstream=${r.offline[0].upstreamStatus})`);
       } finally { cleanup(s.identities); }
     }
