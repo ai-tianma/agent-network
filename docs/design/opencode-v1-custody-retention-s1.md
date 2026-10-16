@@ -61,8 +61,16 @@ and returns exactly one of:
 Three rules replace the conflicting sentences of revisions 1–4:
 
 1. **A durable fence/intent always means retain/refuse.** Missing acknowledgement (no
-   confirmation, no ACK) **never** reverts to ordinary. The only way out of an
-   *uncommitted* fence is the explicit retraction in §4's crash table.
+   confirmation, no ACK) **never** reverts to ordinary — *no confirmation is not proof
+   that the allocation never entered the retention flow*. An uncommitted fence is
+   resolved **only** by (i) completing the **same** revision from originally valid
+   evidence, or (ii) an **explicit named `abandon` decision** that carries its own
+   evidence and its own named writer (§4.1). Neither is ever derived from a missing
+   confirmation artifact.
+   **Invariant: a fence existing implies `nonParticipation: false` for that
+   allocation** (the fence is only ever written by a retention preparation). Such an
+   allocation therefore **can never** be ordinary-cleaned; only an explicit named
+   decision can close it.
 2. **`absent` grants nothing.** "No basis entry" ⇒ `refuse(no-participation-proof)`,
    **not** ordinary. Ordinary requires the affirmative non-participation attestation of
    §2. Allocations created before the participation basis exists therefore **refuse**;
@@ -107,12 +115,13 @@ boundary are:
 
 **Recovery by physical crash point** (each row is a physical point, not an abstract
 "missing" group). The recovery authority may **only re-persist the same revision with its
-originally valid evidence**; it may **never** manufacture qualification, and never
-advance the revision:
+originally valid evidence**; it may **never** manufacture qualification, never advance the
+revision, and **never derive `ordinary-cleanup` from an absent confirmation** (an absent
+confirmation is not evidence that the allocation never entered retention):
 
 | Crash point | On-disk state | Verdict | Allowed recovery |
 |---|---|---|---|
-| after fence written, before any record temp | fence only | retain | authority may **retract the uncommitted fence** with evidence (no confirmation ever existed, generation gone); then §3's ordinary rules apply |
+| after fence written, before any record temp | fence only | `retain` + `refuse(record-expected-missing)` | authority may re-persist the **same revision** from the original outcome, **or** record an **explicit named `abandon` decision** (own writer + own evidence). The missing confirmation is **never** a basis for `ordinary-cleanup` |
 | during record temp write | partial temp file | retain | ignore the temp (it is not a record); fence stands |
 | after record rename, before `records/` dir fsync | record maybe present, no confirmation | `unknown` ⇒ retain | authority re-publishes the **same revision** through the protocol, using the original outcome |
 | after `records/` fsync, before confirmation | record durable, confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | authority writes the confirmation for the **same revision/digest** (original evidence exists) |
@@ -130,7 +139,7 @@ advance the revision:
 | `records/<rev>-<digest>.json` + `current` | the coordinator whose **generation still matches** the record | CAS on the complete current record digest under `lock`; a loser re-reads |
 | `confirmation/<rev>-<digest>.json` | the commit path, or the **named recovery authority** | only for the **same** `(revision, digest)`; never a new revision |
 | `reservation/<allocationId>.json` | a cleanup participant that passed §3 | after it exists, prepare **must fail** |
-| retract an **uncommitted** fence | the **named recovery authority**, with evidence | only when no confirmation ever existed and the generation is gone |
+| resolve an **uncommitted** fence | the named recovery authority | by completing the **same** revision from original evidence, or by an **explicit named `abandon` decision**; never by "the confirmation is absent" |
 | `released` record | the current holder, with #1239 evidence | never producible by a reader |
 | **a refusal** | **nobody** | A refusal is a **decision returned to the caller**, not a record. Readers may never overwrite a valid record with a refusal. |
 
@@ -269,7 +278,8 @@ permits the existing flow.
 |---|---|---|
 | Ordinary root with `nonParticipation: true` for this allocation/root generation, no fence/reservation/record | `ordinary-cleanup` | Must not be turned into permanent retention |
 | No basis entry (`absent`) | `refuse(no-participation-proof)` | Must not be treated as ordinary (pre-basis allocations refuse) |
-| Fence exists, record missing/corrupt/chain-broken | `retain` + `refuse(record-expected-missing)` | Must not revert to ordinary without the explicit fence retraction of §4 |
+| Fence exists, record missing/corrupt/chain-broken | `retain` + `refuse(record-expected-missing)` | Must not revert to ordinary except via the explicit named `abandon` decision of §4 |
+| Fence exists, confirmation **never** existed, coordinator generation gone | `retain` + `refuse(record-expected-missing)` | Must **not** conclude `ordinary-cleanup` from the missing confirmation; a fence implies `nonParticipation: false` |
 | Cleanup holds the lock through deletion, then prepare arrives | prepare **fails** (`cleanup-reserved`) if a reservation exists | A later prepare may not revoke a reservation |
 | Concurrent commits | exactly one wins: CAS on the **complete current record digest** under `lock` | No last-write-wins; no replaced/rewritten record file |
 | Record durable but confirmation absent | `unknown` ⇒ retain + `refuse(commit-unconfirmed)` | Must not be read as durable; no "probably fsynced" |
@@ -298,7 +308,9 @@ produces its listed verdict; (5) record without confirmation ⇒ `unknown`; (6) 
 refuse at prepare; (9) metadata lock free after a crash ⇒ **no** takeover without the
 authority; (10) exit without a barrier ⇒ never `retained-ready`; (11) barrier epoch
 mismatch or crashed controller ⇒ admission still refuses; (12) empty `auth.json` ⇒
-credential cleanup still runs.
+credential cleanup still runs; (13) fence present, confirmation **never** existed and the
+coordinator generation is gone ⇒ **retain + refuse** (never `ordinary-cleanup`); (14) an
+explicit named `abandon` decision is the **only** thing that closes an uncommitted fence.
 
 ## 12. What this document does not claim
 
