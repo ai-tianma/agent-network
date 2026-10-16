@@ -480,8 +480,6 @@ export function orchestrateWindowsManagedStop(
 ): WindowsStopOrchestration {
   const runPowerShell = deps.runPowerShell;
   const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
-  const runPowerShellOrThrow = (rootPid: number): string =>
-    (runPowerShell ?? defaultPowerShellRunner)(windowsTreeReconciliationScript(rootPid));
   const identities: WindowsManagedIdentity[] = [...roots];
   const gaps: string[] = [];
   const notes: string[] = [];
@@ -499,17 +497,24 @@ export function orchestrateWindowsManagedStop(
     killedPids.push(root.pid);
     kills.push({ label, outcome: runTaskkill(root.pid) });
   }
-  // 🔴 非零 kill ⇒ 必须证明「树已空」：否则快照之后才生出的后代可能仍存活，
-  //    而 pre-captured 身份全 gone 会让裁决误判 stopped（Codex P1）。
+  // 🔴 非零 kill ⇒ 必须以**遍历本身**证明「没有未记账的存活后代」：
+  //    快照只提供 (pid, ppid)，遍历在 JS 侧、种子是**全部已捕获身份**（根 + 后代），
+  //    **不依赖根是否可达**。任何未记账的现存后代 / 快照不可得 ⇒ unknown。
   const reconGaps: string[] = [];
   if (kills.some((kill) => kill.outcome.status !== 0 || kill.outcome.signal)) {
-    for (const root of roots) {
-      const label = `${root.role} pid=${root.pid}`;
-      let remaining: number[] | null = null;
-      try { remaining = parseWindowsRecon(runPowerShellOrThrow(root.pid)); }
-      catch { remaining = null; }
-      if (remaining === null) reconGaps.push(`tree not reconciled for ${label}: output not understood`);
-      else if (remaining.length > 0) reconGaps.push(`tree not proven empty after a non-zero taskkill for ${label}: ${remaining.join(",")}`);
+    const capturedPids = identities.map((identity) => identity.pid);
+    let snapshot: Array<{ pid: number; ppid: number }> | null = null;
+    try { snapshot = parseWindowsProcessSnapshot((runPowerShell ?? defaultPowerShellRunner)(windowsProcessSnapshotScript())); }
+    catch { snapshot = null; }
+    if (snapshot === null) {
+      reconGaps.push(`tree not reconciled: process snapshot not obtained or not understood`);
+    } else if (snapshot.length === 0) {
+      // 🔴 全机 CIM 枚举**零行**不能证明"受管树已消失"：执行查询本身就会产生 powershell 进程，
+      //    空结果更可能是**观测缺口**。不得把观察缺口当空集合 ⇒ unknown。
+      reconGaps.push(`tree not reconciled: whole-machine process snapshot was empty; completeness not provable`);
+    } else {
+      const unaccounted = findUnaccountedDescendants(snapshot, capturedPids);
+      if (unaccounted.length > 0) reconGaps.push(`tree not proven empty after a non-zero taskkill: unaccounted live descendants ${unaccounted.join(",")}`);
     }
   }
   const verdict = decideWindowsStopVerdict({
@@ -522,30 +527,73 @@ export function orchestrateWindowsManagedStop(
   return { verdict, killedPids, identities, mustKeepRecord: verdict.kind !== "stopped" };
 }
 
-export const WINDOWS_RECON_PROTOCOL = "RECON:";
+export const WINDOWS_SNAPSHOT_PROTOCOL = "SNAP:";
 
 /**
- * 终止**之后**的树核对：重新枚举该根 pid 的后代（BFS 于一份新的 CIM 快照）。
- * 非空 ⇒ 证明「树未空」（含**快照之后才生出**的后代）⇒ 调用方必须判 unknown。
- * 只用于取证，不用于杀进程。
+ * 终止**之后**的进程快照：**只**返回现存进程的 (pid, ppid) 对，不在脚本里做遍历、不下结论。
+ * 🔴 遍历刻意放在 JS 侧：这样「祖先链上的存活后代」这条判据**本身**可被单测见证，
+ *    而不是只往编排里注入一个已经算好的结果。
  */
-export function windowsTreeReconciliationScript(rootPid: number): string {
+export function windowsProcessSnapshotScript(): string {
   return [
     "$ErrorActionPreference='Stop'",
     "$procs=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId",
-    `$ids=[Collections.Generic.HashSet[int]]::new();[void]$ids.Add(${rootPid})`,
-    "do{$n=0;$procs|%{if($ids.Contains([int]$_.ParentProcessId)-and $ids.Add([int]$_.ProcessId)){$n++}}}while($n-gt 0)",
-    `[void]$ids.Remove(${rootPid})`,
-    `'${WINDOWS_RECON_PROTOCOL}'+($ids-join',')`,
+    `'${WINDOWS_SNAPSHOT_PROTOCOL}'+(($procs|%{ "$($_.ProcessId)=$($_.ParentProcessId)" }) -join ',')`,
   ].join(";");
 }
 
-export function parseWindowsRecon(raw: string): number[] | null {
-  const matched = new RegExp(`^${WINDOWS_RECON_PROTOCOL}(\\d+(,\\d+)*)?$`).exec(String(raw ?? "").trim());
-  if (!matched) return null;
-  if (!matched[1]) return [];
-  const pids = matched[1].split(",").map(Number);
-  return pids.every((pid) => Number.isInteger(pid) && pid > 0) ? pids : null;
+export function parseWindowsProcessSnapshot(raw: string): Array<{ pid: number; ppid: number }> | null {
+  const out = String(raw ?? "").trim();
+  if (!out.startsWith(WINDOWS_SNAPSHOT_PROTOCOL)) return null;
+  const body = out.slice(WINDOWS_SNAPSHOT_PROTOCOL.length);
+  if (!body) return [];
+  const rows: Array<{ pid: number; ppid: number }> = [];
+  for (const part of body.split(",")) {
+    const matched = /^(\d+)=(\d+)$/.exec(part.trim());
+    if (!matched) return null;
+    rows.push({ pid: Number(matched[1]), ppid: Number(matched[2]) });
+  }
+  return rows;
+}
+
+/**
+ * 🔴 **完整性判据（不看根是否可达）**：以**全部已捕获身份**（根 + 后代）为种子，
+ * 在终止后快照里沿 `ParentProcessId` 向下闭包；任何**可达且不属于已捕获身份**的现存进程，
+ * 都是「未被记账的存活后代」。
+ *
+ * 这修掉的是这个反例：捕获 8100→8744 后，8744 又生出 9999；非零 kill 使 8100/8744 退出而
+ * 9999 存活（快照里 `9999=8744`）。旧实现只从 8100 出发 BFS ⇒ 根已不可达 ⇒ 得空 ⇒ 误判 stopped。
+ * 现在 8744 也在种子里 ⇒ 9999 可达 ⇒ 必须 `unknown`。
+ *
+ * ⚠️ **保证范围（有界）**：这是**单次有限快照**上的可达性判据，**不是**"历史后代完整性证明"。
+ *    若某个中间节点**从未被捕获**且已退出，有限 pid/ppid 快照里**没有那条历史边**，本条判据
+ *    看不到它；因此本片**不承诺**全时段/任意树零残留。超出该范围需要启动屏障/Job Object 一类
+ *    机制，**不在本片引入**。
+ */
+export function findUnaccountedDescendants(
+  snapshot: Array<{ pid: number; ppid: number }>,
+  capturedPids: number[],
+): number[] {
+  const captured = new Set(capturedPids);
+  const byParent = new Map<number, number[]>();
+  for (const row of snapshot) {
+    const list = byParent.get(row.ppid);
+    if (list) list.push(row.pid);
+    else byParent.set(row.ppid, [row.pid]);
+  }
+  const seen = new Set<number>(capturedPids);
+  const queue = [...capturedPids];
+  const unaccounted: number[] = [];
+  while (queue.length > 0) {
+    const parent = queue.shift()!;
+    for (const child of byParent.get(parent) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      queue.push(child);
+      if (!captured.has(child)) unaccounted.push(child);
+    }
+  }
+  return unaccounted;
 }
 
 export interface WindowsStopContinuation<TStopResult> {

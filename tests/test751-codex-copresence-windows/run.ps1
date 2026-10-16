@@ -13,6 +13,8 @@ bun test src/copresence-deps.test.ts src/windows-codex-copresence.test.ts src/co
 # #1335 —— 这一行的退出码此前**没有被检查**(`| Tee-Object` 之后没有任何判定),会让新见证的红被后面命令的退出码覆盖。显式判定:
 if ($LASTEXITCODE -ne 0) { throw "Codex co-presence unit tests failed" }
 bun run typecheck 2>&1 | Tee-Object -FilePath $report -Append
+# 与上行同理：typecheck 的退出码此前也没有判定，类型错误会被后续命令的退出码掩盖。
+if ($LASTEXITCODE -ne 0) { throw "agent-network typecheck failed" }
 Set-Location (Join-Path $PSScriptRoot "..\..\agent-node")
 bun install --frozen-lockfile 2>&1 | Tee-Object -FilePath $report -Append
 bun run build 2>&1 | Tee-Object -FilePath $report -Append
