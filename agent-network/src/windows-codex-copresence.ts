@@ -201,15 +201,13 @@ export function taskkillWindowsProcessTree(pid: number): void {
 // #1335 —— taskkill 非零之后：保留诊断，按**精确身份**裁决 gone / alive / unknown
 //
 // 现场（run 38587525619 / job 115933379757）：`taskkill.exe /PID 8100 /T /F` 非零，
-// 自报 `Reason: There is no running instance of the task.`（PID 8744、7656）——它**只**
-// 报告「被枚举到的后代此刻已不在」，**不**证明所有原身份都已退出（历史红不改写）。
+// 自报 `Reason: There is no running instance of the task.`——它**只**报告「被枚举到的后代
+// 此刻已不在」，**不**证明所有原身份都已退出（历史红不改写）。
 //
-// 旧代码把 taskkill **退出码**放在身份判据之前（非零即 exit(1)），使按 PID+CreationDate
-// 的残留判据不可达，良性竞态被当成硬失败。本段：① 非零保留 status/signal 与**受控** stderr
-// 摘要；② 用**可区分**的身份查询判 gone/alive/unknown；③ 由 ② 裁决 —— **不**解析本地化
-// 文案，也**不**按 PID 裸杀。
+// 旧代码把**退出码**放在身份判据之前（非零即 exit(1)），使按 PID+CreationDate 的残留判据
+// 不可达，良性竞态被当成硬失败。本段：① 非零保留 status/signal 与**受控** stderr 摘要；
+// ② 取证与终止都**绑定精确根身份**；③ 由身份裁决 —— **不**解析本地化文案、**不**按 PID 裸杀。
 // ─────────────────────────────────────────────────────────────────────────────
-
 export interface TaskkillOutcome {
   status: number | null;
   signal: string | null;

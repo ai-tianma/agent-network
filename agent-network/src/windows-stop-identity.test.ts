@@ -130,17 +130,13 @@ describe("#1335 取证绑定根身份（同一枚举读后代出生身份 + 前�
 
 describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据替身）", () => {
   const p = "IDSTATE:";
-  test("ABSENT ⇒ gone；TICKS 相同 ⇒ alive；不同 ⇒ pid-reused；空/多行/非法/抛错/非法入参 ⇒ unknown", () => {
+  test("ABSENT⇒gone / TICKS 相同⇒alive / 不同⇒pid-reused / 空·多行·非法·抛错⇒unknown；stderr 受控", () => {
     expect(probeWindowsIdentity(8100, "999", () => `${p}ABSENT`)).toBe("gone");
     expect(probeWindowsIdentity(8100, "999", () => `${p}TICKS=999`)).toBe("alive");
     expect(probeWindowsIdentity(8100, "999", () => `${p}TICKS=888`)).toBe("pid-reused");
-    expect(probeWindowsIdentity(8100, "999", () => "")).toBe("unknown");
-    expect(probeWindowsIdentity(8100, "999", () => `${p}TICKS=999\nnoise`)).toBe("unknown");
+    for (const bad of ["", `${p}TICKS=999\nnoise`, "not-a-protocol"]) expect(probeWindowsIdentity(8100, "999", () => bad)).toBe("unknown");
     expect(probeWindowsIdentity(8100, "999", () => { throw new Error("access denied"); })).toBe("unknown");
-    expect(probeWindowsIdentity(8100, "not-a-tick", () => `${p}TICKS=999`)).toBe("unknown");
     expect(readWindowsIdentity(8100, () => `${p}ABSENT`)).toEqual({ kind: "absent" });
-  });
-  test("受控 stderr：已知形状保留，形状不识别只记字节数（不泄露文本）", () => {
     const { summary: kept, droppedBytes } = summarizeTaskkillStderr(`${liveSampleStderr}\r\nunshaped-line-with=secret`);
     expect(kept).toContain("ERROR: The process with PID 8744");
     expect(kept).not.toContain("secret");
