@@ -304,7 +304,7 @@ console.log("PASS Windows real bridge receives normal/high SSE during one human 
 // 且只有 run.ps1 编译出夹具（ANET_TEST1337_SHIM_DIR 存在）时才加载。
 if (process.env.ANET_TEST1337_SHIM_DIR) {
   const { runStopEffectsScenarios } = await import("./windows-stop-effects.mjs");
-  await runStopEffectsScenarios({ cli, env, project, root, join, spawnSync, readFileSync, writeFileSync });
+  await runStopEffectsScenarios({ cli, env, project, root, join, terminal });
 }
 
 // node-pty's Windows ConPTY helper can retain an internal pipe handle after

@@ -14,7 +14,7 @@ import { spawnSync } from "node:child_process";
 //   B 包装器非零且**不终止**匹配身份                     ⇒ rc≠0 / 记录字节保留 / Hub 请求 0 / 身份仍活
 //   C 仅**新身份协议查询**被返回非法（旧 ownership 预检走真实查询）
 //                                                       ⇒ unverifiable / rc≠0 / 记录保留 / Hub 请求 0
-export async function runStopEffectsScenarios({ cli, env, project, root, join }) {
+export async function runStopEffectsScenarios({ cli, env, project, root, join, terminal }) {
   const shimDir = process.env.ANET_TEST1337_SHIM_DIR;
   const realHubPort = 19351;
   const proxyPort = 19352;
@@ -39,13 +39,13 @@ export async function runStopEffectsScenarios({ cli, env, project, root, join })
   const probeTicks = (pid) => spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
     `[Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks.ToString()`], { encoding: "utf8" }).stdout.trim();
 
-  /** 用给定夹具模式跑一次**真实** `node stop`，返回 rc（不抛）。 */
-  function stopWithShim(tkMode, psMode) {
+  /** 用给定夹具模式跑一次**真实** `node stop`，返回 rc（不抛）。start 复用现有 **PTY** 助手。 */
+  async function stopWithShim(tkMode, psMode) {
     writeFileSync(psLog, "");
     writeFileSync(tkLog, "");
     rmSync(shimRecord, { force: true });
-    const started = spawnSync(bun, [cli, "node", "start", shimNode, "--no-inherit-codex-home"], { cwd: project, env, encoding: "utf8", timeout: 90_000 });
-    if (started.status !== 0 || !existsSync(shimRecord)) throw new Error(`test1337 ${tkMode}/${psMode}: shim node did not start (rc=${started.status})\n${started.stdout}${started.stderr}`);
+    const startedOut = await terminal(["node", "start", shimNode, "--no-inherit-codex-home"], undefined, 90_000);
+    if (!existsSync(shimRecord)) throw new Error(`test1337 ${tkMode}/${psMode}: shim node did not start\n${startedOut}`);
     const before = readFileSync(shimRecord);
     const identities = JSON.parse(before.toString()).processes;
     hubRequests.length = 0;
@@ -80,7 +80,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, join })
 
   // A —— 真实终止完成但包装器非零 ⇒ rc0 / 记录删除 / Hub 离线请求被观测
   {
-    const r = stopWithShim("delegate-nonzero", "delegate");
+    const r = await stopWithShim("delegate-nonzero", "delegate");
     if (r.rc !== 0) throw new Error(`test1337 A: expected rc0, got ${r.rc}\n${r.out}`);
     if (existsSync(shimRecord)) throw new Error("test1337 A: record should be deleted after a settled stop");
     if (callLog(tkLog).trim() === "") throw new Error("test1337 A: taskkill wrapper never hit (no call log)");
@@ -90,7 +90,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, join })
 
   // B —— 包装器非零且**不终止**匹配身份 ⇒ rc≠0 / 记录字节保留 / Hub 请求 0 / 真实身份仍活
   {
-    const r = stopWithShim("nonzero-noop", "delegate");
+    const r = await stopWithShim("nonzero-noop", "delegate");
     if (r.rc === 0) throw new Error(`test1337 B: expected non-zero rc, got 0\n${r.out}`);
     if (!existsSync(shimRecord)) throw new Error("test1337 B: record must be retained");
     if (!readFileSync(shimRecord).equals(r.before)) throw new Error("test1337 B: record bytes changed");
@@ -103,7 +103,7 @@ export async function runStopEffectsScenarios({ cli, env, project, root, join })
 
   // C —— 仅**新身份协议查询**被挡；旧 ownership 预检走真实查询 ⇒ unverifiable / rc≠0 / 记录保留 / Hub 0
   {
-    const r = stopWithShim("delegate", "illegal-identity");
+    const r = await stopWithShim("delegate", "illegal-identity");
     if (r.rc === 0) throw new Error(`test1337 C: expected non-zero rc, got 0\n${r.out}`);
     if (!existsSync(shimRecord)) throw new Error("test1337 C: record must be retained");
     if (r.requests.length !== 0) throw new Error(`test1337 C: Hub requests must be 0, saw ${JSON.stringify(r.requests)}`);
