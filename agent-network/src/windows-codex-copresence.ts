@@ -480,8 +480,6 @@ export function orchestrateWindowsManagedStop(
 ): WindowsStopOrchestration {
   const runPowerShell = deps.runPowerShell;
   const runTaskkill = deps.runTaskkill ?? runTaskkillWindowsProcessTree;
-  const runPowerShellOrThrow = (rootPid: number): string =>
-    (runPowerShell ?? defaultPowerShellRunner)(windowsTreeReconciliationScript(rootPid));
   const identities: WindowsManagedIdentity[] = [...roots];
   const gaps: string[] = [];
   const notes: string[] = [];
