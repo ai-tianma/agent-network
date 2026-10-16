@@ -179,6 +179,30 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
   const callLog = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
 
   try {
+    // 🔴 **反例拒绝自检**（通信牛要求"使错误样本被拒绝"）：直接向代理投递两条 `tools/call report_status
+    //    offline` —— ① 非目标节点 ② 目标节点；要求 ① **不入账**、② 入账。这样"无关节点 offline 凑数"
+    //    这条错误样本会被当场拒绝，而不是等到 A 场景跑偏才发现。
+    {
+      const postMcp = (payload) => new Promise((resolve) => {
+        const body = JSON.stringify(payload);
+        const r = httpRequest({ host: "127.0.0.1", port: proxyPort, path: "/mcp", method: "POST",
+          headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } },
+          (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); });
+        r.on("error", () => resolve(null));
+        r.end(body);
+      });
+      computeExpectedTarget();
+      offlineNotifications.length = 0;
+      await postMcp({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "report_status", arguments: { resume_id: "sdk-someone-else", alias: "other-node", status: "offline" } } });
+      if (offlineNotifications.length !== 0) throw new Error(`test1337 self-check: unrelated-node offline was counted (${offlineNotifications.length})`);
+      await postMcp({ jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "report_status", arguments: { resume_id: expected.resumeId, alias: expected.alias, status: "offline" } } });
+      if (offlineNotifications.length !== 1) throw new Error("test1337 self-check: target-node offline was NOT counted");
+      console.log(`PASS test1337 self-check: unrelated-node offline rejected; target-node counted (upstream=${offlineNotifications[0].upstreamStatus})`);
+      offlineNotifications.length = 0;
+    }
+
     // A —— 真实终止完成、包装器返回非零、精确身份均已退出 ⇒ rc0 / 记录删除 / **观测到 offline 通知**
     console.log("PHASE test1337 A: 非零但已完成终止");
     {
