@@ -84,7 +84,12 @@ describe("#1335 停止编排（CLI 共用实现）—— 正负见证", () => {
     expect(stop.verdict.retainedDiagnostics.join("\n")).toContain("pid reused; unrelated process left untouched");
   });
 
-  test("🔴 creation 分支：读回值是**非法 CreationDate** ⇒ 必须 unknown（unverifiable + mustKeepRecord），**不得**当 pid-reused 放行", () => {
+  // 🔴 对照见证 = 评审 6207108427 给出的确定性见证（逐字）：
+  //     capture CAP:RB=999;RA=999;D=8744=2026-10-16T02:41:37.1234560+00:00;G=
+  //     pre-kill IDSTATE:TICKS=999 ; root after IDSTATE:ABSENT ; child after CIMSTATE:CREATED=definitely-not-a-date
+  //     旧实现（`CREATED=(.{8,64})` + 不相等即 pid-reused）⇒ verdict=stopped / mustKeepRecord=false（**误绿**）
+  //     现实现 ⇒ verdict=unverifiable / mustKeepRecord=true（非法值一律 unknown）
+  test("🔴 [评审 6207108427 对照见证] 非法 CreationDate ⇒ unknown（unverifiable + mustKeepRecord），**不得**当 pid-reused 放行", () => {
     const env = scriptedEnv({
       capture: cap(`8744=${DESC_BIRTH}`),
       probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", "CIMSTATE:CREATED=definitely-not-a-date"],
