@@ -1,51 +1,94 @@
 import { readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 // #1337 —— 真实 CLI 停止「失败副作用」隔离见证（**纯测试夹具，无产品钩子**）。
 //
-// 复用**主流程已证明可行**的启动路径（现有 `windows-picker` 节点 + 既有 PTY 助手），
-// 只在 `stop` 那一次调用注入夹具环境（私有 PATH + 具名模式），并用 **loopback 计数代理**
-// 观测**真实的 Hub 请求**：把 Hub 指向切换成代理端口只发生在 `stop` 前后（用后即还原）。
-//
-// 断言的是**真实 CLI** 的 rc / 记录字节 / Hub 请求，而不是编排层布尔。
-//
-//   A 真实终止完成、包装器返回非零、精确身份均已退出 ⇒ rc0 / 记录删除 / Hub 请求被观测
-//   B 包装器非零且**不终止**匹配身份                     ⇒ rc≠0 / 记录字节保留 / Hub 请求 0 / 身份仍活
-//   C 仅**新身份协议查询**被返回非法（旧 ownership 预检走真实查询）
-//                                                       ⇒ unverifiable / rc≠0 / 记录保留 / Hub 请求 0
+// 修订要点（按通信牛 2026-10-16 的清单）：
+//   1) **同进程 `spawnSync` 会阻塞代理事件循环** ⇒ 需要访问代理的 CLI 必须**异步 spawn**，
+//      否则同步等待时本进程的 `createServer` 无法应答（300ms 最小复现：sync ETIMEDOUT／async ok）。
+//   2) **配置**：`notifyServerOffline` 读的是 `profile.hub || gc.hub` ⇒ 只改**该次停止子进程实际会
+//      读到的那份**（node 的 `profile.hub`）；原始字节**存内存**，`finally` 还原，并打印**命中证明**。
+//   3) **精确观测离线请求**：解析 `POST /mcp` 请求体，只计
+//      `method=tools/call` + `params.name=report_status` + `params.arguments.status=offline`
+//      （可按 alias/resume_id 过滤）；不把 `initialize` 或任意 HTTP 请求计入。
+//   4) **超时/信号不得冒充 B/C 的预期非零**：`rc==null` 或 `signal!=null` ⇒ 显式失败。
+//   5) C 必须**真正进入新的 unverifiable 分支**（断言其诊断），不得以旧 ownership 预检失败冒充。
+//   6) 每个场景 `finally` 清理本夹具拥有且**出生身份匹配**的进程并还原配置。
 export async function runStopEffectsScenarios({ cli, env, project, root, userHome, join, terminal }) {
   const shimDir = process.env.ANET_TEST1337_SHIM_DIR;
+  const bun = process.env.ANET_TEST751_BUN;
   const realHubPort = 19351;
   const proxyPort = 19352;
   const proxyHub = `http://127.0.0.1:${proxyPort}`;
   const node = "windows-picker";
   const record = join(project, ".anet", "nodes", node, "windows-copresence.json");
-  const globalConfig = join(userHome, ".anet", "config.json");
   const nodeConfig = join(project, ".anet", "nodes", node, "config.json");
+  const globalConfig = join(userHome, ".anet", "config.json");
   const psLog = join(root, "test1337-ps.log");
   const tkLog = join(root, "test1337-tk.log");
-  const hubRequests = [];
+
+  /** 全部请求（诊断）+ **精确离线通知**计数。 */
+  const requests = [];
+  const offlineNotifications = [];
 
   const proxy = createServer((req, res) => {
-    hubRequests.push(`${req.method} ${req.url}`);
-    const up = httpRequest({ host: "127.0.0.1", port: realHubPort, path: req.url, method: req.method, headers: req.headers }, (r) => {
-      res.writeHead(r.statusCode || 502, r.headers);
-      r.pipe(res);
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      const entry = { method: req.method, url: req.url, body };
+      requests.push(entry);
+      if (req.method === "POST" && req.url === "/mcp") {
+        try {
+          const parsed = JSON.parse(body);
+          const args = parsed?.params?.arguments ?? {};
+          if (parsed?.method === "tools/call" && parsed?.params?.name === "report_status" && args.status === "offline") {
+            offlineNotifications.push({ alias: args.alias ?? null, resumeId: args.resume_id ?? null });
+          }
+        } catch { /* 非 JSON 体不计入 */ }
+      }
+      const up = httpRequest({ host: "127.0.0.1", port: realHubPort, path: req.url, method: req.method, headers: { ...req.headers, host: `127.0.0.1:${realHubPort}` } }, (r) => {
+        res.writeHead(r.statusCode || 502, r.headers);
+        r.pipe(res);
+      });
+      up.on("error", () => { try { res.writeHead(502); res.end(); } catch {} });
+      up.end(body);
     });
-    up.on("error", () => { try { res.writeHead(502); res.end(); } catch {} });
-    req.pipe(up);
   });
   await new Promise((r) => proxy.listen(proxyPort, "127.0.0.1", r));
-
-  const readJson = (p) => JSON.parse(readFileSync(p, "utf8"));
-  const setHub = (p, hub) => { if (!existsSync(p)) return; const c = readJson(p); const prev = c.hub; c.hub = hub; writeFileSync(p, JSON.stringify(c)); c.__prev = prev; };
-  const restoreHub = (p) => { if (!existsSync(p)) return; const c = readJson(p); if (c.__prev !== undefined) { c.hub = c.__prev; delete c.__prev; writeFileSync(p, JSON.stringify(c)); } };
 
   const probeTicks = (pid) => spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
     `[Diagnostics.Process]::GetProcessById(${pid}).StartTime.ToUniversalTime().Ticks.ToString()`], { encoding: "utf8" }).stdout.trim();
 
-  /** 用主流程同款方式把节点跑到「有记录」的状态；返回身份与记录字节。 */
+  /** 🔴 异步跑 CLI：绝不在需要代理应答时用 spawnSync（会阻塞本进程事件循环 ⇒ 代理死锁）。 */
+  function runCli(args, runEnv, timeoutMs) {
+    return new Promise((resolve) => {
+      const child = spawn(bun, [cli, ...args], { cwd: project, env: runEnv });
+      let out = "";
+      let timedOut = false;
+      child.stdout.on("data", (d) => { out += d; });
+      child.stderr.on("data", (d) => { out += d; });
+      const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer);
+        resolve({ rc: code, signal, out, timedOut });
+      });
+    });
+  }
+
+  /** 只改**该次停止会读到**的 `profile.hub`；原始字节存内存，`finally` 还原。 */
+  const hubPatch = { path: nodeConfig, original: null };
+  const patchProfileHub = () => {
+    hubPatch.original = readFileSync(nodeConfig);          // 原始字节
+    const cfg = JSON.parse(hubPatch.original.toString());
+    cfg.profile = { ...(cfg.profile ?? {}), hub: proxyHub };
+    writeFileSync(nodeConfig, JSON.stringify(cfg, null, 2));
+    console.log(`PHASE test1337: patched profile.hub -> ${proxyHub} (${nodeConfig})`);
+  };
+  const restoreProfileHub = () => {
+    if (hubPatch.original !== null) { writeFileSync(nodeConfig, hubPatch.original); hubPatch.original = null; }
+  };
+
   async function startNode(label) {
     rmSync(record, { force: true });
     const out = await terminal(["node", "start", node, "--no-inherit-codex-home"], undefined, 120_000);
@@ -54,10 +97,19 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
     return { bytes, identities: JSON.parse(bytes.toString()).processes };
   }
 
-  /** 只在 stop 那一次注入夹具环境；Hub 指向临时切到代理用于计数。 */
-  function shimmedStop(tkMode, psMode) {
+  const cleanup = (identities) => {
+    for (const p of identities || []) {
+      try { if (probeTicks(p.pid) === p.creationDate) spawnSync("taskkill.exe", ["/PID", String(p.pid), "/T", "/F"], { encoding: "utf8" }); } catch {}
+    }
+    rmSync(record, { force: true });
+  };
+
+  /** 跑一次「夹具化的真实 stop」；超时/信号 ⇒ 抛错（不得被当作预期非零）。 */
+  async function shimmedStop(label, tkMode, psMode) {
     writeFileSync(psLog, "");
     writeFileSync(tkLog, "");
+    requests.length = 0;
+    offlineNotifications.length = 0;
     const stopEnv = {
       ...env,
       PATH: `${shimDir};${env.PATH}`,
@@ -68,71 +120,80 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
       ANET_TEST1337_REAL_POWERSHELL: process.env.ANET_TEST1337_REAL_POWERSHELL,
       ANET_TEST1337_REAL_TASKKILL: process.env.ANET_TEST1337_REAL_TASKKILL,
     };
-    // ⚠️ 已知障碍（如实保留，不静默降级）：把 CLI 的 hub 指到本 loopback 代理会让 `stop`
-    //    **挂起超时（rc=null）** —— 该 CLI 的 hub 流量不是朴素 HTTP 反代可透明承载的形状
-    //    （疑为 WS/SSE 升级或长连）。因此这里**只**切 global config 作计数尝试；
-    //    若计数仍为 0 即打印明确失败信息，而不是把"没观测到"当成"没有请求"。
-    setHub(globalConfig, proxyHub);
-    hubRequests.length = 0;
+    patchProfileHub();
     try {
-      const res = spawnSync(process.env.ANET_TEST751_BUN, [cli, "node", "stop", node], { cwd: project, env: stopEnv, encoding: "utf8", timeout: 120_000 });
-      return { rc: res.status, out: (res.stdout || "") + (res.stderr || ""), requests: [...hubRequests] };
+      const res = await runCli(["node", "stop", node], stopEnv, 120_000);
+      if (res.timedOut || res.signal) {
+        throw new Error(`test1337 ${label}: CLI did not exit within budget (timedOut=${res.timedOut} signal=${res.signal}) — 不得当作预期非零\n${res.out}`);
+      }
+      return { rc: res.rc, out: res.out, offline: [...offlineNotifications], requests: requests.map((r) => `${r.method} ${r.url}`) };
     } finally {
-      restoreHub(globalConfig);
-      restoreHub(nodeConfig);
+      restoreProfileHub();
     }
   }
 
-  const cleanup = (identities) => {
-    for (const p of identities || []) {
-      try { if (probeTicks(p.pid) === p.creationDate) spawnSync("taskkill.exe", ["/PID", String(p.pid), "/T", "/F"], { encoding: "utf8" }); } catch {}
-    }
-    rmSync(record, { force: true });
-  };
-
-  /** 观测运行期日志（不是编辑仓库源码证明见证红的变异）。 */
   const callLog = (p) => { try { return readFileSync(p, "utf8"); } catch { return ""; } };
 
-  console.log("PHASE test1337 A: taskkill 非零但已完成终止");
-  {
-    const s = await startNode("A");
-    const r = shimmedStop("delegate-nonzero", "delegate");
-    if (r.rc !== 0) throw new Error(`test1337 A: expected rc0, got ${r.rc}\n${r.out}`);
-    if (existsSync(record)) throw new Error("test1337 A: record should be deleted after a settled stop");
-    if (callLog(tkLog).trim() === "") throw new Error("test1337 A: taskkill wrapper never hit (no call log)");
-    if (r.requests.length === 0) throw new Error("test1337 A: no Hub request observed through the counting proxy");
-    console.log(`PASS test1337 A: rc0, record removed, hub requests=${r.requests.length}`);
-  }
+  try {
+    // A —— 真实终止完成、包装器返回非零、精确身份均已退出 ⇒ rc0 / 记录删除 / **观测到 offline 通知**
+    console.log("PHASE test1337 A: 非零但已完成终止");
+    {
+      const s = await startNode("A");
+      try {
+        const r = await shimmedStop("A", "delegate-nonzero", "delegate");
+        if (r.rc !== 0) throw new Error(`test1337 A: expected rc0, got ${r.rc}\n${r.out}`);
+        if (existsSync(record)) throw new Error("test1337 A: record should be deleted after a settled stop");
+        if (callLog(tkLog).trim() === "") throw new Error("test1337 A: taskkill wrapper never hit (no call log)");
+        if (r.offline.length === 0) {
+          throw new Error(`test1337 A: no report_status(offline) observed through the proxy; saw ${JSON.stringify(r.requests.slice(0, 8))}`);
+        }
+        console.log(`PASS test1337 A: rc0, record removed, offline notifications=${r.offline.length} (alias=${r.offline[0]?.alias})`);
+      } finally { cleanup(s.identities); }
+    }
 
-  console.log("PHASE test1337 B: taskkill 非零且未终止");
-  {
-    const s = await startNode("B");
-    const r = shimmedStop("nonzero-noop", "delegate");
-    if (r.rc === 0) throw new Error(`test1337 B: expected non-zero rc, got 0\n${r.out}`);
-    if (!existsSync(record)) throw new Error("test1337 B: record must be retained");
-    if (!readFileSync(record).equals(s.bytes)) throw new Error("test1337 B: record bytes changed");
-    if (r.requests.length !== 0) throw new Error(`test1337 B: Hub requests must be 0, saw ${JSON.stringify(r.requests)}`);
-    const alive = s.identities.filter((p) => { try { return probeTicks(p.pid) === p.creationDate; } catch { return false; } });
-    if (alive.length === 0) throw new Error("test1337 B: expected the real managed identities to still be alive");
-    cleanup(s.identities);
-    console.log(`PASS test1337 B: rc=${r.rc}, record retained, hub requests=0, alive=${alive.length}`);
-  }
+    // B —— 包装器非零且**不终止**匹配身份 ⇒ rc非0 / 记录字节保留 / **offline 计数 0** / 真实身份仍活
+    console.log("PHASE test1337 B: 非零且未终止");
+    {
+      const s = await startNode("B");
+      try {
+        const r = await shimmedStop("B", "nonzero-noop", "delegate");
+        if (r.rc === 0) throw new Error(`test1337 B: expected non-zero rc, got 0\n${r.out}`);
+        if (!existsSync(record)) throw new Error("test1337 B: record must be retained");
+        if (!readFileSync(record).equals(s.bytes)) throw new Error("test1337 B: record bytes changed");
+        if (r.offline.length !== 0) throw new Error(`test1337 B: report_status(offline) must be 0, saw ${JSON.stringify(r.offline)}`);
+        const alive = s.identities.filter((p) => { try { return probeTicks(p.pid) === p.creationDate; } catch { return false; } });
+        if (alive.length === 0) throw new Error("test1337 B: expected the real managed identities to still be alive");
+        console.log(`PASS test1337 B: rc=${r.rc}, record retained, offline=0, alive=${alive.length}`);
+      } finally { cleanup(s.identities); }
+    }
 
-  console.log("PHASE test1337 C: 仅新身份协议查询被挡");
-  {
-    const s = await startNode("C");
-    const r = shimmedStop("delegate", "illegal-identity");
-    if (r.rc === 0) throw new Error(`test1337 C: expected non-zero rc, got 0\n${r.out}`);
-    if (!existsSync(record)) throw new Error("test1337 C: record must be retained");
-    if (r.requests.length !== 0) throw new Error(`test1337 C: Hub requests must be 0, saw ${JSON.stringify(r.requests)}`);
-    const log = callLog(psLog);
-    if (log.trim() === "") throw new Error("test1337 C: powershell wrapper never hit (no call log)");
-    if (!/illegal-identity\t.*GetProcessById/.test(log)) throw new Error("test1337 C: ownership pre-check did not go through the wrapper (must be a real query)");
-    if (!/illegal-identity\t.*CIMSTATE:/.test(log)) throw new Error("test1337 C: new identity protocol query was not exercised");
-    cleanup(s.identities);
-    console.log(`PASS test1337 C: rc=${r.rc}, record retained, hub requests=0, illegal-identity only on the new protocol`);
-  }
+    // C —— 仅**新身份协议查询**被挡（旧 ownership 预检走真实查询）⇒ 真正进入 unverifiable / rc非0 / 记录保留 / offline 0
+    console.log("PHASE test1337 C: 仅新身份协议查询被挡");
+    {
+      const s = await startNode("C");
+      try {
+        const r = await shimmedStop("C", "delegate", "illegal-identity");
+        if (r.rc === 0) throw new Error(`test1337 C: expected non-zero rc, got 0\n${r.out}`);
+        if (!existsSync(record)) throw new Error("test1337 C: record must be retained");
+        if (r.offline.length !== 0) throw new Error(`test1337 C: report_status(offline) must be 0, saw ${JSON.stringify(r.offline)}`);
+        const log = callLog(psLog);
+        if (log.trim() === "") throw new Error("test1337 C: powershell wrapper never hit (no call log)");
+        if (!/illegal-identity\t.*GetProcessById/.test(log)) throw new Error("test1337 C: ownership pre-check did not go through the wrapper (must be a real query)");
+        if (!/illegal-identity\t.*CIMSTATE:/.test(log)) throw new Error("test1337 C: new identity protocol query was not exercised");
+        // 🔴 必须**真正**走到新的 unverifiable 分支，而不是更早的 ownership 预检失败/无关异常冒充。
+        if (!r.out.includes("could not prove Windows managed identity exited")) {
+          throw new Error(`test1337 C: did not reach the new unverifiable branch\n${r.out}`);
+        }
+        if (r.out.includes("STOP_TIMEOUT: Windows ownership could not be proven")) {
+          throw new Error(`test1337 C: an earlier ownership pre-check failure masqueraded as this scenario\n${r.out}`);
+        }
+        console.log(`PASS test1337 C: rc=${r.rc}, record retained, offline=0, reached unverifiable`);
+      } finally { cleanup(s.identities); }
+    }
 
-  await new Promise((r) => proxy.close(r));
-  console.log("PASS test1337 real-CLI stop side-effect fixture (A/B/C)");
+    console.log("PASS test1337 real-CLI stop side-effect fixture (A/B/C)");
+  } finally {
+    restoreProfileHub();
+    await new Promise((r) => proxy.close(r));
+  }
 }
