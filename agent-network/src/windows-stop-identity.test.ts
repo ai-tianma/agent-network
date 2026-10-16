@@ -179,6 +179,30 @@ describe("#1335 取证：后代出生身份必须来自**同一份枚举快照**
 });
 
 describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据替身）", () => {
+  test("creation 协议边界：非法秒/偏移/日期在共享编排中保持 unknown", () => {
+    for (const bad of [
+      "2026-10-16T02:41:60.1234560+00:00", "2026-10-16T02:41:37.1234560+99:99",
+      "2026-10-16T02:41:37.1234560+14:01", "2026-10-16T02:41:37.123456+00:00",
+      "2026-02-30T02:41:37.1234560+00:00",
+    ]) {
+      const env = scriptedEnv({ capture: cap(`8744=${DESC_BIRTH}`),
+        probes: ["IDSTATE:TICKS=999", "IDSTATE:ABSENT", `CIMSTATE:CREATED=${bad}`] });
+      const stop = orchestrateWindowsManagedStop([root], env);
+      expect(stop.verdict.kind).toBe("unverifiable");
+      expect(stop.mustKeepRecord).toBe(true);
+    }
+  });
+
+  test("round-trip 格式均可精确往返，最后一位小数也不可丢失", () => {
+    for (const birth of [DESC_BIRTH, "2024-02-29T01:02:03.1234567Z", "2024-02-29T01:02:03.1234567"]) {
+      expect(probeWindowsIdentity(8744, birth, () => `CIMSTATE:CREATED=${birth}`, "creation")).toBe("alive");
+    }
+    const oneTickLater = DESC_BIRTH.replace("1234560", "1234561");
+    expect(probeWindowsIdentity(8744, DESC_BIRTH, () => `CIMSTATE:CREATED=${oneTickLater}`, "creation")).toBe("pid-reused");
+    expect(probeWindowsIdentity(8744, "not-a-date", () => "CIMSTATE:ABSENT", "creation")).toBe("unknown");
+    expect(isCompleteCimCreationDate(DESC_BIRTH + "\n")).toBe(false);
+  });
+
   const p = "IDSTATE:";
   test("双协议各自精确相等：ticks（根）/ CIM CreationDate（后代）；缺省/非法一律 unknown", () => {
     expect(probeWindowsIdentity(8100, "999", () => `${p}ABSENT`)).toBe("gone");
@@ -207,7 +231,7 @@ describe("#1335 身份协议与受控诊断（纯函数，非 CLI/原生证据�
   });
 });
 
-describe("#1335 停止收尾门控：**实际观测**「记录仍在／未调用 stopNode」（spy，非布尔）\n// ⚠️ Hub 离线通知（`notifyServerOffline`）**不在**本门控内，本片仍记为**欠项（未验）**。", () => {
+describe("#1335 记录清理／本地节点停止回调门控（spy；真实文件／Hub 请求未验）", () => {
   const orchestrationWith = (kind: "stopped" | "survived" | "unverifiable"): WindowsStopOrchestration => ({
     verdict: kind === "stopped"
       ? { kind: "stopped", retainedDiagnostics: [] }
@@ -225,7 +249,7 @@ describe("#1335 停止收尾门控：**实际观测**「记录仍在／未调用
         stopNode: async () => { calls.push("stopNode"); return "stopped"; },
       });
       expect(calls).toEqual([]);
-      expect(settle).toEqual({ kept: true, nodeStopped: false });
+      expect(settle).toEqual({ kept: true, nodeStopInvoked: false });
     }
   });
 
@@ -237,7 +261,7 @@ describe("#1335 停止收尾门控：**实际观测**「记录仍在／未调用
     });
     expect(calls).toEqual(["removeRecord", "stopNode"]);
     expect(settle.kept).toBe(false);
-    expect(settle.nodeStopped).toBe(true);
+    expect(settle.nodeStopInvoked).toBe(true);
     expect(settle.stopResult).toEqual({ status: "stopped", pid: 8100 });
   });
 

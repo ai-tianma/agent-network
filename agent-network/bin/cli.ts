@@ -13132,7 +13132,7 @@ async function stopResolvedNode(resolved: { id: string; profile: Profile }, stop
         console.error(`[anet] STOP_TIMEOUT: could not prove Windows managed identity exited: ${stop.verdict.unknown.join(", ")}`);
         process.exit(1);
       }
-      // 🔴 副作用由共享 settle 门控：只有 stopped 才删记录并通知离线；两种失败都不删、不通知。
+      // settle 门控记录删除与本地节点停止；Hub 通知仍须下方 pidResult 检查通过。
       const settle = await settleWindowsManagedStop(stop, {
         removeRecord: () => rmSync(windowsCopresenceRecordPath(nodesDir(), resolved.id), { force: true }),
         stopNode: () => stopNode(resolved.id),

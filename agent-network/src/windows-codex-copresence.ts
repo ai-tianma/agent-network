@@ -413,20 +413,21 @@ export function cimIdentityProbeScript(pid: number): string {
   ].join(";");
 }
 
-const CIM_CREATION_SHAPE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{7})[+-]\d{2}:\d{2}$/;
+// .NET round-trip "o": seven fraction digits, followed by local offset, Z, or no zone.
+// https://learn.microsoft.com/en-us/dotnet/standard/base-types/standard-date-and-time-format-strings#the-round-trip-o-o-format-specifier
+const CIM_CREATION_SHAPE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{7}(?:Z|([+-])(\d{2}):(\d{2}))?$/;
 
-/**
- * 本协议下**合法且完整**的 `CreationDate`（`ToString('o')` 形态，含 7 位小数与偏移）。
- * 🔴 非法格式/非法日期一律 **false** ⇒ 调用方必须判 unknown，**不得**当"已退出"或"被复用"。
- */
+/** Validate the complete text without rounding the identity's fractional digits. */
 export function isCompleteCimCreationDate(value: string): boolean {
-  const matched = CIM_CREATION_SHAPE.exec(String(value ?? ""));
-  if (!matched) return false;
-  const [, year, month, day, hour, minute, second] = matched;
-  const y = Number(year), mo = Number(month), d = Number(day), h = Number(hour), mi = Number(minute), se = Number(second);
-  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60) return false;
-  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
-  return y >= 1601 && d <= daysInMonth;
+  const m = CIM_CREATION_SHAPE.exec(value);
+  if (!m || m[0] !== value) return false;
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
+  if (year < 1601 || month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (day < 1 || day > days[month - 1]) return false;
+  if (m[7] && (Number(m[8]) > 14 || Number(m[9]) > 59 || (m[8] === "14" && m[9] !== "00"))) return false;
+  return true;
 }
 
 /**
@@ -515,7 +516,7 @@ export interface WindowsStopContinuation<TStopResult> {
 
 /**
  * 🔴 停止收尾的**唯一门控**（CLI 与见证共用）：只有 `stopped` 才删记录、才调用 `stopNode`；
- * `survived`/`unverifiable` 两者都不做，并把 `{kept, nodeStopped, stopResult?}` 如实回报，
+ * `survived`/`unverifiable` 两者都不做；nodeStopInvoked 只表示回调被调用，停止成功与否仍由 stopResult 裁决。
  * 便于用 spy 观测**实际发生了什么调用**（而不是只看一个布尔）。
  *
  * ⚠️ **不含 Hub 离线通知**：真正的 `notifyServerOffline` 在 `stopNode` 之后、由 CLI 自行调用，
@@ -524,11 +525,11 @@ export interface WindowsStopContinuation<TStopResult> {
 export async function settleWindowsManagedStop<TStopResult>(
   outcome: WindowsStopOrchestration,
   continuation: WindowsStopContinuation<TStopResult>,
-): Promise<{ kept: boolean; nodeStopped: boolean; stopResult?: TStopResult }> {
-  if (outcome.verdict.kind !== "stopped") return { kept: true, nodeStopped: false };
+): Promise<{ kept: boolean; nodeStopInvoked: boolean; stopResult?: TStopResult }> {
+  if (outcome.verdict.kind !== "stopped") return { kept: true, nodeStopInvoked: false };
   continuation.removeRecord();
   const stopResult = await continuation.stopNode();
-  return { kept: false, nodeStopped: true, stopResult };
+  return { kept: false, nodeStopInvoked: true, stopResult };
 }
 
 export type WindowsStopVerdict =
