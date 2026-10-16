@@ -220,13 +220,10 @@ export async function runStopEffectsScenarios({ cli, env, project, root, userHom
         if (r.offline.length === 0) {
           throw new Error(`test1337 A: no report_status(offline) for the target node through the proxy; saw ${JSON.stringify(r.requests.slice(0, 8))}`);
         }
-        // 🔴 上游**必须确实响应过**（记录到状态码；证明请求真的到达并往返），但**不**要求 2xx：
-        //    实测该 head 上目标节点的 notify 被上游回 **406**——产品 `notifyServerOffline` 只发
-        //    `Accept: application/json`，而 MCP StreamableHTTP 要求同时含 `text/event-stream`
-        //    （对照 `agent-network/src/client.ts:85`）。这是**产品侧事实**，本片不改产品；
-        //    因此这里只断言"到达上游且上游有响应"，并把状态码打进诊断，交由通信牛裁定是否算接收成功。
+        // 🔴 A 的验收：上游必须 **200 ≤ status < 300**，并**解析 MCP 响应**确认精确 alias/resume_id 的
+        //    `report_status` 处理成功（不只看状态码）。修前的 406 属历史事实：由 #1344/PR2800 修好
+        //    `notifyServerOffline` 两次 POST 的 Accept 后，main `facabc628532` 起上游回 2xx。
         const status = r.offline[0].upstreamStatus;
-        // 🔴 严格：上游必须 **2xx**（#1344 已修产品 Accept ⇒ 406 不应再出现）。
         if (typeof status !== "number" || status < 200 || status >= 300) {
           throw new Error(`test1337 A: upstream did not accept the notification (status=${status})`);
         }
