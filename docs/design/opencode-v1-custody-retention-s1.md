@@ -50,9 +50,9 @@ be written into it.
 
 Explicitly **not** stored: credentials, tokens, passwords, provider keys, model session
 content, message bodies. Digests and `{dev, ino}` only. **Credential boundary (unchanged):
-retention must never hand real auth to a target, must never be disabled in order to keep a
-DB, and an empty `auth.json` is not evidence that a root holds no secrets**; credential
-cleanup stays on its own path (§11).
+credential cleanup must never be disabled in order to retain the DB, retention must never
+hand real auth to a target, and an empty `auth.json` is not evidence that a root holds no
+secrets**; credential cleanup stays on its own path (§11).
 
 ### 2.2 Persistent structures (all outside the root being cleaned)
 
@@ -81,7 +81,7 @@ evaluates the following **in order**; the first matching row wins:
 | 1 | consistency/qualification unknown (unreadable, `schema-newer`, `chain-broken`, `mixed`, `fs-identity-drift`) | `retain` + refuse |
 | 2 | **this actor already holds a valid cleanup reservation** for this allocation | Continue **only** that authorized action; refuse any new prepare (`cleanup-reserved`) |
 | 3 | a **current, complete, confirmed `released` record**, #1239 gate satisfied, **exact root/fence/allocation match** | Establish the retained-root **cleanup reservation** (`authorizedAction: released-cleanup`) — the release cleanup proceeds |
-| 4 | any other state: a fence, an intent without a qualified release, or active custody (`prepare-requested`/`prepared`/`retain-pending`/`retained-ready`/`handed-off`) | `retain` + refuse |
+| 4 | any other state: a fence, an intent without a qualified release, or active custody (`prepared`/`retain-pending`/`retained-ready`/`handed-off`) | `retain` + refuse |
 | 5 | affirmative **non-participation proof** (`nonParticipation: true` for this exact allocation/root generation) **and no participation history** | `ordinary-cleanup` reservation |
 | 6 | otherwise | `refuse(...)` |
 
@@ -109,10 +109,12 @@ Rules that replace the conflicting sentences of revisions 1–4:
 
 - **Serialization**: every phase holds `lock`. **CAS compares the current complete record
   digest** (the `digest` of `current`'s target file), not just the revision number.
-- **CAS initial values**: `revision=0` means the *absence* of a record (`current` missing).
-  The first durable commit is `revision=1` with `prevRecordDigest=null`. A persisted
-  `prepare-requested` **occupies no revision** — only a committed record consumes one — so a
-  prepare retry after a fence-only crash still commits `revision=1`, `prevRecordDigest=null`.
+- **CAS initial values**: `revision=0` means the *absence* of a record (`current` missing),
+  and it applies **only to an initial allocation proven to have no committed history**. A
+  lost `current`, or any evidence of prior history, must **not** restart at `revision=1` —
+  that is `unknown` ⇒ retain + refuse. `prepare-requested` is **not** a committed Record
+  state (§5, §6): it is the **fence**-represented preparation stage, so it occupies no
+  revision; the first Record is `prepared` with `revision=1`, `prevRecordDigest=null`.
 - **Publish protocol** — each step includes the durability of the *new directory entry*:
   1. record temp → `fsync` file → `rename` → `records/<revision>-<digest>.json` → **`fsync`
      `records/`**;
@@ -164,7 +166,7 @@ only** — it never impersonates an actor to make a *new* commit.
 | `fence/<allocationId>.json` | the **coordinator generation** of this allocation | any other writer ⇒ `refuse(unqualified-participant)`, nothing written |
 | `records/…` + `current` | **the named authorizer of the transition** (§6) — the coordinator for `prepared`/`retained-ready`, the **named target** for `handed-off`, the **current holder** for `released` | CAS on the complete current digest under `lock`; a loser re-reads. A legitimate target/holder is **not** blocked by the coordinator row |
 | `confirmation/…`, `receipts/…` | the same authorizer, or the named recovery authority | only for the **same** `(revision, digest)` |
-| `prepare-requested`/`prepared`/`retained-ready` | the coordinator whose generation matches | nobody else may write these states |
+| `prepared`/`retained-ready` | the coordinator whose generation matches | nobody else may write these states |
 | `retain-pending` (from `prepared`) | the coordinator, or the named recovery authority | never overwrites another record's custody |
 | `handed-off` | the **named target**, CAS against the coordinator's revision | the source record is kept; a losing target re-reads |
 | `released` | the current **holder** (coordinator or target), with `ReleaseEvidence` + #1239 | never producible by a reader; **terminal** |
@@ -179,8 +181,11 @@ type GenRef = { pid: number; startTicks: string; uid: number; exeDigest: string 
 type FsId   = { dev: string; ino: string };                 // exact filesystem identity
 type ParticipantIdentity = { kind: "node" | "user" | "recovery-authority"; id: string };
 
-type CustodyState = "observed" | "prepare-requested" | "prepared" | "retain-pending"
-                  | "retained-ready" | "handed-off" | "released";
+type CustodyState = "prepared" | "retain-pending" | "retained-ready"
+                  | "handed-off" | "released";
+// Committed Record states only. `observed` is the pre-record read-only observation and
+// `prepare-requested` is the **fence**-represented preparation stage — a Record never
+// carries either, and neither consumes a revision (§4, §6).
 
 // The native child having exited is ONE fact; it is never an exclusion proof.
 type NativeExit = { pid: number; startTicks: string; observedAt: string; ref: string };
@@ -244,10 +249,13 @@ Requirements that make the barrier usable:
 
 `observed` → `prepare-requested` → `prepared` → (`retain-pending` | `retained-ready`) →
 `handed-off` → `released`; plus the terminal decision `refused` (returned, not written).
+The first two steps are **pre-record staging**: `observed` is read-only observation, and
+`prepare-requested` is represented by the durable **fence** — the **first Record is
+`prepared` at `revision=1`**.
 
 | From → To | Executor | Precondition (exact evidence consumed) | Idempotency / concurrency | Crash |
 |---|---|---|---|---|
-| `observed` → `prepare-requested` | coordinator | identity group of §2.1 complete; **both coordinates present** with their `{dev, ino}` (absent inodes do not qualify); §7 audit passed | replay yields the same digest; concurrent prepares conflict on the lock | nothing durable ⇒ back to `observed` |
+| `observed` → `prepare-requested` (**staging**, no Record) | coordinator | identity group of §2.1 complete; **both coordinates present** with their `{dev, ino}` (absent inodes do not qualify); §7 audit passed | replay yields the same digest; concurrent prepares conflict on the lock | the only durable effect is the **fence**; no Record is written and **no revision is consumed** |
 | `prepare-requested` → `prepared` | coordinator | durable commit per §4 with `revision=1`, `prevRecordDigest=null` | second writer loses the compare; identical replay is a no-op | torn write ⇒ `unknown` ⇒ retain + refuse |
 | `prepared` → `retained-ready` | coordinator (generation must still match) | a `QualifiedOutcome` whose `coordinator` == the record's generation, with `nativeExit` **and** a separate `CohortAdmissionBarrier` held through the retention window (a native exit alone is **not** exclusion), plus `credentialDisposition`; any re-read of `{dev, ino}` that differs ⇒ refuse | duplicate outcomes collapse to one revision | re-read failure ⇒ `refused` |
 | `prepared` → `retain-pending` | coordinator, or the named recovery authority | native child no longer matches its generation **and** no qualified outcome exists | idempotent (pessimistic) | this *is* the crash path |
@@ -372,8 +380,9 @@ Worked examples.
   was never re-persisted, and is not allowed.
 - **(−) profile/credential refusal.** A `borrowed`/`unsafe` profile, an old/unmatched
   source, or a mixed-unknown participant set ⇒ **refuse at prepare**. Retention never hands
-  real auth to a target, is never disabled to keep a DB, and an empty `auth.json` never
-  proves a root is secret-free ⇒ credential cleanup keeps running on its own path.
+  real auth to a target, **credential cleanup is never disabled in order to retain the DB**,
+  and an empty `auth.json` never proves a root is secret-free ⇒ credential cleanup keeps
+  running on its own path.
 
 ## 12. Acceptance plan for the next slice (not executed here)
 
