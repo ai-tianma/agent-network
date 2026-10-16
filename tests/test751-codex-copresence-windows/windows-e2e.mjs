@@ -300,6 +300,13 @@ const managed = JSON.parse(readFileSync(join(project, ".anet", "nodes", "windows
 if (managed.processes.filter((process) => process.role === "bridge").length !== 1) throw new Error("duplicate Windows bridge");
 command(["node", "stop", "windows-picker"]);
 console.log("PASS Windows real bridge receives normal/high SSE during one human turn and steers the same remote/thread/HOME without duplication");
+// #1337 —— 真实 CLI 停止「失败副作用」隔离见证（**纯测试夹具**）：拆到独立模块以便审阅，
+// 且只有 run.ps1 编译出夹具（ANET_TEST1337_SHIM_DIR 存在）时才加载。
+if (process.env.ANET_TEST1337_SHIM_DIR) {
+  const { runStopEffectsScenarios } = await import("./windows-stop-effects.mjs");
+  await runStopEffectsScenarios({ cli, env, project, root, userHome, join, terminal });
+}
+
 // node-pty's Windows ConPTY helper can retain an internal pipe handle after
 // every child has exited. All assertions and both managed teardowns are done.
 process.exit(0);

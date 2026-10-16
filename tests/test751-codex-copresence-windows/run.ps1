@@ -32,6 +32,12 @@ try {
   $env:ANET_TEST751_BUN = (Get-Command bun).Source
   bun test ./agent-node/src/runtime/codex-health.test.ts ./agent-node/src/runtime/windows-tui-health.test.ts 2>&1 | Tee-Object -FilePath $report -Append
   if ($LASTEXITCODE -ne 0) { throw "Codex health regression failed" }
+  # #1337 —— 纯测试夹具：现场确认编译器、编译真实 .exe 包装器并证明命中（失败即抛具体障碍）。
+  & (Join-Path $PSScriptRoot "compile-shims.ps1") 2>&1 | Tee-Object -FilePath $report -Append
+  if ($LASTEXITCODE -ne 0) { throw "test1337 shim compile failed" }
+  $shimEnvFile = Join-Path $env:RUNNER_TEMP "anet-test1337-shim-env.ps1"
+  if (-not (Test-Path $shimEnvFile)) { throw "test1337 BLOCKER: shim env file missing" }
+  . $shimEnvFile
   node ./tests/test751-codex-copresence-windows/windows-e2e.mjs 2>&1 | Tee-Object -FilePath $report -Append
   if ($LASTEXITCODE -ne 0) { throw "Windows native E2E failed" }
 } finally {
