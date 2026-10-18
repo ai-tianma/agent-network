@@ -46,7 +46,8 @@ dsh plugin --profile web add @sleep2agi/dsh-anet
 - 每个任务只回一次 `replied` / `failed`；本地账本保证断线重连、进程重启后不重复回件。
 - 失败会回 `failed` 并带上 DSH 的原文（例如缺模型凭据），发件方能看到原因。
 - SSE 门铃（`/events/<alias>`）+ 60 秒兜底轮询；`report_status` 心跳，`agent` 为 `dsh`。
-- 「消息」类（非任务）收件只确认，不交给 agent；附件暂不支持。
+- 「消息」类（非任务）收件只确认，不交给 agent。
+- 任务里的图片附件会下载并作为 image block 交给 agent（最多 5 张、单张 ≤10MB）；其他类型附件暂不处理。
 - 超过 hub 1 万字上限的回件会截断并附说明。
 
 ## 可选：脚本引导
