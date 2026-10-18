@@ -53,7 +53,7 @@ Configuration lives in `~/.anet/dsh/`: `nodes.json` and `account.json`, both 060
 - SSE doorbell (`/events/<alias>`) plus a 60 s fallback poll; `report_status` heartbeat with
   `agent: "dsh"`.
 - Informational (non-task) inbox messages are only acknowledged.
-- Image attachments on tasks are downloaded and passed to the agent as image blocks (up to 5 images, 10 MB each); other types are not processed yet.
+- Image attachments on tasks are downloaded (up to 5 images, 10 MB each): vision models get them as image blocks, while text-only models (DeepSeek chat-completions) get macOS Vision OCR text instead. Other attachment types are not processed yet.
 - Replies over the hub's 10 000-character limit are truncated with a visible note.
 
 ## Optional: scripted bootstrap
