@@ -142,4 +142,16 @@ describe("recipient-checked channel receipt over real MCP/HTTP, isolated SQLite"
     expect(new Set(events(id).map((e: any) => e.event_key)).size).toBe(2);
     expect((await detail(id)).body.task.consumed_at).toBeNull();
   });
+
+  test("a retried delivery acked by an old bridge cannot revive the prior receipt", async () => {
+    const id = await dispatch();
+    expect((await ack(id)).ok).toBe(true);
+    expect((await detail(id)).body.task.channel_delivery.channel_notification_injected.state).toBe("observed");
+    expect((await mcp(ownerToken, "cancel_task", { task_id: id })).ok).toBe(true);
+    expect((await mcp(ownerToken, "retry_task", { task_id: id })).ok).toBe(true);
+    expect((await mcp(nodeToken, "ack_inbox", { alias, message_id: id })).ok).toBe(true);
+    expect((await detail(id)).body.task.channel_delivery).toBeUndefined();
+    expect(events(id)).toHaveLength(1);
+  });
+
 });

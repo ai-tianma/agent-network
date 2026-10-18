@@ -47,6 +47,8 @@ export function channelDeliveryAt(database: DbAdapter, taskId: string, networkId
           WHERE i.type='task' AND COALESCE(i.task_id,i.id)=e.task_id
             AND e.event_key='channel_notification_injected:' || i.id
             AND ${inboxScope})
+        AND NOT EXISTS (SELECT 1 FROM task_events d
+          WHERE d.task_id=e.task_id AND d.event_type='task.send.delivered' AND d.id>e.id)
       ORDER BY e.id DESC LIMIT 1`,
     ...params,
   );
