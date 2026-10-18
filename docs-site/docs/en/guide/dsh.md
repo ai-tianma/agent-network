@@ -29,6 +29,11 @@ Create a node (name, project directory, session):
 
 ![Create node](/screenshots/dsh-create.png)
 
+After sending a message to the node from the ANet client, the DSH session receives the task and replies:
+
+![DSH session receives an ANet task](/screenshots/dsh-receive.png)
+
+
 ## Use
 
 1. Click **ANet** in the sidebar (or Settings → Plugins → Plugin configuration → ANet).

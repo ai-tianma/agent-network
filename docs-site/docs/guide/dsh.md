@@ -28,6 +28,11 @@ dsh plugin --profile web add @sleep2agi/dsh-anet
 
 ![创建节点](/screenshots/dsh-create.png)
 
+从 ANet 客户端给节点发消息后，DSH 会话收到任务并执行回复：
+
+![DSH 会话收到 ANet 任务](/screenshots/dsh-receive.png)
+
+
 ## 使用
 
 1. 点左侧 **ANet**（或 Settings → Plugins → Plugin configuration → ANet）。
