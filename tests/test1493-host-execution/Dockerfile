@@ -9,5 +9,10 @@ COPY server/src ./server/src
 COPY agent-node/src ./agent-node/src
 RUN ln -s /app/server/node_modules /app/agent-node/node_modules
 COPY tests/test1493-host-execution ./tests/test1493-host-execution
+ARG SOURCE_COMMIT
+ARG RUNSH_BLOB
+ENV SOURCE_COMMIT=$SOURCE_COMMIT RUNSH_BLOB=$RUNSH_BLOB
+LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
+USER 10001:10002
 ENV COMMHUB_DB=/tmp/1493-test.db
 CMD ["sh","tests/test1493-host-execution/run.sh"]

@@ -119,3 +119,20 @@ Limits / INCOMPLETE:
   No merge, deploy, registry write, shared daemon change/restart, production
   connection/DDL/GRANT, credential read or target-node probe/task.
   No work sent to 神明/小盐助手. Containers use --rm; no host mounts or tmux.
+
+CI registration follow-up (PR #2815): continuous gate, not a NOT-IN-CI exemption.
+  qa.sh L1_TESTS includes test1493-host-execution; qa.yml includes its path in
+  BOTH pull_request and push triggers. server/** and agent-node/** already trigger QA.
+  This gate runs the new receipt/HTTP assertions and six behavioral mutants,
+  which are not replaced by existing server-unit coverage.
+  No nested Docker, socket, host mounts, CLI credentials, or external services.
+  Build uses pinned Node/Bun images plus lockfile npm ci; runtime is offline,
+  read-only/non-root, bounded to 1 GiB/2 CPUs/256 PIDs and private executable /tmp.
+  Runtime-only suite; Dockerfile.types remains advisory, not a green full tsc gate.
+  SOURCE_COMMIT is supplied by qa.sh from HEAD, asserted and printed; RUNSH_BLOB
+  is supplied from HEAD:tests/test1493-host-execution/run.sh and checked against
+  the actual executed bytes. Missing/malformed/mismatched values fail closed.
+  Reproduce the real runner on only this suite:
+    QA_L1_ONLY=test1493-host-execution bash scripts/qa.sh --l1
+  Exact-head timings, four registration guards and witnessed-red results are
+  recorded in the PR follow-up evidence; no job timeout/baseline exemption changes.
