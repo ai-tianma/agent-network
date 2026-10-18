@@ -24,16 +24,31 @@ export function recordChannelDelivery(database: DbAdapter, taskId: string, inbox
 /** A retry/reassignment creates a new inbox row. Do not project an older
  * injection as evidence for that new delivery, even within the same second. */
 export function channelDeliveryAt(database: DbAdapter, taskId: string, networkId: string | null): string | null {
+  // A retry creates a new unacked transport row. Until that row is ACKed,
+  // an event from the previous delivery is not evidence for the new one.
+  // Do not order inbox rows by their opaque text id: SQLite rowid has no
+  // PostgreSQL equivalent, and same-second retries need a stable chronology.
+  const pendingParams: unknown[] = [taskId];
+  const pendingScope = networkId === null ? "network_id IS NULL" : "network_id=?2";
+  if (networkId !== null) pendingParams.push(networkId);
+  if (database.get(
+    `SELECT 1 AS pending FROM inbox
+      WHERE type='task' AND COALESCE(task_id,id)=?1 AND acked=0 AND ${pendingScope} LIMIT 1`,
+    ...pendingParams,
+  )) return null;
+  const params: unknown[] = [taskId, EVENT_TYPE];
+  const inboxScope = networkId === null ? "network_id IS NULL" : "network_id=?3";
+  const eventScope = networkId === null ? "e.network_id IS NULL" : "e.network_id=?3";
+  if (networkId !== null) params.push(networkId);
   const row = database.get<{ created_at: string }>(
     `SELECT e.created_at FROM task_events e
-      WHERE e.task_id=?1 AND e.event_type=?2
-        AND e.event_key=(SELECT 'channel_notification_injected:' || i.id FROM inbox i
-          WHERE i.type='task' AND COALESCE(i.task_id,i.id)=?1
-            AND ((?3 IS NULL AND i.network_id IS NULL) OR i.network_id=?3)
-          ORDER BY i.created_at DESC,i.id DESC LIMIT 1)
-        AND ((?3 IS NULL AND e.network_id IS NULL) OR e.network_id=?3)
-      LIMIT 1`,
-    taskId, EVENT_TYPE, networkId,
+      WHERE e.task_id=?1 AND e.event_type=?2 AND ${eventScope}
+        AND EXISTS (SELECT 1 FROM inbox i
+          WHERE i.type='task' AND COALESCE(i.task_id,i.id)=e.task_id
+            AND e.event_key='channel_notification_injected:' || i.id
+            AND ${inboxScope})
+      ORDER BY e.id DESC LIMIT 1`,
+    ...params,
   );
   return row?.created_at ?? null;
 }
