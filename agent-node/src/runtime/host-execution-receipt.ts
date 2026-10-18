@@ -65,7 +65,9 @@ export function receiptCall(call:Call, context:Context, supported:boolean, obser
       failure='process_evidence_unavailable';
     }
     if (status === 'stopped' && observed.state === 'present') {failure='execution_failed';status='stop_failed';}
-    const payload = {...args,status,...(failure ? {error:failure}:{}),execution_receipt:{
+    // Keep the caller's specific ledger error; the receipt's bounded failure
+    // category is additional evidence, not a replacement for that contract.
+    const payload = {...args,status,...(failure ? {error:args.error ?? failure}:{}),execution_receipt:{
       protocol:1,request_id:context.requestId,child_node_id:context.nodeId,child_alias:context.alias,
       operation:context.operation,session_id:context.sessionId ?? null,observed_at:Date.now(),
       process:observed,process_role:pid === null ? 'none' : context.operation === 'stop' ? 'recorded-child' : 'launcher',wrapper_sha256:executableFingerprint(context.wrapperPath),tui_sha256:null,

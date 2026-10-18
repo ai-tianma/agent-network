@@ -9,6 +9,8 @@ for (const dir of ['server', 'agent-node']) {
 }
 symlinkSync('/app/server/node_modules', `${root}/server/node_modules`);
 const variants = [
+ ['specific terminal error overwritten by receipt category','agent-node/src/runtime/host-execution-receipt.ts',
+  '{error:args.error ?? failure}','{error:failure}','server/src/host-execution-receipt.test.ts'],
  ['legacy config restart bypass restored','server/src/tools.ts',
   'if (applyMode !== "hot" && legacyRestartUnsupported(db, node)) {',
   'if (false && applyMode !== "hot" && legacyRestartUnsupported(db, node)) {','server/src/host-execution-http.test.ts'],

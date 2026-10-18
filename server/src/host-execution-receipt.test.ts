@@ -34,6 +34,28 @@ describe('real Linux process observations, no argv/env/pane/log access',()=>{
    expect(sent.status).toBe('started');expect(sent.execution_receipt.process.state).toBe('unknown');
    expect(sent.execution_receipt.failure).toBe('process_evidence_unavailable');expect(sent.execution_receipt.consumer_ready).toBe('unknown');
  });
+ for (const [i, error] of ['workdir_is_home','workdir_has_other_node:child-default','workdir_is_system_dir','workdir_not_ascii','not_my_child'].entries()) {
+  test(`receipt preserves specific terminal error ${error}`,async()=>{
+   const operation=i===4?'stop' as const:'create' as const;
+   const status=operation==='stop'?'stop_failed':'rejected';
+   const requestId=`${operation==='stop'?'sr':'cr'}_preserve_${i}`;
+   let sent:any;
+   const call=receiptCall(async(_t,args)=>{sent=args;return{ok:true};},{...ctx,operation,requestId},true);
+   await call(`ack_${operation}_request`,{request_id:requestId,status,error});
+   expect(sent.status).toBe(status);expect(sent.error).toBe(error);
+   expect(sent.execution_receipt.failure).toBe('execution_failed');
+   expect(executionReceiptSchema.safeParse(sent.execution_receipt).success).toBe(true);
+  });
+ }
+ test('generic terminal error only fills an absent error while receipt remains bounded',async()=>{
+  for (const [i,error] of [undefined,null].entries()) {
+   const requestId=`sr_fallback_${i}`;let sent:any;
+   const call=receiptCall(async(_t,args)=>{sent=args;return{ok:true};},{...ctx,operation:'stop',requestId},true);
+   await call('ack_stop_request',{request_id:requestId,status:'stop_failed',error});
+   expect(sent.status).toBe('stop_failed');expect(sent.error).toBe('execution_failed');
+   expect(sent.execution_receipt.failure).toBe('execution_failed');
+  }
+ });
  test('old Hub receives its original ACK shape',async()=>{
    let sent:any;const call=receiptCall(async(_t,args)=>{sent=args;return{};},ctx,false);
    await call('ack_start_request',{request_id:ctx.requestId,status:'start_failed',error:'synthetic'});

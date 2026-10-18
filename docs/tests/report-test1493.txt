@@ -150,3 +150,16 @@ Review follow-up: update_node_config restart-tier bypass and test1199 binding
   no baseline exemption. Reproduce both via QA_L1_ONLY with their exact names.
   This supersedes the previous test1199 baseline-failure status; follow-up PR
   evidence reports actual final-head results, not inherited review conclusions.
+
+Full-QA regression follow-up: terminal ledger error compatibility
+  Preserve an existing args.error in receiptCall; bounded receipt.failure is
+  additional evidence, not a replacement for specific ledger errors.
+  Only absent/null error falls back to the generic failure category.
+  Directed assertions cover four create rejected workdir errors and stop_failed
+  not_my_child; the mutation restoring unconditional overwrite must turn red.
+  Re-run both original E2E suites, without changing their expected error codes:
+    tests/qa-create-node-workdir/Dockerfile + run.sh
+    tests/test571-lifecycle-safety/Dockerfile + run.sh
+  Exact-head results and output hashes are supplied in the follow-up evidence.
+  Earlier narrow PASS does not qualify full QA; known baseline secret/type gates
+  remain distinct from these two PR-introduced compatibility regressions.
