@@ -9,6 +9,9 @@ for (const dir of ['server', 'agent-node']) {
 }
 symlinkSync('/app/server/node_modules', `${root}/server/node_modules`);
 const variants = [
+ ['legacy config restart bypass restored','server/src/tools.ts',
+  'if (applyMode !== "hot" && legacyRestartUnsupported(db, node)) {',
+  'if (false && applyMode !== "hot" && legacyRestartUnsupported(db, node)) {','server/src/host-execution-http.test.ts'],
  ['delivered start claim automatically retried','server/src/tools.ts',
   'if (inFlight.delivered_at !== null) return', 'if (false && inFlight.delivered_at !== null) return','server/src/host-execution-http.test.ts'],
  ['legacy restart gate removed','server/src/tools.ts',

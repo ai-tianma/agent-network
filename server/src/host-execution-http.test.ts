@@ -66,7 +66,67 @@ beforeAll(async()=>{
 },30000);
 afterAll(async()=>{await sse?.cancel().catch(()=>{});hub?.stop(true);rmSync(dir,{recursive:true,force:true});});
 
+// A FIFO marker after the real MCP response drains the exact target SSE queue.
+// This proves absence of a config doorbell without a sleep/timing assumption.
+async function configWithDoorbells(child: {id:string;name:string}, patch: Record<string, unknown>, token=ownerToken) {
+ const {createSSEStream,pushEvent}=await import('./push.js');
+ const reader=createSSEStream(child.name,net).body!.getReader();
+ await reader.read();
+ try {
+  const result=await mcp(token,'update_node_config',{node_id:child.id,base_revision:0,patch});
+  const marker=`barrier-${++next}`;
+  pushEvent(child.name,{type:'test_config_barrier',marker},net);
+  const events:Array<Record<string,unknown>>=[];
+  while (!events.some(e=>e.marker===marker)) {
+   const {value,done}=await reader.read();if(done) throw Error('SSE ended before barrier');
+   for(const line of new TextDecoder().decode(value).split('\n')) {
+    if(line.startsWith('data:')) events.push(JSON.parse(line.slice(5)));
+   }
+  }
+  return {result,doorbells:events.filter(e=>e.type==='config_update')};
+ } finally {await reader.cancel();}
+}
+
 describe('negotiated host receipts over real MCP/HTTP + SQLite',()=>{
+ for (const runtime of ['claude-code-cli','claude-code','session-only']) {
+  test(`legacy ${runtime} config restart tiers produce zero cu/doorbell/config writes`,async()=>{
+   const child=seedChild(runtime==='session-only'?'codex-sdk':runtime,'active');
+   db.run(`UPDATE nodes SET config_snapshot='{"config_update_capable":true,"model":"unchanged"}' WHERE node_id=?1`,[child.id]);
+   if(runtime==='session-only') {
+    db.run('UPDATE nodes SET runtime=NULL WHERE node_id=?1',[child.id]);
+    db.run(`INSERT INTO sessions(resume_id,alias,node_id,network_id,status,agent) VALUES(?1,?2,?3,?4,'idle','claude-code')`,[`legacy-config-${child.id}`,child.name,child.id,net]);
+   }
+   const before=db.get('SELECT * FROM nodes WHERE node_id=?1',child.id);
+   for(const patch of [{model:'synthetic-new'},{flags:{timeout:60000}},{channels:[]},{}]) {
+    const {result,doorbells}=await configWithDoorbells(child,patch);
+    expect(result).toMatchObject({ok:false,error:'legacy_restart_unsupported',command_accepted:false,request_id:null});
+    expect(doorbells).toHaveLength(0);
+    expect(db.get<any>('SELECT count(*) AS n FROM node_config_updates WHERE node_id=?1',child.id).n).toBe(0);
+    expect(db.get('SELECT * FROM nodes WHERE node_id=?1',child.id)).toEqual(before);
+   }
+   // Even a stale row must not be mutated by the reaper on a rejected patch.
+   db.run(`INSERT INTO node_config_updates(update_id,node_id,network_id,patch_json,apply_mode,base_revision,status,created_at,created_by_token)
+    VALUES(?1,?2,?3,'{}','restart_only',0,'pending',1,'synthetic')`,[`cu_stale_${child.id}`,child.id,net]);
+   const old=db.all('SELECT * FROM node_config_updates WHERE node_id=?1',child.id);
+   const {result,doorbells}=await configWithDoorbells(child,{model:'synthetic-new'});
+   expect(result.error).toBe('legacy_restart_unsupported');expect(doorbells).toHaveLength(0);
+   expect(db.all('SELECT * FROM node_config_updates WHERE node_id=?1',child.id)).toEqual(old);
+   expect(db.get('SELECT * FROM nodes WHERE node_id=?1',child.id)).toEqual(before);
+  });
+ }
+ test('config gate preserves legacy hot, nonlegacy restart and network authorization',async()=>{
+  const legacy=seedChild('claude-code-cli','active');
+  const hot=await configWithDoorbells(legacy,{flags:{maxTurns:4}});
+  expect(hot.result).toMatchObject({ok:true,apply_mode:'hot'});expect(hot.doorbells).toHaveLength(1);
+  const supported=seedChild('codex-sdk','active');
+  const restart=await configWithDoorbells(supported,{model:'synthetic-new'});
+  expect(restart.result).toMatchObject({ok:true,apply_mode:'restart'});expect(restart.doorbells).toHaveLength(1);
+  const foreign=seedChild('claude-code-cli','active');
+  const denied=await configWithDoorbells(foreign,{model:'synthetic-new'},foreignToken);
+  expect(denied.result.ok).toBe(false);expect(denied.result.error).not.toBe('legacy_restart_unsupported');
+  expect(denied.doorbells).toHaveLength(0);
+  expect(db.get<any>('SELECT count(*) AS n FROM node_config_updates WHERE node_id=?1',foreign.id).n).toBe(0);
+ });
  test('legacy restart rejected before cu write, no false advertised support; foreign network cannot use gate as oracle',async()=>{
   const child=seedChild('claude-code-cli','active');
   db.run(`UPDATE nodes SET config_snapshot='{"config_update_capable":true}' WHERE node_id=?1`,[child.id]);

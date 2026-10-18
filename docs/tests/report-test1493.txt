@@ -136,3 +136,17 @@ CI registration follow-up (PR #2815): continuous gate, not a NOT-IN-CI exemption
     QA_L1_ONLY=test1493-host-execution bash scripts/qa.sh --l1
   Exact-head timings, four registration guards and witnessed-red results are
   recorded in the PR follow-up evidence; no job timeout/baseline exemption changes.
+
+Review follow-up: update_node_config restart-tier bypass and test1199 binding
+  Legacy restart/restart_only config patches are refused after tier classification
+  and BEFORE the stale-update reaper as well as cu INSERT/push. Hot patches and
+  nonlegacy restart behavior retain their original contracts.
+  HTTP + SQLite + real SSE FIFO-barrier tests assert zero new cu, zero config
+  doorbells, unchanged target/config snapshot, and unchanged stale cu; cover
+  runtime claude-code/claude-code-cli and session-only legacy identification.
+  Cross-network requests remain denied before capability disclosure.
+  New mutation restores only this bypass and must fail those behavioral tests.
+  test1199 now has ARG/ENV SOURCE_COMMIT plus 40-lowercase-hex assertion and print;
+  no baseline exemption. Reproduce both via QA_L1_ONLY with their exact names.
+  This supersedes the previous test1199 baseline-failure status; follow-up PR
+  evidence reports actual final-head results, not inherited review conclusions.

@@ -3486,6 +3486,14 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         };
       }
 
+      // Reject unsupported restart-tier changes before any config mutation,
+      // including the stale-update reaper, not only the new cu INSERT.
+      const applyMode = computeApplyMode(model, flags, channels);
+      if (applyMode !== "hot" && legacyRestartUnsupported(db, node)) {
+        return {content:[{type:'text' as const,text:JSON.stringify({ok:false,error:'legacy_restart_unsupported',
+          restart_only_supported:false,command_accepted:false,request_id:null,child_node_id:nodeId,consumer_ready:'unknown'})}]};
+      }
+
       // F-B (CHANGE_REQ): single-flight with stale-update reaper.
       // Without TTL, a node that ack'd "restarting" then crashed (lost
       // power, OOM, killed) leaves a non-terminal row forever — every
@@ -3534,7 +3542,6 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
       // Compute apply_mode + persist + push doorbell.
       const updateId = `cu_${uuidv4()}`;
-      const applyMode = computeApplyMode(model, flags, channels);
       const patchJson = JSON.stringify({
         ...(model !== undefined ? { model } : {}),
         flags,
