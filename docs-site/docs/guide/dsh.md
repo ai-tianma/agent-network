@@ -22,7 +22,7 @@ dsh plugin --profile web add @sleep2agi/dsh-anet
 3. 创建节点：节点名称（alias）、项目目录、Session（新建或选已有）。节点 token 由当前登录账号
    自动签发，创建后立即上线。
 4. 其他人在 hub/看板给该 alias 派任务；任务在节点的 DSH session 里执行，结果自动回 hub。
-5. 可同时运行多个节点；节点卡片里的 Session 下拉可随时切换，**删除** 即下线。
+5. 可同时运行多个节点；节点卡片里可随时切换 **项目**（切换项目会为该节点新建 session）和 **Session**，**删除** 即下线。
 
 配置在 `~/.anet/dsh/`：`nodes.json`（节点）与 `account.json`（登录态），均为 0600。
 

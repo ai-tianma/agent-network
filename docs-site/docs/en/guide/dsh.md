@@ -24,8 +24,8 @@ the profile's `cordis.patch.yml`.
    is minted through the logged-in account and the node connects immediately.
 4. Others dispatch tasks to that alias from the hub/dashboard. Tasks run in the node's DSH
    session and the answer goes back to the hub.
-5. Multiple nodes can run together. The session dropdown on a node card switches sessions;
-   **Delete** stops the node.
+5. Multiple nodes can run together. A node card can switch **project** (which creates a new
+   session for that project) and switch **session** at any time; **Delete** stops the node.
 
 Configuration lives in `~/.anet/dsh/`: `nodes.json` and `account.json`, both 0600.
 
