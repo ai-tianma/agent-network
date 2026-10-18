@@ -1,5 +1,10 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu
+[[ "${SOURCE_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+  echo 'FAIL: SOURCE_COMMIT must be one full lowercase Git SHA' >&2
+  exit 1
+}
+echo "source_commit=$SOURCE_COMMIT"
 # No mounted HOME/auth/session files; runner uses --network none (loopback only).
 # Layer 1: pure truth tables / transport faults. A red layer stops the run.
 bun test agent-network/src/channel-delivery.test.ts server/src/channel-delivery-evidence.test.ts server/src/task-diagnostic.test.ts

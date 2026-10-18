@@ -1521,7 +1521,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       alias: z.string().min(1).max(200).describe("Alias"),
       message_id: z.string().min(1).max(200),
       response: z.string().max(10000).optional(),
-      channel_notification_injected: z.literal(true).optional().describe("Transport notification written, NOT CLI admission or consumption"),
+      channel_notification_injected: z.literal(true).optional().describe("Notification written; not CLI admitted/consumed"),
       network_id: z.string().max(200).optional().describe("Network scope (auto-resolved for single-network user tokens)"),
     },
     async ({ alias, message_id, response, channel_notification_injected, network_id: netId }) => {
