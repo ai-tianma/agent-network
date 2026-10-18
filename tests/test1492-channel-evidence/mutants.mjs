@@ -25,7 +25,7 @@ for (const [name, file, from, to, test] of variants) {
   const path = `${root}/${file}`, original = readFileSync(path, 'utf8');
   if (!original.includes(from)) throw new Error(`mutation anchor absent: ${name}`);
   let changed = original.replace(from, to);
-  if (name === 'old delivery reused after retry') changed = changed.replace('ORDER BY i.created_at DESC,i.rowid DESC LIMIT 1)', 'ORDER BY i.created_at DESC,i.rowid DESC)');
+  if (name === 'old delivery reused after retry') changed = changed.replace('ORDER BY i.created_at DESC,i.id DESC LIMIT 1)', 'ORDER BY i.created_at DESC,i.id DESC)');
   writeFileSync(path, changed);
   const result = spawnSync('bun', ['test', test], { cwd: root, encoding: 'utf8', timeout: 30000 });
   writeFileSync(path, original);

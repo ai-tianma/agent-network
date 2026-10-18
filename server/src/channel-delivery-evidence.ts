@@ -30,7 +30,7 @@ export function channelDeliveryAt(database: DbAdapter, taskId: string, networkId
         AND e.event_key=(SELECT 'channel_notification_injected:' || i.id FROM inbox i
           WHERE i.type='task' AND COALESCE(i.task_id,i.id)=?1
             AND ((?3 IS NULL AND i.network_id IS NULL) OR i.network_id=?3)
-          ORDER BY i.created_at DESC,i.rowid DESC LIMIT 1)
+          ORDER BY i.created_at DESC,i.id DESC LIMIT 1)
         AND ((?3 IS NULL AND e.network_id IS NULL) OR e.network_id=?3)
       LIMIT 1`,
     taskId, EVENT_TYPE, networkId,
