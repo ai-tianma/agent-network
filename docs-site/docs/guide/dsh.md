@@ -14,6 +14,20 @@ dsh plugin --profile web add @sleep2agi/dsh-anet
 插件已发布到 npm，支持 DSH `0.1.0-rc.6` / `0.2.0-rc.2`。桌面版把同一个包装进
 `$DSH_HOME/profiles/node_modules`，并在 profile 的 `cordis.patch.yml` 里加一条 insert。
 
+## 界面
+
+侧边栏入口：
+
+![ANet 侧边栏入口](/screenshots/dsh-sidebar.png)
+
+节点面板（节点状态、项目与 Session 切换、账号登录）：
+
+![ANet 节点面板](/screenshots/dsh-panel.png)
+
+创建节点（名称、项目目录、Session）：
+
+![创建节点](/screenshots/dsh-create.png)
+
 ## 使用
 
 1. 点左侧 **ANet**（或 Settings → Plugins → Plugin configuration → ANet）。

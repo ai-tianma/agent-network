@@ -15,6 +15,20 @@ The plugin is published on npm and supports DSH `0.1.0-rc.6` / `0.2.0-rc.2`. On 
 app, install the same package under `$DSH_HOME/profiles/node_modules` and add one insert row in
 the profile's `cordis.patch.yml`.
 
+## Screens
+
+The sidebar entry:
+
+![ANet sidebar entry](/screenshots/dsh-sidebar.png)
+
+The node panel (status, project/session switching, account login):
+
+![ANet node panel](/screenshots/dsh-panel.png)
+
+Create a node (name, project directory, session):
+
+![Create node](/screenshots/dsh-create.png)
+
 ## Use
 
 1. Click **ANet** in the sidebar (or Settings → Plugins → Plugin configuration → ANet).
