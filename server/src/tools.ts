@@ -729,12 +729,12 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
 
   server.tool(
     "report_status",
-    "Report agent status. Returns inbox_count so you know if there are pending tasks.",
+    "Report agent status. Returns inbox_count.",
     {
       resume_id: z.string().min(1).max(200).describe("Claude Code session UUID (unique per session)"),
       alias: z.string().min(1).max(200).describe("Human-readable session name for dispatching (e.g. 指挥室/知识哥)"),
       status: z.enum(["working", "idle", "blocked", "error", "waiting_input", "offline"]),
-      task: z.string().max(TASK_CONTENT_MAX).optional().describe("Current task description (the hub stores only the first 200 chars on the session row; the full text is matched against tasks.content)"),
+      task: z.string().max(TASK_CONTENT_MAX).optional().describe("Task (session stores 200 chars; full text matches tasks.content)"),
       output: z.string().max(50000).optional().describe("Recent output (max 4000 chars stored)"),
       score: z.number().min(0).max(10).optional().describe("Self-score 1-10"),
       progress: z.number().min(0).max(100).optional().describe("Progress 0-100"),
@@ -742,6 +742,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       hostname: z.string().max(200).optional().describe("Agent hostname"),
       agent: z.string().max(100).optional().describe("Agent type (claude-code / codex / opencode)"),
       project_dir: z.string().max(1000).optional().describe("Agent working directory"),
+      // #1198 — OS account the process runs as (platform identity only; no env fallback).
+      os_user: z.string().min(1).max(256).optional().describe("OS account"),
       version: z.string().max(100).optional().describe("Agent version"),
       tmux_name: z.string().max(200).optional().describe("tmux session name"),
       // V2 fields
@@ -964,7 +966,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // instead of rejecting the whole report (see node-health-store.ts).
       health: nodeHealthSchema,
     },
-    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth }) => {
+    async ({ resume_id, alias, status, task, output, score, progress, server: srv, hostname: hn, agent: ag, project_dir: pd, os_user: osUser, version: ver, tmux_name: tmux, node_id, session_id, config_path, channels, model: mdl, node_name: nn, network_id: netId, host, process_telemetry: proc, external_schedules: externalSchedules, config_snapshot: cfgSnap, rules_file_capable: rulesFileCapable, skills_capable: skillsCapable, files_capable: filesCapable, logs_capable: logsCapable, health: nodeHealth }) => {
       const effectiveNetId = getNetworkId(netId);
       const sessionNetId = effectiveNetId ?? "default";
       if (!callerTokenIsNetwork || !enforceNetworkId) {
@@ -1111,7 +1113,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
                   channels, model, cpu_load_1min, cpu_cores, mem_total_gb, mem_used_gb, mem_avail_gb, disk_total_gb,
                   disk_used_gb, disk_avail_gb, process_rss_bytes, process_rss_mb, process_cpu_pct,
                   process_uptime_seconds, process_in_flight_count, external_schedules, registered_at,
-                  rules_file_capable, skills_capable, files_capable, logs_capable
+                  rules_file_capable, skills_capable, files_capable, logs_capable, os_user
              FROM sessions WHERE alias = ?1 AND resume_id != ?2 AND network_id = ?3
              ORDER BY updated_at DESC LIMIT 1`,
           effectiveAlias, resume_id, sessionNetId,
@@ -1156,6 +1158,22 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
              last_seen_at = datetime('now'), updated_at = datetime('now')`,
           [resume_id, effectiveAlias, tmux ?? null, srv ?? null, hostIp, hostHostname, ag ?? null, pd ?? null, ver ?? null, storedStatus, sessionTask, trimmedOutput ?? null, progress ?? null, score ?? null, node_id ?? null, session_id ?? null, config_path ?? null, channels ?? null, sessionNetId, mdl ?? null, cpuLoad1m, cpuCores, memTotalGb, memUsedGb, memAvailGb, diskTotalGb, diskUsedGb, diskAvailGb, processRssBytes, processRssMb, processCpuPct, processUptimeSeconds, processInFlightCount, externalSchedulesJson, peerReplyInboxCapable ? 1 : 0]
         );
+        // #1198 — os_user is its own UPDATE so the INSERT/UPSERT shape stays
+        // pinned (test698). Absent means "not reported": keep the stored value.
+        // A resume_id handover DELETE+INSERTs a row that starts NULL, so copy
+        // the replaced row only when this report omits the field. COALESCE
+        // keeps a value already on the surviving row.
+        if (osUser) {
+          db.run(
+            `UPDATE sessions SET os_user = ?2, updated_at = datetime('now') WHERE resume_id = ?1`,
+            [resume_id, osUser],
+          );
+        } else if (typeof handover?.os_user === "string" && handover.os_user) {
+          db.run(
+            `UPDATE sessions SET os_user = COALESCE(os_user, ?2) WHERE resume_id = ?1`,
+            [resume_id, handover.os_user],
+          );
+        }
         if (handover) {
           // 换 resume_id 那条路径上 ON CONFLICT 不会触发;INSERT 完再把没上报(仍为 NULL)的
           // 描述性列从被替换的那行接手。INSERT 语句与参数列表保持原样 —— test698 的变异
