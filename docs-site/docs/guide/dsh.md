@@ -47,7 +47,7 @@ dsh plugin --profile web add @sleep2agi/dsh-anet
 - 失败会回 `failed` 并带上 DSH 的原文（例如缺模型凭据），发件方能看到原因。
 - SSE 门铃（`/events/<alias>`）+ 60 秒兜底轮询；`report_status` 心跳，`agent` 为 `dsh`。
 - 「消息」类（非任务）收件只确认，不交给 agent。
-- 任务里的图片附件会下载（最多 5 张、单张 ≤10MB）：模型支持视觉时作为 image block 交给 agent；文本模型（如 DeepSeek chat-completions）则用 macOS Vision OCR 提取图片文字后交给 agent。其他类型附件暂不处理。
+- 任务里的图片附件会下载并作为 image block 交给 agent（最多 5 张、单张 ≤10MB）；需要模型支持图片输入，否则该轮会报 `UNSUPPORTED_CONTENT`。其他类型附件暂不处理。
 - 超过 hub 1 万字上限的回件会截断并附说明。
 
 ## 可选：脚本引导
