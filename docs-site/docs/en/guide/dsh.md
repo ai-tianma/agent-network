@@ -1,42 +1,54 @@
-# DSH node (preview)
+# DSH node
 
-::: warning Preview
-`integrations/dsh-commhub` ships in the repository only and is **not published to npm yet**. DSH itself is still on release candidates (this plugin is verified against `0.1.5-rc.2`); its plugin APIs may change between rc builds.
-:::
+[DSH (DeepSeek Harness)](https://www.npmjs.com/package/@deepseek-ai/dsh) is a plugin-based agent
+framework. `@sleep2agi/dsh-anet` turns one or more DSH sessions into Agent Network (CommHub)
+nodes: receive tasks, reply, and dispatch work to other nodes.
 
-[DSH (DeepSeek Harness)](https://www.npmjs.com/package/@deepseek-ai/dsh) is a plugin-based agent framework. The `dsh-commhub` plugin lets a DSH agent join an Agent Network hub as a node: receive tasks, reply, and dispatch tasks or messages to other nodes.
+## Install
 
-## What it does
+```bash
+dsh plugin --profile web add @sleep2agi/dsh-anet
+# restart DSH
+```
 
-| Capability | Details |
-|---|---|
-| Receive tasks | Subscribes to the hub's SSE doorbell, with a 60 s fallback poll |
-| Reply | One agent turn per task, exactly one `replied` / `failed` reply; a local ledger prevents duplicates after reconnects or restarts |
-| Find and dispatch | Tools `commhub_get_all_status`, `commhub_send_task`, `commhub_send_message`; an offline target is reported as *queued* |
-| Presence | `report_status` heartbeat with `agent: "dsh"` |
+The plugin is published on npm and supports DSH `0.1.0-rc.6` / `0.2.0-rc.2`. On the desktop
+app, install the same package under `$DSH_HOME/profiles/node_modules` and add one insert row in
+the profile's `cordis.patch.yml`.
 
-## Setup
+## Use
 
-1. Mint a node token on the hub (`anet node create`, or create the node in the desktop app).
-2. Install into a DSH profile:
+1. Click **ANet** in the sidebar (or Settings → Plugins → Plugin configuration → ANet).
+2. Log in with the hub URL + a human account. The login is stored in
+   `~/.anet/dsh/account.json` (0600) and restored after restart; **Log out** clears it.
+3. Create a node: name (alias), project directory, and session (new or existing). The node token
+   is minted through the logged-in account and the node connects immediately.
+4. Others dispatch tasks to that alias from the hub/dashboard. Tasks run in the node's DSH
+   session and the answer goes back to the hub.
+5. Multiple nodes can run together. The session dropdown on a node card switches sessions;
+   **Delete** stops the node.
 
-   ```bash
-   dsh plugin --profile web add ./integrations/dsh-commhub
-   ```
+Configuration lives in `~/.anet/dsh/`: `nodes.json` and `account.json`, both 0600.
 
-3. Start with environment variables. The token may only come from the environment or a file with mode `600`:
+## Behaviour notes
 
-   ```bash
-   export ANET_HUB=http://127.0.0.1:9200
-   export ANET_ALIAS=my-dsh-node
-   export ANET_NODE_TOKEN_FILE=~/.dsh-commhub/my-dsh-node.token
-   dsh web
-   ```
+- Each node owns a DSH session; tasks run there consecutively, so context is preserved and the
+  session can be switched at any time.
+- Exactly one reply per task (`replied` / `failed`); a local ledger prevents duplicates across
+  reconnects and restarts.
+- Failures reply `failed` with DSH's own error text (for example a missing model credential).
+- SSE doorbell (`/events/<alias>`) plus a 60 s fallback poll; `report_status` heartbeat with
+  `agent: "dsh"`.
+- Informational (non-task) inbox messages are only acknowledged; attachments are not supported.
+- Replies over the hub's 10 000-character limit are truncated with a visible note.
 
-Configure DSH's own model credentials as usual (the DSH Web Models page, or the environment variable DSH asks for). Without one, tasks are answered `failed` with DSH's reason attached.
+## Optional: scripted bootstrap
 
-## Limits
+With a hub user token (`utok_`), the helper mints a first node token and writes a base config
+that the plugin migrates into a node on first start:
 
-- Informational (non-task) inbox messages are acknowledged but not passed to the agent.
-- Each task runs in a fresh DSH session; consecutive tasks from the same sender do not share context.
-- Attachments are not supported yet.
+```bash
+ANET_USER_TOKEN=utok_... node scripts/connect.mjs \
+  --hub https://your-hub.example --alias my-dsh-node --network net_xxxx
+```
+
+The user token is never printed or persisted; `--no-verify` skips the round-trip.
