@@ -228,6 +228,8 @@ daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet n
 
 读回：daemon 上报的配置快照 `flags` 会带上 `opencodeGeneration`、`opencodeMode`、`opencodeUnsafeTools`，只读。`update_node_config` 不能改这三项。`runtime_readiness` 里的 `opencode-cli` 可带 `generation` 与 `accepted`；V2 的 `state` 仍是 `unknown`（provider 与登录取决于目标节点配置）。`accepted: false` 表示这个 2.x 不是接受的 pin，显式创建会被拒绝。
 
+post-spawn 校验失败不会留下活着的 generation。启动器没退出、退出非 0，或 launch-health / attach 记录缺失、不安全时，daemon 先停掉这次刚起的启动器，再用 `anet node stop <name>` 走与 stop doorbell 同一套生命周期收据，最后只对**本 generation 自己写的** launch-health / attach 记录里点名的进程兜底（pid 与启动时刻都要对上）。ack 的 `error` 末尾带 `cleanup=reaped | no_live_generation | handed_to_host | residue`；`cleanup=residue` 同时给出 `residue_pids=…`，表示按记录仍有进程活着、需要人工 `anet node stop <name>` 收尸 —— Hub 上的「失败」与磁盘真实状态因此在同一条 ack 里对得上。
+
 ### 任务超时 `flags.timeout` 的单位是毫秒 {#create-node-timeout-ms}
 
 `create_node` 的 `node_spec.flags.timeout` 是**毫秒**：daemon 原样写进子节点 config，节点按毫秒读

@@ -244,6 +244,8 @@ This API does not take an anet provider preset; keys stay in the OpenCode config
 
 Readback: the daemon's config snapshot `flags` echo `opencodeGeneration`, `opencodeMode`, and `opencodeUnsafeTools` as read-only fields. `update_node_config` cannot change those three. `runtime_readiness` for `opencode-cli` may include `generation` and `accepted`. V2 `state` stays `unknown` (provider and login depend on the target node's own configuration). `accepted: false` means this 2.x is not the accepted pin, so an explicit create is refused.
 
+A failed post-spawn check does not leave a live generation behind. When the launcher does not exit, exits non-zero, or the launch-health / attach record is missing or unsafe, the daemon stops the launcher it just spawned, then runs `anet node stop <name>` through the same lifecycle receipts the stop doorbell uses, and finally signals anything the generation's own launch-health / attach records still name (pid **and** start ticks must match). The ack's `error` ends with `cleanup=reaped | no_live_generation | handed_to_host | residue`; `cleanup=residue` also carries `residue_pids=…`, meaning those processes are still alive per the records and need a manual `anet node stop <name>` — so the Hub's "failed" and what is actually on disk agree in the same ack.
+
 ### Task timeout: `flags.timeout` is in milliseconds {#create-node-timeout-ms}
 
 `create_node`'s `node_spec.flags.timeout` is in **milliseconds**: the daemon writes it into the child's config
