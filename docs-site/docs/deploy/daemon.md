@@ -226,6 +226,8 @@ daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet n
 
 这个接口不接收 anet 的 provider 预设，密钥留在目标节点已有的 OpenCode 配置里。daemon 在写子节点配置之前，要求 PATH 上的 `opencode --version` 是本发行接受的 `@opencode/cli@2.0.22`。显式 `v1` 同样必须对上接受的 `opencode-ai` 版本（当前 pin `1.18.34`，过渡版 `1.18.1`）。对不上的错误码是 `opencode_generation_mismatch`。省略 `opencodeGeneration` 仍按旧的 V1 创建，不因为机器上碰巧是 V2 二进制而拒绝。`--version` 超时不在这一步拒绝。
 
+同一台机器上同时装着 V1 与 V2 两份 `opencode` 是常见情况，而子进程 PATH 的第一命中未必是请求的那一代。自 #1611 起，显式 `v1` / `v2` 建节点会按 PATH 顺序逐个探测候选，取第一个版本被该代际接受的；启动侧同样按代际挑二进制，不再停在第一命中。所以「机器上两份都有」不再是阻塞项——但把 anet 管理的 V2 前缀（`~/.anet/oe-v2-prefix/node_modules/.bin`）留在 `daemonExtraPath` 里仍然是好习惯：它让探测少走几步，也让 PATH 顺序在别的工具里可预测。
+
 读回：daemon 上报的配置快照 `flags` 会带上 `opencodeGeneration`、`opencodeMode`、`opencodeUnsafeTools`，只读。`update_node_config` 不能改这三项。`runtime_readiness` 里的 `opencode-cli` 可带 `generation` 与 `accepted`；V2 的 `state` 仍是 `unknown`（provider 与登录取决于目标节点配置）。`accepted: false` 表示这个 2.x 不是接受的 pin，显式创建会被拒绝。
 
 ### 任务超时 `flags.timeout` 的单位是毫秒 {#create-node-timeout-ms}
