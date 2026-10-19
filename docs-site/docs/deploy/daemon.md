@@ -216,6 +216,8 @@ daemon 会在子节点 config 里写 `codexCopresence: true`，之后的 `anet n
 - 只对 `codex-app-server` 有效；其他 runtime 带这个键会被 Hub 拒绝（`flag_not_applicable_to_runtime`）。
 - 不认识这个键的旧 Hub / 旧 daemon 会拒绝请求（`flag_key_unknown`），不会悄悄建出无头节点。
 
+校验失败时不会留下活着的三段会话。判据是子节点自己的身份标记：`copresence-identity.json` 在盘上且本 daemon 写的 config 对得上，才会用 `anet node stop <name>` 走同一套身份收据收尾；标记不在盘上时**一律不跑 stop**（那条路会退回按显示名清扫，等于按名字杀），也不会认领同名 tmux 会话。ack 的 `error` 末尾带与 OpenCode V2 相同的 `cleanup=` 结果，残留会话以 `residue_sessions=` 列出（daemon 不直接 `kill-session`）。
+
 ### 经 daemon 创建 OpenCode V2 共存节点 {#opencode-v2-via-daemon}
 
 `runtime` 仍是 `opencode-cli`。要建 V2 共存节点，`create_node` 的 `node_spec.flags` 同时带 `"opencodeGeneration": "v2"` 和 `"opencodeUnsafeTools": true`，`model` 必须是 OpenCode 自己的 `provider/model`（恰好一个斜杠）：
