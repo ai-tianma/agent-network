@@ -64,6 +64,15 @@ anet node start my-agent --tmux
 | `logs/` | 运行日志。本机看用上面的 `anet logs`；从客户端看见 [节点运行日志](/guide/node-run-logs) |
 | `goals.json` | 本节点的循环任务状态 |
 
+### 启动时的环境变量优先级
+
+`agent-node`（包括直接 `agent-node --config <path>` 启动）按下面的顺序取值，**高者胜**：
+
+1. **进程启动时已经存在的环境变量**（`KEY=` 空串也算已设置，会被保留）；
+2. `config.json` 的 `env` 里的键（明文或 `_envRef`）；
+3. 节点目录下的 `secrets.env`（`anet node secret set` 写的那份）——**只填空位**，不会覆盖前两层。
+
+`secrets.env` 的约束：必须 0600 的普通文件且属于当前用户；符号链接、非普通文件、权限不对时**整份不生效**（不是部分生效）。保留键（`PATH`、`LD_*`、`NODE_*` 等）会被跳过。文件不存在是正常状态。
 全局的用户登录与当前 network 位于 `~/.anet/config.json`。不要提交项目 `.anet`、token 或 `.env`。
 
 envRef 让 `config.json` 只保存环境变量引用；实际值仍可能存入节点的 mode-0600 `.env`。迁移前先检查备份和目标变量：
