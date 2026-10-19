@@ -767,3 +767,11 @@ jobs:
 
           echo "✅ $n@${{ inputs.version }} 已发布到 preview 通道"
           echo "下一步(人工):至少 30 分钟真实环境烟测 + owner ACK 后,用 promote-latest 升 latest"
+
+      # RFC-029 published-pair guard (#1811): the tree keeps the two versions in
+      # lockstep, but a release can still leave a HALF pair on npm — 2026-10-19
+      # shipped agent-node .150 while the CLI that declares it was only staged.
+      # Runs after the node publish so the failure names the surviving half.
+      - name: 配对断言(agent-node 发布后 CLI 也必须在 npm 上)
+        if: inputs.package == 'agent-node'
+        run: node scripts/check-pair-published.mjs
