@@ -8,7 +8,7 @@
      The latest stamp records the checked channel version; the preview stamp records the validated
      release candidate, not npm publication. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.185 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.186 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
@@ -60,7 +60,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.185` adds, on top of `.184` (generation-aware opencode resolution `#1611`, failed-create reaping `#1625`, `anet daemon secret` `#1509`), only the codex failed-create reaper (`#1650`, agent-node side); CLI behaviour is identical to `.184`. Relative to `.182` it also adds (node-to-Hub link-shape reporting `#1510`, a Hub REST entry for node secrets `#1491`, `anet node secret` and env-key-name reporting `#2056`/`#1474`/`#909`, read-only Hub surfaces `#1473`, the auto-chain dedupe fix `#1940`, OS-account reporting `#1198`): OpenCode V2 session-model reporting and live switching (`#2827`), resolving `opencode` by the requested generation (`#1611`), reaping the generation a failed create leaves behind (`#1625`), and `anet daemon secret list/set/unset` (`#1509`). **The default bootstrap / random-password path is unchanged.** This installation gate uses an explicit password; the default path was not rerun separately. Publication requires all release gates to pass.
+The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.186` adds, on top of `.185`, only the actionable error when an OpenCode node's working directory is occupied (`#2838`, agent-node side); CLI behaviour matches `.184` (the V2 co-presence start orchestration landed in `.184`). Relative to `.182` it also adds (generation-aware opencode resolution `#1611`, failed-create reaping `#1625`, `anet daemon secret` `#1509`), only the codex failed-create reaper (`#1650`, agent-node side); CLI behaviour is identical to `.184`. Relative to `.182` it also adds (node-to-Hub link-shape reporting `#1510`, a Hub REST entry for node secrets `#1491`, `anet node secret` and env-key-name reporting `#2056`/`#1474`/`#909`, read-only Hub surfaces `#1473`, the auto-chain dedupe fix `#1940`, OS-account reporting `#1198`): OpenCode V2 session-model reporting and live switching (`#2827`), resolving `opencode` by the requested generation (`#1611`), reaping the generation a failed create leaves behind (`#1625`), and `anet daemon secret list/set/unset` (`#1509`). **The default bootstrap / random-password path is unchanged.** This installation gate uses an explicit password; the default path was not rerun separately. Publication requires all release gates to pass.
 **Candidate validation does not mean publication.** Run `npm view @sleep2agi/agent-network dist-tags` for the currently installable channel versions; do not treat the candidate number as the current npm `preview`.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 
