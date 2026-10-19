@@ -463,6 +463,20 @@ List locally configured daemon nodes (configuration only, not liveness).`,
 list reads the daemon-scoped Provider configuration (no secrets).
 scan, put, and apply read private JSON from stdin. No key is accepted in argv.
 put saves that JSON; it does not apply it to a runtime.`,
+  "daemon secret": `Usage: anet daemon secret list  <daemon> [--node <alias>] [--json]
+       anet daemon secret set   <daemon> <KEY> --from-env <VAR> (--node <alias> | --all)
+       anet daemon secret unset <daemon> <KEY> (--node <alias> | --all)
+
+Manage the env secrets this daemon hands to its child nodes on their next start
+(scoped-secrets.json, 0600). Values only come from --from-env or stdin; they
+never appear in argv, in the receipt, or in list.
+
+  anet daemon secret set daemon-dev DEEPSEEK_API_KEY --from-env MY_KEY --all
+  anet daemon secret set daemon-dev DEEPSEEK_API_KEY --from-env MY_KEY --node 指挥室
+  anet daemon secret unset daemon-dev DEEPSEEK_API_KEY --node 指挥室
+
+--all writes the daemon-wide default; --node writes that child only. A write
+without either is refused on purpose: a default reaches every child.`,
 
   // ── network ──
   "network ls": `Usage: anet network ls
