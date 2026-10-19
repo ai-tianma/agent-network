@@ -44,6 +44,8 @@ import { replaceOpencodeConfigJson } from "../shared/opencode-preset.js";
 import { readHostSharedOpenCodeServer, withHostOpenCodeV2ClientPath } from "./opencode-shared-server-registry.js";
 import { selectHostSharedOpenCodeForCreate } from "./opencode-host-shared-create.js";
 import { inspectLaunchHealth, liveLaunchResidue, readLiveProcess, successfulLauncherExit, waitForLaunchHealth } from "./opencode-copresence/launcher-health.js";
+import { copresenceSessionResidue } from "./codex-copresence-session-residue.js";
+import { copresenceTeardownFor } from "./stop-daemon.js";
 import {
   execVersionReal,
   opencodeExplicitGenerationMismatch,
@@ -1623,8 +1625,25 @@ export async function handleCreateNodeDoorbell(
         }
         const msg = `codex co-presence launcher ended within ${FAIL_FAST_MS}ms (${verdict.how}) — run \`anet node start ${childDirName}\` in ${childWorkDir} to see why`;
         deps.warn(`[create-node] runtime_capability_check_failed: ${msg}`);
+        // #1650 — 与 #1625 同族:失败的那条 return 必须把这次起的 generation 收掉。
+        // 归属门 = config 是我们的 + identity marker 在盘上;门不开就绝不跑
+        // `anet node stop`(marker 缺失时它会按显示名清扫,#596 禁止)。
+        const reap = await reapFailedCodexCreate({
+          alias: req.node_spec.name,
+          childWorkDir,
+          childDirName,
+          childNodeId: childNodeIdForMap,
+          launcherPid: childPid,
+          launcher,
+          log: deps.log,
+          warn: deps.warn,
+        });
+        const cleanup = reap.status === "residue"
+          ? `cleanup=residue residue_sessions=${reap.residue.join(",")}`
+          : `cleanup=${reap.status}`;
         await deps.callCommHub("ack_create_request", {
-          request_id, status: "runtime_capability_check_failed", error: msg.slice(0, 800), runtime: req.node_spec.runtime,
+          request_id, status: "runtime_capability_check_failed",
+          error: `${msg}; ${cleanup}`.slice(0, 800), runtime: req.node_spec.runtime,
         }).catch(() => {});
         return;
       }
@@ -1659,22 +1678,29 @@ export async function handleCreateNodeDoorbell(
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * #1625 —— 校验失败必须连尸体一起交。
+ * #1625 / #1650 —— 校验失败必须连尸体一起交。
  *
- * OpenCode V2 共存的 `anet node start` 只是启动器:bridge / serve / TUI 交给 tmux,
- * 启动器自己退出。于是 post-spawn 校验失败时,Hub 侧 ack 是「没建成」,盘上却是
- * 一整套活着的 generation —— 真机实测能一直 idle 到人工 `delete_node`。
+ * 两种共存 generation 的启动器都只是壳:opencode 的 bridge/serve/TUI、codex 的
+ * app-server/桥/TUI 都交给 tmux,启动器自己退出。于是 post-spawn 校验失败时,
+ * Hub 侧 ack 是「没建成」,盘上却是一整套活着的 generation(#1625 真机实测)。
  *
- * 这条路径的停止权只有三处,按顺序用,**都不新造第二套判据**:
+ * 停止权只有三处,按顺序用,**都不新造第二套判据**:
  *   1. 我们自己 spawn 的启动器**句柄**(身份就是这条 handle,不存在 pid 复用);
  *   2. `anet node stop <alias>` —— 与 stop doorbell 同一套生命周期收据;
- *   3. 兜底只认**本 generation 自己写下的记录**(launch-health / attach 的 pid +
- *      启动时刻)。记录不在、或启动时刻不符 = 不证明是本代,一律不 signal。
+ *   3. 生成方式自带的残留证据:opencode 用 launch-health/attach 记录的 pid+启动时刻,
+ *      codex 用 identity marker 认领的三个 tmux 会话(只读)。
  *
- * 返回值直接进 ack:收干净了才说干净;收不干净就把残留 pid 报出去,让 Hub 上的
+ * 🔴 #1650 — 第 2 步有归属门:codex 的 marker 不在盘上时,CLI 的 stop 会退回按
+ *    显示名清扫(按名字杀,#596 禁止),所以 `teardownGate() === false` 时**不跑**
+ *    stop,也不认领同名会话,只能报 `no_live_generation`。
+ *
+ * 返回值直接进 ack:收干净了才说干净;收不干净就把残留报出去,让 Hub 上的
  * 「失败」与磁盘真实状态一致,而不是留一个看起来失败、实际在线的孤儿。
  */
 export type FailedCreateReapStatus = "reaped" | "handed_to_host" | "no_live_generation" | "residue";
+
+/** 残留物的种类决定 ack 字段名:进程用 `residue_pids`,tmux 会话用 `residue_sessions`。 */
+export type ReapResidueKind = "pids" | "sessions";
 
 export interface FailedCreateReap {
   status: FailedCreateReapStatus;
@@ -1683,35 +1709,62 @@ export interface FailedCreateReap {
   residue: number[];
 }
 
-export async function reapFailedOpencodeCreate(args: {
+export interface FailedCreateCodexReap {
+  status: FailedCreateReapStatus;
+  detail: string;
+  /** 仍活着的本 generation tmux 会话名;只有 status === "residue" 时非空。 */
+  residue: string[];
+  residueKind: "sessions";
+}
+
+interface ReapResidueEntry {
+  /** 稳定标识:opencode 是 pid 字符串,codex 是 tmux 会话名。 */
+  id: string;
+  role: string;
+  /** 额外身份证据(opencode: 启动时刻),由 `signal` 自己再核对一次。 */
+  identity?: unknown;
+}
+
+interface ReapResidue {
+  borrowed: boolean;
+  alive: ReapResidueEntry[];
+}
+
+interface ReapGenerationArgs {
   alias: string;
   childWorkDir: string;
-  childDir: string;
-  childConfigPath: string;
   launcherPid: number;
   /** 生产传 spawn 出来的 handle;测试可不传,退化成按 pid signal。 */
   launcher?: { kill?: (signal?: NodeJS.Signals | number) => boolean } | null;
+  /** 归属门:false ⇒ 绝不跑 `anet node stop`(只用于 codex;opencode 缺省 true)。 */
+  teardownGate?: () => boolean;
   /** 测试注入;缺省 `anet node stop <alias>`(pinned bin + minimalEnv)。 */
   stopChild?: (alias: string, childWorkDir: string) => Promise<{ ok: boolean; detail: string }>;
+  /** 当前仍活着的残留物(每次调用都重新取证)。 */
+  residueOf: () => ReapResidue;
+  /** 直接结束残留物的能力。**不提供 = 只有 CLI 一个停止权**(codex 不自己 kill-session)。 */
+  signal?: (entry: ReapResidueEntry, signal: NodeJS.Signals) => void;
   alive?: (pid: number) => boolean;
-  residueOf?: (dir: string, configPath: string) => { borrowed: boolean; alive: Array<{ pid: number; role: string; ticks: string }> };
-  readLive?: (pid: number) => { ticks: string } | undefined;
   kill?: (pid: number, signal: NodeJS.Signals) => void;
   sleep?: (ms: number) => Promise<void>;
   /** 启动器 SIGTERM→SIGKILL 之间的观察窗。 */
   launcherGraceMs?: number;
-  /** 记录里的 pid SIGTERM→SIGKILL 之间的观察窗。 */
+  /** 残留物 SIGTERM→SIGKILL 之间的观察窗。 */
   residueGraceMs?: number;
+  residueKind: ReapResidueKind;
   log: (m: string) => void;
   warn: (m: string) => void;
-}): Promise<FailedCreateReap> {
+}
+
+/** 两种 generation 共用的收尸骨架;差异全部由 `teardownGate` / `residueOf` / `signal` 注入。 */
+export async function reapFailedGeneration(
+  args: ReapGenerationArgs,
+): Promise<{ status: FailedCreateReapStatus; detail: string; residue: string[]; residueKind: ReapResidueKind }> {
   const alive = args.alive ?? ((pid: number) => {
     try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; }
   });
   const kill = args.kill ?? ((pid: number, sig: NodeJS.Signals) => { process.kill(pid, sig); });
   const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const residueOf = args.residueOf ?? liveLaunchResidue;
-  const readLive = args.readLive ?? ((pid: number) => readLiveProcess(pid));
   const launcherGraceMs = args.launcherGraceMs ?? 1_000;
   const residueGraceMs = args.residueGraceMs ?? 5_000;
   const notes: string[] = [];
@@ -1736,67 +1789,173 @@ export async function reapFailedOpencodeCreate(args: {
     }
   }
 
-  // 2) 与 stop doorbell 同一套身份收据。
-  try {
-    const stop = args.stopChild ?? (async (alias: string, childWorkDir: string) => {
-      const { stopCopresenceChild } = await import("./stop-daemon.js");
-      return stopCopresenceChild(alias, childWorkDir);
-    });
-    const r = await stop(args.alias, args.childWorkDir);
-    if (r.ok) acted = true;
-    const lastLine = String(r.detail ?? "").split("\n").filter(Boolean).slice(-1)[0] ?? "";
-    notes.push(`anet node stop ${r.ok ? "ok" : "failed"}${lastLine ? `: ${lastLine}` : ""}`);
-    if (!r.ok) args.warn(`[create-node] reap: anet node stop failed for '${args.alias}': ${r.detail}`);
-  } catch (e: any) {
-    notes.push(`anet node stop threw: ${e?.message || e}`);
-    args.warn(`[create-node] reap: anet node stop threw for '${args.alias}': ${e?.message || e}`);
+  // 2) 与 stop doorbell 同一套身份收据 —— 但只在归属门放行时。
+  const owned = args.teardownGate ? args.teardownGate() : true;
+  if (!owned) {
+    // 没有本代身份证据时,`anet node stop` 会退回按别名清扫(按名字杀)。
+    notes.push("teardown skipped: generation not proven owned (no identity marker)");
+  } else {
+    try {
+      const stop = args.stopChild ?? (async (alias: string, childWorkDir: string) => {
+        const { stopCopresenceChild } = await import("./stop-daemon.js");
+        return stopCopresenceChild(alias, childWorkDir);
+      });
+      const r = await stop(args.alias, args.childWorkDir);
+      if (r.ok) acted = true;
+      const lastLine = String(r.detail ?? "").split("\n").filter(Boolean).slice(-1)[0] ?? "";
+      notes.push(`anet node stop ${r.ok ? "ok" : "failed"}${lastLine ? `: ${lastLine}` : ""}`);
+      if (!r.ok) args.warn(`[create-node] reap: anet node stop failed for '${args.alias}': ${r.detail}`);
+    } catch (e: any) {
+      notes.push(`anet node stop threw: ${e?.message || e}`);
+      args.warn(`[create-node] reap: anet node stop threw for '${args.alias}': ${e?.message || e}`);
+    }
   }
 
-  // 3) 记录里点名、且启动时刻仍对得上的进程。
-  let residue = residueOf(args.childDir, args.childConfigPath);
+  // 3) 本代自带的残留证据。
+  let residue = args.residueOf();
   if (residue.borrowed) {
     return {
       status: "handed_to_host",
       detail: notes.join("; ") + "; borrowed V1 host generation — stop authority stays with the host",
       residue: [],
+      residueKind: args.residueKind,
     };
   }
-  const signalSameIdentity = (pid: number, ticks: string, signal: NodeJS.Signals): boolean => {
-    const live = readLive(pid);
-    if (!live || live.ticks !== ticks) return false; // 已退出或 pid 被复用:绝不再 signal
-    try { kill(pid, signal); return true; } catch { return false; }
-  };
-  if (residue.alive.length > 0) {
+  if (residue.alive.length > 0 && args.signal) {
     acted = true;
-    for (const p of residue.alive) signalSameIdentity(p.pid, p.ticks, "SIGTERM");
+    for (const entry of residue.alive) args.signal(entry, "SIGTERM");
     for (let waited = 0; waited < residueGraceMs; waited += 50) {
       await sleep(50);
-      residue = residueOf(args.childDir, args.childConfigPath);
+      residue = args.residueOf();
       if (residue.alive.length === 0) break;
     }
     if (residue.alive.length > 0) {
-      for (const p of residue.alive) signalSameIdentity(p.pid, p.ticks, "SIGKILL");
+      for (const entry of residue.alive) args.signal(entry, "SIGKILL");
       for (let waited = 0; waited < 2_000; waited += 50) {
         await sleep(50);
-        residue = residueOf(args.childDir, args.childConfigPath);
+        residue = args.residueOf();
         if (residue.alive.length === 0) break;
       }
     }
   }
   if (residue.alive.length > 0) {
-    const pids = residue.alive.map((p) => p.pid);
-    args.warn(`[create-node] reap: generation still alive after stop+SIGKILL: pids=${pids.join(",")}`);
+    const ids = residue.alive.map((e) => e.id);
+    args.warn(`[create-node] reap: generation still alive after stop: residue ${args.residueKind}=${ids.join(",")}`
+      + (args.signal ? "" : " (no direct-kill authority; only `anet node stop` may reap it)"));
     return {
       status: "residue",
-      detail: `${notes.join("; ")}; residue pids=${pids.join(",")} (${residue.alive.map((p) => p.role).join(",")})`,
-      residue: pids,
+      detail: `${notes.join("; ")}; residue ${args.residueKind}=${ids.join(",")} (${residue.alive.map((e) => e.role).join(",")})`,
+      residue: ids,
+      residueKind: args.residueKind,
     };
   }
   if (acted) {
     args.log(`[create-node] reap: failed create cleaned up (${notes.join("; ") || "no live generation"})`);
-    return { status: "reaped", detail: notes.join("; "), residue: [] };
+    return { status: "reaped", detail: notes.join("; "), residue: [], residueKind: args.residueKind };
   }
-  return { status: "no_live_generation", detail: notes.join("; "), residue: [] };
+  return { status: "no_live_generation", detail: notes.join("; "), residue: [], residueKind: args.residueKind };
+}
+
+/** OpenCode V2:残留证据是本代自己写的 launch-health / attach 记录(pid + 启动时刻)。 */
+export async function reapFailedOpencodeCreate(args: {
+  alias: string;
+  childWorkDir: string;
+  childDir: string;
+  childConfigPath: string;
+  launcherPid: number;
+  /** 生产传 spawn 出来的 handle;测试可不传,退化成按 pid signal。 */
+  launcher?: { kill?: (signal?: NodeJS.Signals | number) => boolean } | null;
+  /** 测试注入;缺省 `anet node stop <alias>`(pinned bin + minimalEnv)。 */
+  stopChild?: (alias: string, childWorkDir: string) => Promise<{ ok: boolean; detail: string }>;
+  alive?: (pid: number) => boolean;
+  residueOf?: (dir: string, configPath: string) => { borrowed: boolean; alive: Array<{ pid: number; role: string; ticks: string }> };
+  readLive?: (pid: number) => { ticks: string } | undefined;
+  kill?: (pid: number, signal: NodeJS.Signals) => void;
+  sleep?: (ms: number) => Promise<void>;
+  /** 启动器 SIGTERM→SIGKILL 之间的观察窗。 */
+  launcherGraceMs?: number;
+  /** 记录里的 pid SIGTERM→SIGKILL 之间的观察窗。 */
+  residueGraceMs?: number;
+  log: (m: string) => void;
+  warn: (m: string) => void;
+}): Promise<FailedCreateReap> {
+  const residueOf = args.residueOf ?? liveLaunchResidue;
+  const readLive = args.readLive ?? ((pid: number) => readLiveProcess(pid));
+  const kill = args.kill ?? ((pid: number, signal: NodeJS.Signals) => { process.kill(pid, signal); });
+  const r = await reapFailedGeneration({
+    alias: args.alias,
+    childWorkDir: args.childWorkDir,
+    launcherPid: args.launcherPid,
+    launcher: args.launcher,
+    stopChild: args.stopChild,
+    alive: args.alive,
+    sleep: args.sleep,
+    launcherGraceMs: args.launcherGraceMs,
+    residueGraceMs: args.residueGraceMs,
+    residueKind: "pids",
+    residueOf: () => {
+      const record = residueOf(args.childDir, args.childConfigPath);
+      return {
+        borrowed: record.borrowed,
+        alive: record.alive.map((p) => ({ id: String(p.pid), role: p.role, identity: p.ticks })),
+      };
+    },
+    // 身份再核对:pid 还活着且启动时刻仍对得上才 signal(pid 复用的唯一防线)。
+    signal: (entry, signal) => {
+      const live = readLive(Number(entry.id));
+      if (!live || live.ticks !== String(entry.identity)) return;
+      try { kill(Number(entry.id), signal); } catch { /* gone */ }
+    },
+    log: args.log,
+    warn: args.warn,
+  });
+  return { status: r.status, detail: r.detail, residue: r.residue.map(Number) };
+}
+
+/** Codex 共存:残留证据是 marker 认领的三个 tmux 会话;没有直接 kill 权,只报不杀。 */
+export async function reapFailedCodexCreate(args: {
+  alias: string;
+  childWorkDir: string;
+  /** `<workdir>/.anet/nodes/<childDirName>` 的目录名(#652 起可能与 alias 不同)。 */
+  childDirName: string;
+  /** Hub 铸的 canonical child node_id(`node_<request_id>`). */
+  childNodeId: string;
+  launcherPid: number;
+  launcher?: { kill?: (signal?: NodeJS.Signals | number) => boolean } | null;
+  stopChild?: (alias: string, childWorkDir: string) => Promise<{ ok: boolean; detail: string }>;
+  /** 测试注入:归属门(缺省 = config 是我们的 + marker 在盘上)。 */
+  teardownGate?: () => boolean;
+  /** 测试注入:tmux 会话探针(只读)。 */
+  probeSession?: (name: string) => boolean;
+  alive?: (pid: number) => boolean;
+  sleep?: (ms: number) => Promise<void>;
+  launcherGraceMs?: number;
+  log: (m: string) => void;
+  warn: (m: string) => void;
+}): Promise<FailedCreateCodexReap> {
+  const workdirRoot = join(args.childWorkDir, ".anet", "nodes");
+  const ownedNow = args.teardownGate
+    ?? (() => copresenceTeardownFor(workdirRoot, args.childDirName, args.childNodeId));
+  const r = await reapFailedGeneration({
+    alias: args.alias,
+    childWorkDir: args.childWorkDir,
+    launcherPid: args.launcherPid,
+    launcher: args.launcher,
+    stopChild: args.stopChild,
+    alive: args.alive,
+    sleep: args.sleep,
+    launcherGraceMs: args.launcherGraceMs,
+    residueKind: "sessions",
+    teardownGate: () => ownedNow(),
+    residueOf: () => {
+      const residue = copresenceSessionResidue(args.alias, ownedNow(), args.probeSession);
+      return { borrowed: residue.borrowed, alive: residue.alive };
+    },
+    // 刻意不传 `signal`:tmux 会话只经 `anet node stop` 收,daemon 不自己 kill-session。
+    log: args.log,
+    warn: args.warn,
+  });
+  return { status: r.status, detail: r.detail, residue: r.residue, residueKind: "sessions" };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

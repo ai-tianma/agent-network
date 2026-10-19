@@ -232,6 +232,8 @@ missing is reported at start (the request ends as `runtime_capability_check_fail
 - Only valid for `codex-app-server`; the Hub rejects the key on any other runtime (`flag_not_applicable_to_runtime`).
 - An older Hub or daemon that does not know the key rejects the request (`flag_key_unknown`) instead of quietly creating a headless node.
 
+A failed check leaves no live trio behind. The gate is the child's own identity marker: only when `copresence-identity.json` is on disk and the config is the one this daemon wrote does it run `anet node stop <name>` through the same lifecycle receipts. Without the marker it **never** runs stop (that path falls back to a display-name sweep, i.e. killing by name) and never claims same-named tmux sessions. The ack's `error` ends with the same `cleanup=` result as OpenCode V2, and surviving sessions are listed as `residue_sessions=` (the daemon never `kill-session`s directly).
+
 ### Creating an OpenCode V2 co-presence node through the daemon {#opencode-v2-via-daemon}
 
 `runtime` stays `opencode-cli`. To create a V2 co-presence node, `create_node`'s `node_spec.flags` must include both `"opencodeGeneration": "v2"` and `"opencodeUnsafeTools": true`, and `model` must be OpenCode's own `provider/model` (exactly one slash):
