@@ -64,6 +64,15 @@ Project-local node state is under `.anet/nodes/<alias>/`:
 | `logs/` | Runtime logs. On this machine use `anet logs` above; from a client see [Node run logs](/en/guide/node-run-logs) |
 | `goals.json` | Scheduled goals owned by this node |
 
+### Environment precedence at startup
+
+`agent-node` (including a direct `agent-node --config <path>` start) resolves variables in this order, **highest wins**:
+
+1. **process env already set when the process starts** (an empty string counts as set and is kept);
+2. keys named in `config.json` `env` (plain or `_envRef`);
+3. `secrets.env` in the node directory (what `anet node secret set` writes) — **fill-only**, never overriding the two above.
+
+`secrets.env` must be a regular 0600 file owned by the current user; a symlink, a non-regular file or a wrong mode makes the **whole file** inapplicable (never partially applied). Reserved keys (`PATH`, `LD_*`, `NODE_*`, …) are skipped. A missing file is a normal state.
 User login and the active network are stored globally in `~/.anet/config.json`. Do not commit project `.anet`, tokens, or `.env`.
 
 envRef keeps only an environment-variable reference in `config.json`; the real value may still be stored in the node's mode-0600 `.env`. Inspect the backup and target variable before migration:
