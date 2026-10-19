@@ -25,6 +25,7 @@ import {
 } from "./config-apply.js";
 import { CODEX_CONFIG_ONLY_FLAG_KEYS, validateCodexConfigFlag } from "./codex-config-flags.js";
 import { validProviderInitialization } from '../shared/provider-initialization.js';
+import { isAcceptedOpencodeVersionFor } from "./opencode-versions.js";
 import {
   applyCodexCopresenceFlagDefaults,
   writeCopresenceYoloToCodexHome,
@@ -1113,12 +1114,18 @@ export async function handleCreateNodeDoorbell(
   }
   const childEnvForCli = withHostOpenCodeV2ClientPath(
     minimalEnv() as Record<string, string | undefined>, sharedOpenCodeServerForCreate);
+  const requestedOpenCodeGeneration = req.node_spec.flags?.opencodeGeneration;
   const cliStatus = await requiredCliStatus(
     req.node_spec.runtime,
     childEnvForCli.PATH ?? "",
     childEnvForCli,
     { resolveOnPath: resolveOnPathReal, execVersion: execVersionReal },
     STEP_TIMEOUT_MS,
+    // #1611 — 显式 v1/v2：按 PATH 顺序找第一个「该代际接受」的候选，
+    // 而不是 PATH 第一命中。同机装了两份 opencode 时，第一命中经常是另一代。
+    requestedOpenCodeGeneration === "v1" || requestedOpenCodeGeneration === "v2"
+      ? (version) => version !== undefined && isAcceptedOpencodeVersionFor(requestedOpenCodeGeneration, version)
+      : undefined,
   );
   if (cliStatus.cli === "missing" && cliStatus.command) {
     const error = missingCliCreateError(cliStatus.command);
