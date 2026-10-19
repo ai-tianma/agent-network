@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { cleanupAfterExit } from "./close-cleanup";
 import { chmodSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { createServer } from "net";
-import { join } from "path";
+import { dirname, join } from "path";
 import { resolve } from "path";
 import {
   cleanupOpencodeChildEnv,
@@ -278,7 +278,17 @@ export function writeOpenCodeCommhubInstructions(
     } catch {
       throw error;
     }
-    if (existingFirstLine !== opencodeCommhubInstructionsFirstLine(alias)) throw error;
+    if (existingFirstLine !== opencodeCommhubInstructionsFirstLine(alias)) {
+      // One node per working directory: ANET-COMMHUB.md is named after the
+      // alias, so a different alias in the same cwd means two nodes share it.
+      // Keep the EEXIST code (callers/tests depend on it) and say what to do.
+      const occupied = new Error(
+        `ANET-COMMHUB.md in ${dirname(instructionPath)} belongs to another node (or a human); `
+        + `give this node its own working directory — one OpenCode node per directory`,
+      ) as NodeJS.ErrnoException;
+      occupied.code = "EEXIST";
+      throw occupied;
+    }
     writeFileSync(instructionPath, content, { mode: 0o600, flag: "w" });
     chmodSync(instructionPath, 0o600);
     return { path: instructionPath, content };
