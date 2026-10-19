@@ -161,7 +161,7 @@ function writeFakeAnet(root: string): string {
   return realpathSync(abs);
 }
 
-interface Spawned { bin: string; args: string[]; cwd: string; path?: string }
+interface Spawned { bin: string; args: string[]; cwd: string; path?: string; pid?: number }
 
 async function runCreate(spec: Record<string, unknown>, requestId: string, envBlob?: Record<string, string>, providerScope?: CreateNodeDeps['providerScope']) {
   const acks: Record<string, any>[] = [];
@@ -185,6 +185,7 @@ async function runCreate(spec: Record<string, unknown>, requestId: string, envBl
       spawned.push({ bin, args, cwd: opts.cwd, path: opts.env.PATH });
       const child = spawn("sleep", ["30"], { stdio: "ignore", detached: true });
       if (child.pid) killPids.push(child.pid);
+      spawned.at(-1)!.pid = child.pid ?? undefined;
       return child;
     },
   });
@@ -630,5 +631,33 @@ describe("#652 start / stop / delete find the ASCII directory from the alias", (
     const entries = readdirSync(trash);
     expect(entries.some(n => n.endsWith(`-${CN_DIR}`))).toBe(true);
     expect(entries.filter(n => !isAscii(n))).toEqual([]);
+  });
+});
+
+// ── #1625 — a failed post-spawn validation owns the generation it spawned ──
+describe("#1625 failed V2 create reaps what it spawned", () => {
+  const pidAlive = (pid: number): boolean => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
+
+  test("runtime_capability_check_failed leaves no live launcher and says so in the ack", async () => {
+    plantOpencode("opencode v2.0.22");
+    const cfgDir = join(home, ".config", "opencode");
+    mkdirSync(cfgDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(cfgDir, "opencode.json"), `${JSON.stringify({ model: "stub/model" })}\n`, { mode: 0o600 });
+
+    const { acks, spawned } = await runCreate({
+      name: "v2-orphan", runtime: "opencode-cli", model: "stub/model",
+      flags: { opencodeGeneration: "v2", opencodeUnsafeTools: true, timeout: 600000 },
+    }, "cr_v2orphan1625");
+
+    expect(acks.map(a => a.status)).toEqual(["runtime_capability_check_failed"]);
+    expect(String(acks[0].error)).toContain("cleanup=");
+    expect(String(acks[0].error)).not.toContain("cleanup=residue");
+
+    const pid = spawned[0]?.pid;
+    expect(pid).toBeGreaterThan(0);
+    for (let i = 0; i < 60 && pidAlive(pid!); i++) await new Promise(r => setTimeout(r, 50));
+    expect(pidAlive(pid!)).toBe(false);
   });
 });
