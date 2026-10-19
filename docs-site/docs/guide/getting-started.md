@@ -7,7 +7,7 @@
      latest 标记已核对的通道版本，preview 标记已验证的发布候选，不代表 npm 已发布；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.184 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.185 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.184`）在 `.182`（节点链路形态上报 `#1510`、节点密钥 REST `#1491`、`anet node secret` 与 env key 名上报 `#2056`/`#1474`/`#909`、Hub 只读读面 `#1473`、auto-chain 去重 `#1940`、OS 账号上报 `#1198`）之上增加：OpenCode V2 会话模型上报与在线切换（`#2827`）、按请求代际解析 opencode（`#1611`）、失败建节点的孤儿收尸（`#1625`）、`anet daemon secret list/set/unset`（`#1509`）；**默认初始化/随机密码路径未改动**。本次安装门使用显式密码，未额外重跑默认密码路径。候选须通过全部发布门后才公开。
+已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.185`）在 `.184`（opencode 按代际解析 `#1611`、失败建节点收尸 `#1625`、`anet daemon secret` `#1509`）之上只增加 codex 失败建节点的收尸（`#1650`，agent-node 侧），CLI 行为与 `.184` 相同；相对 `.182` 则包含（节点链路形态上报 `#1510`、节点密钥 REST `#1491`、`anet node secret` 与 env key 名上报 `#2056`/`#1474`/`#909`、Hub 只读读面 `#1473`、auto-chain 去重 `#1940`、OS 账号上报 `#1198`）之上增加：OpenCode V2 会话模型上报与在线切换（`#2827`）、按请求代际解析 opencode（`#1611`）、失败建节点的孤儿收尸（`#1625`）、`anet daemon secret list/set/unset`（`#1509`）；**默认初始化/随机密码路径未改动**。本次安装门使用显式密码，未额外重跑默认密码路径。候选须通过全部发布门后才公开。
 **候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 
