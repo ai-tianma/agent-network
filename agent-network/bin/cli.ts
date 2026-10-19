@@ -15,7 +15,7 @@ import { hasBorrowedV1Intent, readBorrowedLaunchConfig, waitForBorrowedLaunchHea
 import { checkDaemonAnetBin, daemonAnetBinEnv, shouldPinDaemonOnNodeStart } from "../src/daemon-anet-bin.js";
 import { runDaemonAdopt } from "../src/daemon-adopt.js";
 import { readProviderInput, runDaemonProvider } from "../src/daemon-provider-command.js";
-import { runDaemonSecret } from '../src/scoped-secrets.js';
+import { runDaemonSecret, runDaemonSecretCli } from '../src/scoped-secrets.js';
 import { readScopedNodeEnv } from '../src/shared/scoped-secret-env.js';
 import { runDaemonProviderApply } from '../src/daemon-provider-apply-command.js';
 import { runDaemonProviderInitialize } from '../src/daemon-provider-initialize.js';
@@ -11418,10 +11418,14 @@ Run \`anet hub start\` first if you don't yet have a CommHub.`);
   }
   switch (sub) {
     case 'secret': {
-      const code = runDaemonSecret(args.slice(2), { nodesDir: nodesDir(), readInput: () => {
+      const secretArgs = args.slice(2);
+      const readPrivate = () => {
         if (process.stdin.isTTY) throw Error('private stdin required');
         return readProviderInput();
-      }, print: console.log });
+      };
+      const code = ['list', 'set', 'unset'].includes(secretArgs[0] ?? '')
+        ? runDaemonSecretCli(secretArgs, { nodesDir: nodesDir(), readInput: readPrivate, print: console.log })
+        : runDaemonSecret(secretArgs, { nodesDir: nodesDir(), readInput: readPrivate, print: console.log });
       if (code === 2) markUsageError(); else if (code) markFailed();
       break;
     }
