@@ -71,10 +71,14 @@ describe("launch snapshot (#461)", () => {
   });
 
   test("launcher-owned env names stay aligned with agent-network", () => {
-    const upstream = readFileSync(join(import.meta.dir, "../../../agent-network/src/codex-copresence-env.ts"), "utf8");
-    const block = upstream.match(/const LAUNCHER_ENV = new Set\(\[([\s\S]*?)\]\);/)?.[1] ?? "";
-    const upstreamKeys = [...block.matchAll(/"([A-Z0-9_]+)"/g)].map((m) => m[1]).sort();
-    expect([...CODEX_APPSERVER_LAUNCHER_ENV].sort()).toEqual(upstreamKeys);
+    // The unit-test image mounts only agent-node, so the launcher's names travel as a
+    // checked-in contract that scripts/sync-codex-launcher-env-contract.mjs regenerates
+    // from agent-network/src/codex-copresence-env.ts (run it with --check for drift).
+    const contract = JSON.parse(
+      readFileSync(join(import.meta.dir, "codex-launcher-env.contract.json"), "utf8"),
+    ) as { source: string; names: string[] };
+    expect(contract.source).toBe("agent-network/src/codex-copresence-env.ts");
+    expect([...CODEX_APPSERVER_LAUNCHER_ENV].sort()).toEqual([...contract.names].sort());
   });
 
   test("relaunch env replays resolved config keys and proxy/CA variables while launcher identity wins", () => {
