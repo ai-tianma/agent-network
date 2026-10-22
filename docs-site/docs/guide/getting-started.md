@@ -7,7 +7,7 @@
      latest 标记已核对的通道版本，preview 标记已验证的发布候选，不代表 npm 已发布；
      讲历史的版本引用(如 `≤ 2.3.0-preview.37`)故意不标。 -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.189 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.190 -->
 
 从启动 Hub 到在 Dashboard 里和第一个 Agent 对话，**4 步**。每步一条命令 + 一句验证。
 
@@ -59,7 +59,7 @@ anet hub dashboard
    Store this password now; it will not be shown again.
 ```
 
-已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.189`）相对 `.188` 只有一处改动：CLI 的配对常量指向**已经发布**的 agent-node `2.5.0-preview.152`，节点侧因此拿到五个修复（切 OpenCode V2 模型有 45 秒硬上限、grok 402 额度耗尽说人话、节点上报自己怎么连 Hub、共享会话忙时报「已等多久」、共享会话忙到预算用完时的文案点名共享会话）。**默认初始化 / 随机密码路径未改动。**候选须通过全部发布门后才公开。
+已核对的 `latest`（`2.3.0-preview.181`）打印随机密码，形如 `anet-` 加 22 位十六进制字符。本次 `preview` 候选（`2.3.0-preview.190`）相对 `.189` 只有一处改动：CLI 的配对常量指向**已经发布**的 agent-node `2.5.0-preview.153`，节点侧因此拿到共享会话排队的两样新东西 —— 排队项绑定 task 与提交者（状态里看得出等的是谁的那条任务），以及共享会话的负责人离开、会话也没了时排队项被**明确终止**（理由 `owner_left`，不再沉默等满 30 分钟才报一句泛泛的「会话忙」）。**默认初始化 / 随机密码路径未改动。**候选须通过全部发布门后才公开。
 **候选验证不代表已经发布**；当前可安装的通道版本请运行 `npm view @sleep2agi/agent-network dist-tags` 查询，不要把候选版本号当作当前 npm `preview`。
 固定的 `admin / anethub` 只存在于 `2.2.x` 及更早的版本，新装的 Hub 上用它登不进去。
 

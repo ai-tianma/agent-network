@@ -8,7 +8,7 @@
      The latest stamp records the checked channel version; the preview stamp records the validated
      release candidate, not npm publication. Historical references (e.g. `<= 2.3.0-preview.37`) are not stamped. -->
 <!-- version-claim: package=agent-network channel=latest version=2.3.0-preview.181 -->
-<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.189 -->
+<!-- version-claim: package=agent-network channel=preview version=2.3.0-preview.190 -->
 
 From starting a Hub to chatting with your first agent in the Dashboard: **4 steps**, each with one command and one check.
 
@@ -60,7 +60,7 @@ The first `anet hub start` prints the admin credentials once:
    Store this password now; it will not be shown again.
 ```
 
-The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.189` differs from `.188` in one place only: the CLI pairing constant now points at the **published** agent-node `2.5.0-preview.152`, which carries five node-side fixes (the OpenCode V2 model switch is bounded to 45 s, a grok 402 quota exhaustion reads as a sentence, the node reports how it reaches the Hub, a busy shared session reports how long it has waited, and the timeout text names the shared session). **The default bootstrap / random-password path is unchanged.** Publication requires all release gates to pass.
+The checked `latest` (`2.3.0-preview.181`) prints a random password: `anet-` followed by 22 hex characters. Candidate `2.3.0-preview.190` differs from `.189` in one place only: the CLI pairing constant now points at the **published** agent-node `2.5.0-preview.153`, which gives the shared-session queue two things it did not have — a queued item is bound to its task and its submitter (the status shows whose task is waiting), and when the session owner leaves and the session itself is gone the queued task is terminated explicitly with the reason `owner_left` instead of sitting silently for the full 30-minute budget. **The default bootstrap / random-password path is unchanged.** Publication requires all release gates to pass.
 **Candidate validation does not mean publication.** Run `npm view @sleep2agi/agent-network dist-tags` for the currently installable channel versions; do not treat the candidate number as the current npm `preview`.
 The fixed `admin / anethub` only exists on `2.2.x` and earlier; it will not log you in to a freshly installed Hub.
 
