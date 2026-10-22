@@ -41,7 +41,7 @@ function realPng(width: number, height: number): Buffer {
 
 
 /** CRC 全对、但 IDAT 内容非法的 PNG：用来证明「结构通过 ≠ 图像有效」。 */
-function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number } = {}): Buffer {
+function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number; width?: number; height?: number; interlace?: number } = {}): Buffer {
   const crcTable = new Uint32Array(256).map((_, n) => {
     let c = n;
     for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -60,7 +60,7 @@ function pngWithIdat(idat: Buffer, opts: { colorType?: number; bitDepth?: number
   };
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(opts.width ?? 1, 0); ihdr.writeUInt32BE(opts.height ?? 1, 4);
-  ihdr[8] = opts.bitDepth ?? 8; ihdr[9] = opts.colorType ?? 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  ihdr[8] = opts.bitDepth ?? 8; ihdr[9] = opts.colorType ?? 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = opts.interlace ?? 0;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0)),
@@ -82,7 +82,7 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
 
   const upload = async (token: string | null, bytes: Buffer, fieldName = "file", extra?: [string, string]) => {
     const form = new FormData();
-    form.append(fieldName, new Blob([bytes], { type: "image/png" }), "a.png");
+    form.append(fieldName, new Blob([new Uint8Array(bytes)], { type: "image/png" }), "a.png");
     if (extra) form.append(extra[0], extra[1]);
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -121,6 +121,11 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
     expect(ok1.body.user_id).toBe(a.user!.user_id);
     expect(ok1.body.avatar_url).toMatch(new RegExp(`^/api/users/${a.user!.user_id}/avatar/[A-Za-z0-9_-]{1,128}\\.png$`));
 
+    // 资料读取面必须同步看到这张头像（同一事务写 users.avatar_url）。
+    const meAfter = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${a.token}` } });
+    const meBody = await meAfter.json() as any;
+    expect(meBody.user.avatar_url).toBe(ok1.body.avatar_url);
+
     const first = await getAvatar(a.token!, ok1.body.avatar_url);
     expect(first.status).toBe(200);
     expect(first.headers.get("content-type")).toBe("image/png");
@@ -150,20 +155,114 @@ test("account avatar upload: user token only, PNG limits, visibility by shared n
       "SELECT version, bytes FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
     expect(afterInvalid).toEqual(beforeInvalid);
 
+    // P2：清空后旧托管 URL 立即失效（本人与同网络成员都不能再读到）。
+    const putProfile = async (token: string, avatar_url: string | null) => {
+      const res = await fetch(`${base}/api/auth/me/avatar`, {
+        method: "PUT", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ avatar_url }),
+      });
+      return { status: res.status, body: await res.json() as any };
+    };
+    // 重新造一张可读的：此刻 b 已被撤权，先用 outsider 之外的同网成员做读校验
+    expect(addNetworkMember(a.network_id!, b.user!.user_id, "member").ok).toBe(true);
+    expect((await getAvatar(b.token!, ok1.body.avatar_url)).status).toBe(200);
+    expect((await putProfile(a.token!, null)).status).toBe(200);
+    expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(404);
+    expect((await getAvatar(b.token!, ok1.body.avatar_url)).status).toBe(404);
+    const meCleared = await fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${a.token}` } });
+    expect(((await meCleared.json()) as any).user.avatar_url).toBeNull();
+    expect(db.get("SELECT 1 AS ok FROM user_avatar_uploads WHERE user_id=?1", [a.user!.user_id])).toBeNull();
+
+    // 换成池里的一张（非托管 URL）也必须撤销旧托管行。
+    const again = await upload(a.token!, PNG_1X1);
+    expect(again.status).toBe(200);
+    expect((await getAvatar(a.token!, again.body.avatar_url)).status).toBe(200);
+    expect((await putProfile(a.token!, "/avatars/avatar-03.webp")).status).toBe(200);
+    expect((await getAvatar(a.token!, again.body.avatar_url)).status).toBe(404);
+    expect(db.get("SELECT 1 AS ok FROM user_avatar_uploads WHERE user_id=?1", [a.user!.user_id])).toBeNull();
+
     // 原子替换：一次失败的上传不能把上一张弄丢；成功后旧 version 立刻 404。
-    const beforeBad = db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id);
+    const baseline = await upload(a.token!, PNG_1X1);
+    expect(baseline.status).toBe(200);
+    const beforeBad = db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", [a.user!.user_id]);
+    expect(beforeBad?.version).toBeTruthy();
     expect((await upload(a.token!, Buffer.from("broken"))).status).toBe(400);
     expect(db.get<{ version: string }>("SELECT version FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id)!.version).toBe(beforeBad!.version);
-    expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(200);
+    expect((await getAvatar(a.token!, baseline.body.avatar_url)).status).toBe(200);
 
     const ok2 = await upload(a.token!, realPng(512, 512));
     expect(ok2.status).toBe(200);
-    expect(ok2.body.avatar_url).not.toBe(ok1.body.avatar_url);
-    expect((await getAvatar(a.token!, ok1.body.avatar_url)).status).toBe(404);
+    expect(ok2.body.avatar_url).not.toBe(baseline.body.avatar_url);
+    expect((await getAvatar(a.token!, baseline.body.avatar_url)).status).toBe(404);
     expect((await getAvatar(a.token!, ok2.body.avatar_url)).status).toBe(200);
     expect(db.get<{ width: number }>("SELECT width FROM user_avatar_uploads WHERE user_id=?1", a.user!.user_id)!.width).toBe(512);
   } finally {
     db.run("DELETE FROM user_avatar_uploads WHERE user_id IN (?1, ?2, ?3)", [a.user!.user_id, b.user!.user_id, outsider.user!.user_id]);
+    await hub.stop?.();
+  }
+});
+
+test("deleted network leaves only ghost membership: member loses read, owner keeps it", async () => {
+  const owner = register("avup_netowner", "AvatarUpload1!");
+  const member = register("avup_netmember", "AvatarUpload1!");
+  expect(owner.ok && member.ok).toBe(true);
+  expect(addNetworkMember(owner.network_id!, member.user!.user_id, "member").ok).toBe(true);
+  const { bootServer } = await import("./server.js");
+  const hub = bootServer({ port: 0, hostname: "127.0.0.1" });
+  const base = `http://127.0.0.1:${hub.port}`;
+  const read = async (token: string, path: string) => (await fetch(base + path, { headers: { Authorization: `Bearer ${token}` } })).status;
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([new Uint8Array(PNG_1X1)], { type: "image/png" }), "a.png");
+    const up = await fetch(`${base}/api/auth/me/avatar/upload`, { method: "POST", headers: { Authorization: `Bearer ${owner.token}` }, body: form });
+    expect(up.status).toBe(200);
+    const url = ((await up.json()) as any).avatar_url as string;
+    expect(await read(member.token!, url)).toBe(200);
+    // 只删网络行，故意留下 network_members 残行：live membership 必须据此拒绝。
+    db.run("DELETE FROM networks WHERE network_id = ?1", [owner.network_id!]);
+    expect(await read(member.token!, url)).toBe(404);
+    expect(await read(owner.token!, url)).toBe(200); // 本人不依赖成员关系
+  } finally {
+    db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [owner.user!.user_id]);
+    db.run("UPDATE users SET avatar_url = NULL WHERE user_id = ?1", [owner.user!.user_id]);
+    await hub.stop?.();
+  }
+});
+
+test("upload is rate limited before multipart parsing, and rejects keepalive leftovers", async () => {
+  const u = register("avup_ratelimit", "AvatarUpload1!");
+  expect(u.ok).toBe(true);
+  const { bootServer } = await import("./server.js");
+  const hub = bootServer({ port: 0, hostname: "127.0.0.1" });
+  const base = `http://127.0.0.1:${hub.port}`;
+  const send = async (body: BodyInit | null, contentType?: string) => {
+    const headers: Record<string, string> = { Authorization: `Bearer ${u.token}` };
+    if (contentType) headers["Content-Type"] = contentType;
+    const res = await fetch(`${base}/api/auth/me/avatar/upload`, { method: "POST", headers, body });
+    return { status: res.status, connection: res.headers.get("connection"), body: await res.json().catch(() => null) as any };
+  };
+  const multipart = () => {
+    const form = new FormData();
+    form.append("file", new Blob([PNG_1X1], { type: "image/png" }), "a.png");
+    return form;
+  };
+  try {
+    // 60 次成功用满这一小时的桶（每张 1×1，成本可忽略）。
+    for (let i = 0; i < 60; i++) {
+      const r = await send(multipart());
+      expect(r.status).toBe(200);
+    }
+    const limited = await send(multipart());
+    expect(limited.status).toBe(429);
+    expect(limited.body.error).toBe("rate_limited");
+    expect(limited.connection).toBe("close");
+    // 关键：限流在 multipart 解析之前——普通 JSON 也被先拒成 429，而不是 415。
+    const early = await send("{}", "application/json");
+    expect(early.status).toBe(429);
+    expect(early.connection).toBe("close");
+  } finally {
+    db.run("DELETE FROM user_avatar_uploads WHERE user_id = ?1", [u.user!.user_id]);
+    db.run("UPDATE users SET avatar_url = NULL WHERE user_id = ?1", [u.user!.user_id]);
     await hub.stop?.();
   }
 });
@@ -178,6 +277,15 @@ test("image inspector: signature, shape and size limits", () => {
   const corrupt = Buffer.from(truePng); corrupt[corrupt.length - 20] ^= 0xff;
   expect(inspectAvatarImage(corrupt).ok).toBe(false);
   expect(inspectAvatarImage(realPng(513, 16))).toEqual({ ok: false, reason: "too_big" });
+  // Adam7 隔行：明确拒收（不按非隔行长度错算）
+  const interlaced = pngWithIdat(deflateSync(Buffer.alloc(6)), { width: 1, height: 1, interlace: 1 });
+  expect(inspectAvatarImage(interlaced)).toEqual({ ok: false, reason: "interlaced_unsupported" });
+  // 规范外取值 2..255：同样拒收（负控：扫描数据本来是非隔行的合法布局，
+  // 只有 interlace 字节非法，证明拦截来自 interlace 判断而不是解码失败）
+  for (const bad of [2, 3, 128, 255]) {
+    const invalidInterlace = pngWithIdat(deflateSync(Buffer.alloc(6)), { width: 1, height: 1, interlace: bad });
+    expect(inspectAvatarImage(invalidInterlace)).toEqual({ ok: false, reason: "interlaced_unsupported" });
+  }
   const zeroWide = realPng(0, 1); // 宽 0 + 正确 CRC：专证 bad_dimensions 而不是 bad_crc
   expect(inspectAvatarImage(zeroWide)).toEqual({ ok: false, reason: "bad_dimensions" });
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...new Array(40).fill(0)]);
