@@ -921,7 +921,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
           revision: z.number().int().min(0).optional(),
         }).strict()).max(64),
         error: z.enum(["invalid_manifest", "unsafe_manifest", "read_failed"]).optional(),
-      }).strict().optional().describe("Bounded node-reported external schedule snapshot; never includes host paths or commands"),
+      }).strict().optional().describe("Node-reported schedules; never includes host paths or commands"),
       // RFC-024 B6 — masked snapshot of the node's effective config
       // (model + 6 dashboard-editable flags). Secrets ARE NOT in this
       // shape (env._envRef stays on host); the dashboard reads this
@@ -934,6 +934,16 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
         model: z.string().max(200).optional().nullable(),
         flags: z.record(z.string(), z.unknown()).optional(),
         config_revision: z.number().int().min(0).optional(),
+        // #2293（admin 2026-10-25）—— 节点自己上报的 OpenCode V2 模型 id 清单
+        // （`provider/model`）。没有 daemon 绑定的节点靠这一格给客户端可选列表，
+        // 否则 admin 只能手填。只收 id：名字/设置/headers 可能带凭据，一律不收。
+        // 排成**一个字符串数组**而不是对象，是为了不抬 tools/list 的字节上限
+        // （约定见 tool-audience-http.test.ts：加字段先砍描述或合并，别改那三个数）。
+        // `.catch(undefined)`：形状不对只丢这一格，绝不拒掉整份心跳。
+        opencode_catalog: z.array(z.string()).max(400).optional().catch(undefined),
+        // #2293 —— 这台机器上 OpenCode serve 的 loopback 端点（`http://127.0.0.1:PORT`）。
+        // 客户端「OpenCode Server」行此前只能写「端口未上报」。只收 loopback URL，不收密码。
+        opencode_server: z.string().max(200).optional().catch(undefined),
         config_update_capable: z.boolean().optional(),
         peer_reply_inbox_capable: z.literal(true).optional(),
         side_thread_capability: z.object({
@@ -2002,8 +2012,8 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       from_session: z.string().max(200).optional(),
       ttl_seconds: z.number().min(1).max(86400).optional().describe("Task TTL in seconds (default: 3600)"),
       network_id: z.string().max(200).optional().describe("Network scope"),
-      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. When the child task replies the hub will auto-chain the answer to the parent task's originator, so the user sees the final result even if the intermediate session ends."),
-      meta: z.any().optional().describe("Optional structured task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
+      parent_task_id: z.string().max(200).optional().describe("Parent task this dispatch is on behalf of. The child's reply is auto-chained to the parent's originator, so the user sees the result even if the intermediate session ends."),
+      meta: z.any().optional().describe("Optional task metadata, e.g. { attachments: [{ type, path, url, mime, name, size }] }."),
       force: z.boolean().optional().describe("dispatch even if the target is degraded (user tokens only)"),
     },
     async ({ alias, task, priority, context, from_session: _fromIn, ttl_seconds, network_id: netId, parent_task_id: parentIn, meta, force }) => {
@@ -2367,7 +2377,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // it always sent alias=undefined → -32602 "expected string, received
       // undefined at alias". The target was already knowable from the task,
       // so requiring the caller to pass it was a redundant-param trap.
-      alias: z.string().min(1).max(200).optional().describe("Target session alias — optional; derived from in_reply_to's task sender when omitted"),
+      alias: z.string().min(1).max(200).optional().describe("Target alias — optional; defaults to in_reply_to's sender"),
       text: z.string().min(1).max(10000).describe("Reply content"),
       in_reply_to: z.string().max(200).optional().describe("Original task/message ID"),
       status: z.enum(["replied", "failed", "cancelled"]).optional().default("replied").describe("Task outcome"),
@@ -2378,7 +2388,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       // `attachments` before this schema entry existed would see `ok:true`
       // and never learn the attachments were dropped. Validated by
       // validateAttachments (uploads.ts) — the same helper the REST path uses.
-      attachments: z.any().optional().describe("Attachments, like send_task's meta.attachments: [{type:'file', file_id, name?, mime?, size?}]."),
+      attachments: z.any().optional().describe("Attachments, like send_task's: [{type:'file', file_id, name?, mime?, size?}]."),
       // #507 — optional structured metadata (parity with send_task L837). If
       // both `attachments` (top-level) and `meta.attachments` are supplied,
       // top-level wins (same rule as REST /api/task L2101).
@@ -4111,7 +4121,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
       lines: z.number().int().min(1).max(LOGS_MAX_LINES).optional().describe("How many of the newest matching lines (default 500, max 2000)."),
       level: z.enum(["info", "warn", "error"]).optional().describe("Only lines of exactly this level."),
       grep: z.string().min(1).max(LOGS_GREP_MAX).optional().describe("Case-insensitive substring, matched after redaction."),
-      since_ts: z.number().int().min(0).optional().describe("Only lines at or after this epoch-ms timestamp (follow mode; the client de-duplicates by line key)."),
+      since_ts: z.number().int().min(0).optional().describe("Only lines at/after this epoch-ms timestamp (follow mode; client de-dupes by line key)."),
       network_id: z.string().max(200).optional(),
     },
     async ({ node_id, child_node_id, alias, lines, level, grep, since_ts, network_id }) =>
@@ -6776,7 +6786,7 @@ export function registerTools(server: McpServer, clientIP?: string, enforceNetwo
     name: z.string().min(1).max(80).optional(),
     priority: z.enum(["high", "normal", "low", "lowest"]).optional().describe("high = P0 最高, normal = P1 普通, low = P2 低, lowest = P3 极低"),
     column: z.enum(["pool", "doing", "done", "abandoned"]).optional(),
-    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 with Z / ±HH:MM (stored as UTC seconds); \"\" clears"),
+    due: z.string().max(40).optional().describe("YYYY-MM-DD (all day) or ISO 8601 (stored as UTC seconds); \"\" clears"),
     start: z.string().max(40).optional().describe("start date (Gantt): same shapes as due; \"\" clears"),
     description: z.string().max(20_000).optional().describe("markdown"),
     checklist: z.array(reqChecklistItem).max(100).optional().describe("replaces the whole list"),
