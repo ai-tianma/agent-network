@@ -166,6 +166,9 @@ check_feature "no-progress backoff fn"        "applyNoProgressBackoff"          
 
 # .173 —— 首次 retention sweep 延后到启动风暴之后（#2614）。
 check_feature "retention first delay knob"    "COMMHUB_RETENTION_FIRST_DELAY_MS"        "0.9.0-preview.173"
+
+# .174 —— 首次 sweep 延迟默认 180 秒（#2614 第二轮实测）。
+check_feature "retention first delay 180s"    "180_000"                                 "0.9.0-preview.174"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
 # 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
 # （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
