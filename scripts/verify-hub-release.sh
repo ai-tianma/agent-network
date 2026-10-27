@@ -159,6 +159,10 @@ check_feature "empty node gc log"             "empty-node-gc"                   
 # .171 —— 两格只读视图：版本债务（#2720）与最近一次广播（#2721）。
 check_feature "version stats route"           "/api/stats/versions"                   "0.9.0-preview.171"
 check_feature "health broadcast state"        "broadcastRecentState"                  "0.9.0-preview.171"
+
+# .172 —— 排程「跑不起来」的两类跳过也退避（#2622）。
+check_feature "no-progress backoff knob"      "COMMHUB_SCHEDULE_NO_PROGRESS_BACKOFF_RUNS" "0.9.0-preview.172"
+check_feature "no-progress backoff fn"        "applyNoProgressBackoff"                 "0.9.0-preview.172"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
 # 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
 # （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
