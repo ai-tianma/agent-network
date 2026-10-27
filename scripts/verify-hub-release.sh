@@ -187,6 +187,9 @@ check_feature "skip-path backoff log"          "skip-path backoff"              
 # .180 —— /health 里能看到 Hub 自己所在磁盘的水位（#2756）。
 check_feature "health host disk"               "host_disk"                                "0.9.0-preview.180"
 
+# .181 —— 离线退避「算出来」与「落库」两步分开打日志（target_offline 归因）。
+check_feature "offline backoff log"            "offline-backoff"                          "0.9.0-preview.181"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
