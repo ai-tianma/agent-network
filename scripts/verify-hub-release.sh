@@ -169,6 +169,12 @@ check_feature "retention first delay knob"    "COMMHUB_RETENTION_FIRST_DELAY_MS"
 
 # .174 —— 首次 sweep 延迟默认 180 秒（#2614 第二轮实测）。
 check_feature "retention first delay 180s"    "180_000"                                 "0.9.0-preview.174"
+
+# .175 —— 首次 sweep 改为「等循环安静」（#2614 第三轮）。
+check_feature "first sweep quiet gate"        "firstSweepShouldWait"                    "0.9.0-preview.175"
+
+# .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
+check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
 # 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
 # （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
