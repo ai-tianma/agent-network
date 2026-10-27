@@ -163,6 +163,9 @@ check_feature "health broadcast state"        "broadcastRecentState"            
 # .172 —— 排程「跑不起来」的两类跳过也退避（#2622）。
 check_feature "no-progress backoff knob"      "COMMHUB_SCHEDULE_NO_PROGRESS_BACKOFF_RUNS" "0.9.0-preview.172"
 check_feature "no-progress backoff fn"        "applyNoProgressBackoff"                 "0.9.0-preview.172"
+
+# .173 —— 首次 retention sweep 延后到启动风暴之后（#2614）。
+check_feature "retention first delay knob"    "COMMHUB_RETENTION_FIRST_DELAY_MS"        "0.9.0-preview.173"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
 # 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
 # （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
