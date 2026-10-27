@@ -173,6 +173,9 @@ check_feature "retention first delay 180s"    "180_000"                         
 # .175 —— 首次 sweep 改为「等循环安静」（#2614 第三轮）。
 check_feature "first sweep quiet gate"        "firstSweepShouldWait"                    "0.9.0-preview.175"
 
+# .177 —— quiet-loop 重新上线（#3119 → 撤销 → #3122）。
+check_feature "quiet loop gate re-land"       "waitForQuietLoop"                        "0.9.0-preview.177"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
