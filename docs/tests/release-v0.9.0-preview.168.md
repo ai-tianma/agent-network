@@ -59,3 +59,35 @@ curl -s localhost:9200/health | python3 -c 'import sys,json;e=json.load(sys.stdi
 **语义没动**：retention 时间窗、`COMMHUB_RETENTION_*_DAYS`（`<0` 仍等于该表 opt-out）、
 tasks 的 child-safe（父任务被子任务引用就不删）全部保持；PostgreSQL 路径保持单条 DELETE
 （没有 rowid，且 autovacuum 自己按批回收）。
+
+## Install
+
+```bash
+set -e
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.168
+commhub-server --version   # 0.9.0-preview.168
+```
+
+## Upgrade
+
+```bash
+npm i -g @sleep2agi/commhub-server@0.9.0-preview.168
+commhub-server --version   # 0.9.0-preview.168
+curl -s http://127.0.0.1:9200/health | python3 -c 'import sys,json;print(json.load(sys.stdin)["version"])'
+```
+
+版本化运行时目录（`HUB_RUNTIME_DIR`）：把依赖版本改成 `0.9.0-preview.168` 后 `npm install`，
+指到新目录再重启；旧目录保留即可回滚，无数据迁移。
+
+## 验收
+
+```bash
+# 1) 发布说明里那条判据：一次 sweep 的批次数与最长单批
+grep "commhub retention" ~/.commhub/pm2-hub-out.log | tail -1
+#   期望：swept in <2000ms (42 batches, max <300ms)
+
+# 2) 停顿监测（不再出现每小时一次 ~10 秒 gap）
+curl -s localhost:9200/health | python3 -c 'import sys,json;e=json.load(sys.stdin)["event_loop"];print(e.get("max_gap_ms"), e.get("stall_count"))'
+```
+
+回滚：把 `HUB_RUNTIME_DIR` 指回上一版（`runtime-v167-preview167`）并重启；无 schema 变更、无数据迁移。
