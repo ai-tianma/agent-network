@@ -184,6 +184,9 @@ check_feature "no-progress window counting"   "NO_PROGRESS_WINDOW"              
 # 用它证明不了「这个分支真的调用了」。这正是 .178 那次被骗过去的地方。
 check_feature "skip-path backoff log"          "skip-path backoff"                        "0.9.0-preview.179"
 
+# .180 —— /health 里能看到 Hub 自己所在磁盘的水位（#2756）。
+check_feature "health host disk"               "host_disk"                                "0.9.0-preview.180"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
