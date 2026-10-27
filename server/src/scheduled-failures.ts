@@ -19,6 +19,7 @@
 
 import { db, setScheduledRunTerminalHook } from "./db.js";
 import { sendAgentNotice } from "./agent-notice.js";
+import { parseHubTimestamp } from "./hub-timestamp.js";
 
 export const SCHEDULE_FAILING_NOTICE_KIND = "schedule_failing";
 const ERROR_PREVIEW_CHARS = 300;
@@ -224,6 +225,110 @@ export function applyFailureBackoff(scheduleId: string, now = new Date()): { str
     [streak, effective, next, scheduleId, row.revision],
   );
   return { streak, effective_seconds: effective };
+}
+
+/**
+ * #2622（第二轮）—— 「跑不起来」的两类跳过也要退避。
+ *
+ * 生产 24h（2026-10-27）：`previous_run_active` 2286 条、`target_offline` 1951 条，
+ * 而 `failureStreak()` 只数 `status='failed'`，**skipped 完全不计**，
+ * 于是一个 `every_seconds=180` 的排程可以在目标永久离线的状态下每 3 分钟写一行 skip，
+ * 一天 470 条，永不减速。
+ *
+ * 这里只做「放慢」，不改变派发语义：
+ *   · 同一 error_code 连续出现 ≥ N（默认 3）⇒ 间隔按 2 倍放大，上限 1800 秒；
+ *   · `target_offline` 的链用更长的上限（7200 秒 = 2 小时）——目标不在时没有理由每 3 分钟试一次；
+ *   · 换链（原因变了）或出现成功 ⇒ 立刻回到原间隔；
+ *   · 与 `no_change_backoff=1` 的排程互斥（那套逻辑自己拥有 backoff_* 三列）。
+ */
+const NO_PROGRESS_CODES = ["previous_run_active", "target_offline"] as const;
+export type NoProgressCause = (typeof NO_PROGRESS_CODES)[number];
+
+function noProgressFromRuns(runs: Array<{ status: string; error_code: string | null }>): { cause: NoProgressCause | null; streak: number } {
+  const first = runs[0];
+  if (!first) return { cause: null, streak: 0 };
+  let cause: NoProgressCause | null = null;
+  if (first.status === "failed") cause = null; // 由 applyFailureBackoff 负责，避免两套逻辑抢同一列
+  else if (first.status === "skipped" && (NO_PROGRESS_CODES as readonly string[]).includes(first.error_code ?? "")) {
+    cause = first.error_code as NoProgressCause;
+  }
+  if (!cause) return { cause: null, streak: 0 };
+  let streak = 0;
+  for (const r of runs) {
+    if (r.status !== "skipped" || r.error_code !== cause) break;
+    streak++;
+  }
+  return { cause, streak };
+}
+
+export function noProgressBackoffRuns(): number {
+  return envInt("COMMHUB_SCHEDULE_NO_PROGRESS_BACKOFF_RUNS", 3, 1);
+}
+
+export function applyNoProgressBackoff(scheduleId: string, now = new Date()): { streak: number; effective_seconds: number | null; cause: NoProgressCause } | null {
+  const from = noProgressBackoffRuns();
+  if (from <= 0) return null;
+  const row = db.get<any>(
+    `SELECT schedule_id, revision, status, schedule_type, schedule_json, no_change_backoff,
+            backoff_effective_seconds, next_run_at
+       FROM scheduled_tasks WHERE schedule_id = ?1`,
+    scheduleId,
+  );
+  if (!row || row.status !== "active" || row.no_change_backoff === 1) return null;
+  if (row.schedule_type !== "interval") return null;
+  let spec: any = null;
+  try { spec = JSON.parse(row.schedule_json || "{}"); } catch { spec = null; }
+  const base = spec && spec.type === "interval" ? Number(spec.every_seconds) : NaN;
+  if (!Number.isFinite(base) || base <= 0) return null;
+
+  const runs = db.all<{ status: string; error_code: string | null }>(
+    `SELECT status, error_code FROM scheduled_task_runs
+      WHERE schedule_id = ?1 ORDER BY scheduled_for DESC, created_at DESC LIMIT 12`,
+    scheduleId,
+  );
+  const { cause, streak } = noProgressFromRuns(runs);
+
+  // 回到原间隔（成功 / 换链 / 未达阈值都走这里；只在真的退避过时才写）
+  const restore = () => {
+    if ((row.backoff_streak ?? 0) === 0 && row.backoff_effective_seconds == null) return;
+    // next_run_at 是 hub 的 TEXT UTC（无时区标记），必须走 parseHubTimestamp
+    const cur = parseHubTimestamp(row.next_run_at);
+    const next = cur === null
+      ? row.next_run_at
+      : new Date(Math.min(cur, now.getTime() + base * 1000)).toISOString();
+    db.run(
+      `UPDATE scheduled_tasks SET backoff_streak = 0, backoff_effective_seconds = NULL, next_run_at = ?1,
+         updated_at = datetime('now') WHERE schedule_id = ?2 AND revision = ?3 AND status = 'active'`,
+      [next, scheduleId, row.revision],
+    );
+  };
+
+  if (!cause) { restore(); return null; }
+
+  // 上限按原因分开：
+  //   previous_run_active —— 上一次还在跑，30 分钟足够等到它结束；
+  //   target_offline      —— 目标连续 6 次不在（按 180s 基底已是 18 分钟），
+  //                          再用 3 分钟一次的节奏去敲没有意义；2 小时一次仍能及时接住它回来。
+  // 判据：#2622「同类原因日增量 ≤20」——180s 基底配 2 小时上限 ⇒ 12 次/天。
+  const cap = cause === "target_offline" ? 7200 : 1800;
+  if (streak < from) { restore(); return null; }
+
+  const effective = Math.min(cap, base * 2 ** Math.min(streak - from + 1, 5));
+  const previous = row.backoff_effective_seconds ?? base;
+  let next = row.next_run_at;
+  if (effective !== previous && next) {
+    const candidate = now.getTime() + effective * 1000;
+    const existing = parseHubTimestamp(next);
+    if (existing !== null) {
+      next = new Date(effective > previous ? Math.max(existing, candidate) : Math.min(existing, candidate)).toISOString();
+    }
+  }
+  db.run(
+    `UPDATE scheduled_tasks SET backoff_streak = ?1, backoff_effective_seconds = ?2, next_run_at = ?3,
+       updated_at = datetime('now') WHERE schedule_id = ?4 AND revision = ?5 AND status = 'active'`,
+    [streak, effective, next, scheduleId, row.revision],
+  );
+  return { streak, effective_seconds: effective, cause };
 }
 
 /** GET /runs 的附加字段。 */
