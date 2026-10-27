@@ -179,6 +179,11 @@ check_feature "quiet loop gate re-land"       "waitForQuietLoop"                
 # .178 —— 同因跳过按窗口计数（#2622 第二轮）。
 check_feature "no-progress window counting"   "NO_PROGRESS_WINDOW"                      "0.9.0-preview.178"
 
+# .179 —— 「上一次还在跑」这条跳过路径补上退避调用（#2622 第三轮）。
+# 锚点用**这条日志**而不是函数名：applyNoProgressBackoff 从 .172 就存在，
+# 用它证明不了「这个分支真的调用了」。这正是 .178 那次被骗过去的地方。
+check_feature "skip-path backoff log"          "skip-path backoff"                        "0.9.0-preview.179"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。

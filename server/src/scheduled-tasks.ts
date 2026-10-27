@@ -525,6 +525,9 @@ export function dispatchScheduledOccurrence(row: ScheduledRow, scheduledFor: str
         try {
           const bo = applyNoProgressBackoff(row.schedule_id);
           if (bo && bo.effective_seconds) {
+            // 这条日志是**可观测性**，不是装饰：上一轮「代码加了但没人调用」整轮排查，
+            // 就是因为生产日志里看不出退避到底有没有在这个分支生效。
+            console.error(`[commhub scheduled-tasks] skip-path backoff schedule=${row.schedule_id} cause=${bo.cause} streak=${bo.streak} effective=${bo.effective_seconds}s`);
             const sched = db.get<{ next_run_at: string | null }>("SELECT next_run_at FROM scheduled_tasks WHERE schedule_id = ?1", row.schedule_id);
             const at = parseHubTimestamp(sched?.next_run_at);
             if (at !== null) advance(row, scheduledFor, new Date(at));
