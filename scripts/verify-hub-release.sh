@@ -148,6 +148,9 @@ check_feature "alert baseline health field"   "alert_baselines"                 
 # .168 —— retention 分批（#2614）：调参与日志都带可 grep 的锚点。
 check_feature "retention chunk knob"          "COMMHUB_RETENTION_CHUNK_ROWS"          "0.9.0-preview.168"
 check_feature "retention batch log field"     "batches, max"                          "0.9.0-preview.168"
+
+# .169 —— retention 改为索引驱动（把 .168 那 4.7 秒拿掉），并给 checkpoint 加了重试。
+check_feature "retention checkpoint retry"    "wal_checkpoint failed after 3 attempts" "0.9.0-preview.169"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
 # 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
 # （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
