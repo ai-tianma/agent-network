@@ -151,6 +151,10 @@ check_feature "retention batch log field"     "batches, max"                    
 
 # .169 —— retention 改为索引驱动（把 .168 那 4.7 秒拿掉），并给 checkpoint 加了重试。
 check_feature "retention checkpoint retry"    "wal_checkpoint failed after 3 attempts" "0.9.0-preview.169"
+
+# .170 —— retention 可观测（max/phases）与空壳 node 行清理（#2596）。
+check_feature "retention phase timing"        "phases "                               "0.9.0-preview.170"
+check_feature "empty node gc log"             "empty-node-gc"                         "0.9.0-preview.170"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
 # 本脚本校验的是 commhub-server 的 tarball，把 node 的锚点放进来只会在发版时必红一次
 # （2026-10-27 `.166` 就白跑了一轮）。node 的能力请用 agent-node 自己的发版校验。
