@@ -224,6 +224,9 @@ check_feature "node busy circuit"                "scanNodeBusyCircuit"          
 # 0.9.0-preview.192 —— 熔断真正接进派发（此前只有扫描与日志）。
 check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"                     "0.9.0-preview.192"
 
+# 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
+check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
