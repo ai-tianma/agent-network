@@ -196,6 +196,10 @@ check_feature "offline backoff steady push"     "Math.max(existing, candidate)" 
 # 0.9.0-preview.183 —— 组织架构两个部门轴分开给（Agent 轴 agent_count / agents_unassigned）。
 check_feature "department agent count"          "agents_unassigned"                         "0.9.0-preview.183"
 
+# 0.9.0-preview.184 —— 拦截率的分母（node_tool_calls）+ 节点重启判据（restart_readiness）。
+check_feature "node tool call counter"          "node_tool_calls"                           "0.9.0-preview.184"
+check_feature "node restart readiness"          "restart_readiness"                         "0.9.0-preview.184"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
