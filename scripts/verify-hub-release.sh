@@ -213,6 +213,10 @@ check_feature "scheduled failure code"           "scheduledFailureCode"         
 # 探针盯行为不盯实现位置：这里 grep 的是投影里真有这一列，而不是某个函数名。
 check_feature "api nodes department_id"          "department_id"                             "0.9.0-preview.188"
 
+# 0.9.0-preview.189 —— schedule_stuck 通知每排程每日上限（#2881）。
+# 探针盯行为名：限额函数在，说明天花板逻辑已进产物。
+check_feature "stuck notice daily cap"           "stuckNoticeMaxPerDay"                      "0.9.0-preview.189"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
