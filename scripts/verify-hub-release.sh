@@ -206,6 +206,9 @@ check_feature "tool call cap covers retention"   "TOOL_CALL_MAX_ROWS"           
 # 0.9.0-preview.186 —— 节点连续确定性失败时告警一次（假活可见化）。
 check_feature "node failure alert"               "node-failure-alert"                        "0.9.0-preview.186"
 
+# 0.9.0-preview.187 —— 定时任务失败分类：共享会话忙单独记（#1879）。
+check_feature "scheduled failure code"           "scheduledFailureCode"                      "0.9.0-preview.187"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
