@@ -79,3 +79,23 @@ sqlite3 ~/.commhub/commhub.db \
 
 「按 `task_failed_busy` 做调度侧动作」（比如跳过这一跳、或延后到下次）**不在本版**。
 本版只让这个事实**可见**；要不要据此改变投递，属于另一个决定（见 #2884）。
+
+## Install
+
+```bash
+set -e
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.187
+commhub-server --version   # 0.9.0-preview.187
+```
+
+## Upgrade
+
+```bash
+npm i -g @sleep2agi/commhub-server@0.9.0-preview.187
+commhub-server --version   # 0.9.0-preview.187
+```
+
+版本化运行时目录（`HUB_RUNTIME_DIR`）：依赖版本改 `0.9.0-preview.187` → `npm install` → 指到新目录重启。
+上一版目录保留即可回滚；本次只多读一个 `result` 列、新增一个纯函数模块，**无 schema 变更、无数据迁移**。
+
+回滚：`HUB_RUNTIME_DIR` 指回 `.186` 目录并重启。回滚后新产生的 run 会退回全部记 `task_failed`（历史数据里已写入的 `task_failed_busy` 不受影响）。
