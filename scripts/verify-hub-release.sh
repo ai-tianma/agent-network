@@ -217,6 +217,10 @@ check_feature "api nodes department_id"          "department_id"                
 # 探针盯行为名：限额函数在，说明天花板逻辑已进产物。
 check_feature "stuck notice daily cap"           "stuckNoticeMaxPerDay"                      "0.9.0-preview.189"
 
+# 0.9.0-preview.190 —— 空转排程暂停 + 节点忙熔断（默认关闭，只记录候选）。
+check_feature "schedule starvation scan"         "scanStarvedSchedules"                      "0.9.0-preview.190"
+check_feature "node busy circuit"                "scanNodeBusyCircuit"                       "0.9.0-preview.190"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
