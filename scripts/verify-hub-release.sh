@@ -209,6 +209,10 @@ check_feature "node failure alert"               "node-failure-alert"           
 # 0.9.0-preview.187 —— 定时任务失败分类：共享会话忙单独记（#1879）。
 check_feature "scheduled failure code"           "scheduledFailureCode"                      "0.9.0-preview.187"
 
+# 0.9.0-preview.188 —— /api/nodes 返回 department_id（军团分区免 N 次往返）。
+# 探针盯行为不盯实现位置：这里 grep 的是投影里真有这一列，而不是某个函数名。
+check_feature "api nodes department_id"          "department_id"                             "0.9.0-preview.188"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
