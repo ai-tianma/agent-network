@@ -221,6 +221,9 @@ check_feature "stuck notice daily cap"           "stuckNoticeMaxPerDay"         
 check_feature "schedule starvation scan"         "scanStarvedSchedules"                      "0.9.0-preview.190"
 check_feature "node busy circuit"                "scanNodeBusyCircuit"                       "0.9.0-preview.190"
 
+# 0.9.0-preview.192 —— 熔断真正接进派发（此前只有扫描与日志）。
+check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"                     "0.9.0-preview.192"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
