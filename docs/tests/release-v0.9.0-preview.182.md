@@ -53,7 +53,19 @@ if (effective !== previous && next) { /* 推 next_run_at */ }
 套件：`scheduled-offline` 4 pass · `scheduled-skip-path-backoff-2622` 3 pass ·
 `scheduled-failure-backoff-2622` 9 pass · `scheduled-offline-backoff-probe` 1 pass。
 
-## Install / Upgrade
+## Install
+
+全新节点：
+
+```bash
+set -e
+npm install -g @sleep2agi/commhub-server@0.9.0-preview.182
+commhub-server --version   # 0.9.0-preview.182
+```
+
+## Upgrade
+
+已有节点（含 `.181`）：
 
 ```bash
 npm i -g @sleep2agi/commhub-server@0.9.0-preview.182
@@ -61,7 +73,7 @@ commhub-server --version   # 0.9.0-preview.182
 ```
 
 版本化运行时目录（`HUB_RUNTIME_DIR`）：依赖版本改 `0.9.0-preview.182` → `npm install` → 指到新目录重启。
-上一版目录保留即可回滚；无 schema 变更、无数据迁移。
+上一版目录 `runtime-v181-preview181` 保留即可回滚；无 schema 变更、无数据迁移。
 
 ## 验收（部署后 30 分钟）
 
