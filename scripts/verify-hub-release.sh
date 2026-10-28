@@ -190,6 +190,9 @@ check_feature "health host disk"               "host_disk"                      
 # .181 —— 离线退避「算出来」与「落库」两步分开打日志（target_offline 归因）。
 check_feature "offline backoff log"            "offline-backoff"                          "0.9.0-preview.181"
 
+# .182 —— 退避进入稳态后仍推 next_run_at（`.181` 日志定位到的根因）。
+check_feature "offline backoff steady push"     "Math.max(existing, candidate)"             "0.9.0-preview.182"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
