@@ -1712,6 +1712,12 @@ jobs:
           - test235-grok-mcp-outbound-only
           - test219-grok-copresence
           - test605-grok-startup-model-label
+          # #677 —— 套件本来就在仓里、四个变异锚点也都还在代码里
+          # （board668-inflight-task / keep-working / session-preview / parent-delivered-only），
+          # 但它只出现在 paths 过滤器里、从不是任何 matrix 条目 ⇒ 最近 8 条 run 里
+          # 含 test668 的 job 数 = 0。也就是说「它偶发失败」这件事今天既无法复现也无法验证。
+          # 这里把它接回矩阵恢复覆盖；若跑起来确实不稳定，再按 #677 处置（而不是继续不跑）。
+          - test668-grok-working-status
     steps:
       - uses: actions/checkout@v4
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
@@ -1721,9 +1727,19 @@ jobs:
       - name: Build + run ${{ matrix.suite }}
         if: ${{ !contains(needs.changes.outputs.skip, format('"suite:{0}"', matrix.suite)) }}
         run: |
-          docker build --build-arg SOURCE_COMMIT="$GITHUB_SHA" \
+          # 从 Dockerfile 里读 provenance ARG 名，不硬编码。
+          # 硬编码 --build-arg SOURCE_COMMIT 时，用别的名字的套件会拿到空值，然后被自己的
+          # SHA 校验拒绝启动（test668 就是这样：它要 TEST668_SOURCE_COMMIT，0.4 分钟即报
+          # FAIL: TEST668_SOURCE_COMMIT must be one full lowercase Git SHA）。
+          DF="tests/${{ matrix.suite }}/Dockerfile"
+          BUILD_ARGS=()
+          while read -r name; do
+            [ -n "$name" ] && BUILD_ARGS+=(--build-arg "$name=$GITHUB_SHA")
+          done < <(grep -oE '^ARG (SOURCE_COMMIT|TEST[0-9]+_SOURCE_COMMIT)' "$DF" | awk '{print $2}')
+          echo "detected build args: ${BUILD_ARGS[*]:-(none)}"
+          docker build "${BUILD_ARGS[@]}" \
             -t anet-${{ matrix.suite }} \
-            -f tests/${{ matrix.suite }}/Dockerfile .
+            -f "$DF" .
           # #1324: 不用 `docker run --rm` 一行式 —— 本 step 在 set -e 下,docker run 一旦
           #        非零就立刻中断,后面的 cp 根本不执行,而失败正是唯一需要 artifact 的时刻。
           #        所以先把退出码收进 rc,取完再原样退出。
