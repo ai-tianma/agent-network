@@ -227,6 +227,9 @@ check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"        
 # 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
 check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
 
+# 0.9.0-preview.196 —— #669 REST /api/task 也写 parent_source（显式父任务），两条建任务路径都覆盖。
+check_feature "rest parent source marker"         "metaWithParent"                            "0.9.0-preview.196"
+
 # 0.9.0-preview.195 —— #3185 parent_task_id 来源标记（explicit / inferred），并把它排除出幂等指纹。
 check_feature "parent source marker"              "parent_source"                             "0.9.0-preview.195"
 
