@@ -227,6 +227,9 @@ check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"        
 # 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
 check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
 
+# 0.9.0-preview.197 —— #2964 告警分类器认得出真实的登录失效文案（model login expired / needs a fresh login）。
+check_feature "login expired alert pattern"       "needs a fresh login"                       "0.9.0-preview.197"
+
 # 0.9.0-preview.196 —— #669 REST /api/task 也写 parent_source（显式父任务），两条建任务路径都覆盖。
 check_feature "rest parent source marker"         "metaWithParent"                            "0.9.0-preview.196"
 
