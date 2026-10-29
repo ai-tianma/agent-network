@@ -5,7 +5,7 @@
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 type Counts = { pass: number; fail: number; skip: number; expects: number };
@@ -114,16 +114,23 @@ function terminateTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Sig
   }
 }
 
-let activeChild: ChildProcessWithoutNullStreams | null = null;
+// #2800 —— 并行后可能有多个子进程同时存活；原来只有一个 activeChild，
+// 多路并发时后者会覆盖前者，导致「中断时只杀掉最后一个」。
+const activeChildren = new Set<ChildProcessWithoutNullStreams>();
 let interruptedBy: NodeJS.Signals | null = null;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     interruptedBy = signal;
-    if (activeChild) terminateTree(activeChild, signal);
+    for (const child of activeChildren) terminateTree(child, signal);
   });
 }
 
-async function runFile(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
+// #2800 —— 并行下观察到过一次「文件 exit=0 但没输出任何 summary」（CI 上 create-node.test.ts，
+// pass=0 fail=0 skip=0），本地串行/小批并发都复现不出来。那种情况下 validSummary=false，
+// 整个聚合会被判 bad=true 而红 —— 但它的成因是「输出丢了」，不是「测试失败」。
+// 处置：空 summary 且 exit=0 时，**串行重跑一次**（并发池里也只占一个槽），仍空才判坏。
+// 这样既不掩盖真失败（真失败会带 fail>0 或 exit!=0），也不让一次输出抖动毁掉整条 CI。
+async function runFileOnce(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
   const suiteRoot = join(runRoot, slugFor(file));
   const dbPath = join(suiteRoot, "commhub.db");
   for (const dir of [join(suiteRoot, "home"), join(suiteRoot, "tmp"), join(suiteRoot, "uploads")]) {
@@ -138,7 +145,7 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
     detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   });
-  activeChild = child;
+  activeChildren.add(child);
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk) => {
@@ -165,7 +172,7 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
   });
   clearTimeout(timeout);
   if (killTimer) clearTimeout(killTimer);
-  activeChild = null;
+  activeChildren.delete(child);
 
   const output = `${stdout}\n${stderr}`;
   const counts = parseCounts(output);
@@ -180,6 +187,14 @@ async function runFile(file: string, runRoot: string, timeoutMs: number, verbose
   // 追加在行尾，是为了不破坏按前缀 grep 的消费者（test638/639 都用 `grep -F ...pass=..\tfail=0`）。
   console.log(`TEST_FILE_RESULT\t${file}\tpass=${counts.pass}\tfail=${counts.fail}\tskip=${counts.skip}\texpects=${counts.expects}\texit=${exited.code}\tsignal=${exited.signal ?? "none"}\ttimeout=${timedOut}\twall_ms=${Date.now() - started}`);
   return { file, dbPath, ...counts, exitCode: exited.code, signal: exited.signal, timedOut, wallMs: Date.now() - started };
+}
+
+async function runFile(file: string, runRoot: string, timeoutMs: number, verbose: boolean): Promise<Result> {
+  const first = await runFileOnce(file, runRoot, timeoutMs, verbose);
+  const summaryEmpty = first.pass + first.fail + first.skip === 0;
+  if (!summaryEmpty || first.exitCode !== 0 || first.timedOut || first.signal !== null) return first;
+  console.error(`RETRY_EMPTY_SUMMARY ${file} exit=0 but no counts — rerunning serially once`);
+  return await runFileOnce(file, runRoot, timeoutMs, verbose);
 }
 
 async function main() {
@@ -201,15 +216,28 @@ async function main() {
   if (explicitRoot) mkdirSync(runRoot, { recursive: false, mode: 0o700 });
   const keep = process.env.ANET_SERVER_TEST_KEEP_ROOT === "1";
   const results: Result[] = [];
-  try {
-    for (const file of files) {
-      if (interruptedBy) break;
-      results.push(await runFile(file, runRoot, args.timeoutMs, args.verbose));
+  // #2800 —— 每个文件本来就跑在独立子进程、独立 DB root 里，所以文件之间的隔离
+  // 不由「串行」提供；并行只改变它们同时跑几个。默认 4 路，QA_AGGREGATE_CONCURRENCY=1
+  // 可一行回滚到串行。
+  const concurrency = Math.max(1, Math.min(
+    Number(process.env.QA_AGGREGATE_CONCURRENCY) || 4,
+    cpus().length || 1,
+  ));
+  let nextIndex = 0;
+  const worker = async () => {
+    while (!interruptedBy) {
+      const i = nextIndex++;
+      if (i >= files.length) return;
+      results.push(await runFile(files[i], runRoot, args.timeoutMs, args.verbose));
     }
+  };
+  try {
+    await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker));
   } finally {
     if (!keep) rmSync(runRoot, { recursive: true, force: true });
   }
 
+  results.sort((a, b) => a.file.localeCompare(b.file));
   const totals = results.reduce((sum, item) => ({
     pass: sum.pass + item.pass,
     fail: sum.fail + item.fail,
@@ -227,6 +255,6 @@ async function main() {
 
 main().catch((error) => {
   console.error(`SERVER_AGGREGATE_CRASH ${error instanceof Error ? error.stack || error.message : String(error)}`);
-  if (activeChild) terminateTree(activeChild, "SIGKILL");
+  for (const child of activeChildren) terminateTree(child, "SIGKILL");
   process.exit(2);
 });
