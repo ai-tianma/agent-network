@@ -227,6 +227,9 @@ check_feature "circuit dispatch guard"           "nodeCanAcceptDispatch"        
 # 0.9.0-preview.193 —— #2884 共享会话忙的失败分开报排队/会话等待（读时投影）。
 check_feature "busy elapsed split"                "busyElapsedNote"                           "0.9.0-preview.193"
 
+# 0.9.0-preview.195 —— #3185 parent_task_id 来源标记（explicit / inferred），并把它排除出幂等指纹。
+check_feature "parent source marker"              "parent_source"                             "0.9.0-preview.195"
+
 # .175 —— 首次 sweep 等“循环安静”而不是固定秒数（#2614 第三轮）。
 check_feature "retention quiet-loop gate"     "firstSweepShouldWait"                    "0.9.0-preview.175"
 # 🔴 采纳错误码（#1987 `publicAdoptError`）住在 **agent-node**，不在本包（commhub-server）里。
